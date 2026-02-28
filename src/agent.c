@@ -14,12 +14,17 @@ Agent g_agent = {
     .model = NULL,
     .running = false,
     .debug_mode = false,
+    .status = AGENT_STATUS_IDLE,
     .tools = NULL,
     .tool_count = 0,
     .tool_capacity = 20,
     .memory = NULL,
     .memory_count = 0,
-    .memory_capacity = 50
+    .memory_capacity = 50,
+    .steps = NULL,
+    .step_count = 0,
+    .step_capacity = 10,
+    .current_step = 0
 };
 
 // Debug logging helper
@@ -447,6 +452,55 @@ static char *agent_parse_command(const char *command) {
     } else if (strstr(command, "list tools") != NULL || strstr(command, "tools") != NULL) {
         agent_list_tools();
         snprintf(result, 2048, "Tools listed above");
+    } else if (strstr(command, "step add") != NULL) {
+        char *str = strstr(command, "step add");
+        if (str) {
+            str += 9; // Skip "step add "
+            char *description = strtok(str, "|");
+            char *tool_name = strtok(NULL, "|");
+            char *params = strtok(NULL, "");
+            if (description && tool_name && params) {
+                if (agent_add_step(description, tool_name, params)) {
+                    snprintf(result, 2048, "Step added: %s", description);
+                } else {
+                    snprintf(result, 2048, "Error adding step");
+                }
+            } else {
+                snprintf(result, 2048, "Usage: step add <description>|<tool>|<params>");
+            }
+        } else {
+            snprintf(result, 2048, "Error: Invalid format");
+        }
+    } else if (strstr(command, "steps execute") != NULL) {
+        if (agent_execute_steps()) {
+            snprintf(result, 2048, "Steps execution started");
+        } else {
+            snprintf(result, 2048, "Error executing steps");
+        }
+    } else if (strstr(command, "steps pause") != NULL) {
+        if (agent_pause_execution()) {
+            snprintf(result, 2048, "Execution paused");
+        } else {
+            snprintf(result, 2048, "Error pausing execution");
+        }
+    } else if (strstr(command, "steps resume") != NULL) {
+        if (agent_resume_execution()) {
+            snprintf(result, 2048, "Execution resumed");
+        } else {
+            snprintf(result, 2048, "Error resuming execution");
+        }
+    } else if (strstr(command, "steps stop") != NULL) {
+        if (agent_stop_execution()) {
+            snprintf(result, 2048, "Execution stopped");
+        } else {
+            snprintf(result, 2048, "Error stopping execution");
+        }
+    } else if (strstr(command, "steps clear") != NULL) {
+        agent_clear_steps();
+        snprintf(result, 2048, "Steps cleared");
+    } else if (strstr(command, "steps list") != NULL) {
+        agent_print_steps();
+        snprintf(result, 2048, "Steps listed");
     } else {
         // Send to AI model if no tool match
         AIModelResponse *response = ai_model_send_message(command);
@@ -515,6 +569,18 @@ bool agent_init(void) {
         return false;
     }
 
+    // Initialize steps array
+    g_agent.steps = (Step *)malloc(sizeof(Step) * g_agent.step_capacity);
+    if (!g_agent.steps) {
+        fprintf(stderr, "Failed to allocate steps array\n");
+        free(g_agent.memory);
+        free(g_agent.tools);
+        free(g_agent.model);
+        g_agent.model = NULL;
+        ai_model_cleanup();
+        return false;
+    }
+
     // Register default tools
     agent_register_tool("calculator", "Perform basic arithmetic calculations", tool_calculator);
     agent_register_tool("time", "Get current time", tool_time);
@@ -558,6 +624,16 @@ void agent_cleanup(void) {
         g_agent.memory_capacity = 50;
     }
 
+    // Cleanup steps
+    agent_clear_steps();
+    if (g_agent.steps) {
+        free(g_agent.steps);
+        g_agent.steps = NULL;
+        g_agent.step_count = 0;
+        g_agent.step_capacity = 10;
+        g_agent.current_step = 0;
+    }
+
     // Cleanup AI model
     ai_model_cleanup();
 
@@ -590,4 +666,193 @@ bool agent_send_message(const char *message) {
     
     free(result);
     return true;
+}
+
+// Multi-step execution functions
+bool agent_add_step(const char *description, const char *tool_name, const char *params) {
+    debug_log("Adding step: %s", description);
+    
+    // Resize steps array if needed
+    if (g_agent.step_count >= g_agent.step_capacity) {
+        g_agent.step_capacity *= 2;
+        Step *new_steps = (Step *)realloc(g_agent.steps, sizeof(Step) * g_agent.step_capacity);
+        if (!new_steps) {
+            return false;
+        }
+        g_agent.steps = new_steps;
+    }
+    
+    // Create step ID
+    char id[32];
+    snprintf(id, 32, "step_%d", g_agent.step_count);
+    
+    // Add step
+    g_agent.steps[g_agent.step_count].id = strdup(id);
+    g_agent.steps[g_agent.step_count].description = strdup(description);
+    g_agent.steps[g_agent.step_count].tool_name = strdup(tool_name);
+    g_agent.steps[g_agent.step_count].params = strdup(params);
+    g_agent.steps[g_agent.step_count].result = NULL;
+    g_agent.steps[g_agent.step_count].completed = false;
+    g_agent.step_count++;
+    
+    return true;
+}
+
+bool agent_execute_steps(void) {
+    if (g_agent.step_count == 0) {
+        printf("No steps to execute\n");
+        return false;
+    }
+    
+    g_agent.status = AGENT_STATUS_EXECUTING;
+    g_agent.current_step = 0;
+    
+    printf("Starting execution of %d steps\n", g_agent.step_count);
+    
+    while (g_agent.current_step < g_agent.step_count && g_agent.status == AGENT_STATUS_EXECUTING) {
+        Step *step = &g_agent.steps[g_agent.current_step];
+        printf("Executing step %d: %s\n", g_agent.current_step + 1, step->description);
+        
+        // Execute the tool
+        char *result = agent_execute_tool(step->tool_name, step->params);
+        step->result = strdup(result);
+        step->completed = true;
+        
+        printf("Step %d result: %s\n", g_agent.current_step + 1, result);
+        free(result);
+        
+        g_agent.current_step++;
+    }
+    
+    if (g_agent.status == AGENT_STATUS_EXECUTING) {
+        g_agent.status = AGENT_STATUS_IDLE;
+        printf("All steps completed\n");
+    }
+    
+    return true;
+}
+
+bool agent_pause_execution(void) {
+    if (g_agent.status != AGENT_STATUS_EXECUTING) {
+        printf("Agent is not executing\n");
+        return false;
+    }
+    
+    g_agent.status = AGENT_STATUS_PAUSED;
+    printf("Execution paused at step %d\n", g_agent.current_step + 1);
+    return true;
+}
+
+bool agent_resume_execution(void) {
+    if (g_agent.status != AGENT_STATUS_PAUSED) {
+        printf("Agent is not paused\n");
+        return false;
+    }
+    
+    g_agent.status = AGENT_STATUS_EXECUTING;
+    printf("Resuming execution from step %d\n", g_agent.current_step + 1);
+    
+    while (g_agent.current_step < g_agent.step_count && g_agent.status == AGENT_STATUS_EXECUTING) {
+        Step *step = &g_agent.steps[g_agent.current_step];
+        printf("Executing step %d: %s\n", g_agent.current_step + 1, step->description);
+        
+        // Execute the tool
+        char *result = agent_execute_tool(step->tool_name, step->params);
+        step->result = strdup(result);
+        step->completed = true;
+        
+        printf("Step %d result: %s\n", g_agent.current_step + 1, result);
+        free(result);
+        
+        g_agent.current_step++;
+    }
+    
+    if (g_agent.status == AGENT_STATUS_EXECUTING) {
+        g_agent.status = AGENT_STATUS_IDLE;
+        printf("All steps completed\n");
+    }
+    
+    return true;
+}
+
+bool agent_stop_execution(void) {
+    if (g_agent.status != AGENT_STATUS_EXECUTING && g_agent.status != AGENT_STATUS_PAUSED) {
+        printf("Agent is not executing\n");
+        return false;
+    }
+    
+    g_agent.status = AGENT_STATUS_IDLE;
+    g_agent.current_step = 0;
+    printf("Execution stopped\n");
+    return true;
+}
+
+void agent_clear_steps(void) {
+    for (int i = 0; i < g_agent.step_count; i++) {
+        free(g_agent.steps[i].id);
+        free(g_agent.steps[i].description);
+        free(g_agent.steps[i].tool_name);
+        free(g_agent.steps[i].params);
+        if (g_agent.steps[i].result) {
+            free(g_agent.steps[i].result);
+        }
+    }
+    g_agent.step_count = 0;
+    g_agent.current_step = 0;
+    printf("Steps cleared\n");
+}
+
+void agent_print_steps(void) {
+    if (g_agent.step_count == 0) {
+        printf("No steps defined\n");
+        return;
+    }
+    
+    printf("Defined steps:\n");
+    for (int i = 0; i < g_agent.step_count; i++) {
+        Step *step = &g_agent.steps[i];
+        printf("  Step %d: %s\n", i + 1, step->description);
+        printf("    Tool: %s\n", step->tool_name);
+        printf("    Params: %s\n", step->params);
+        printf("    Status: %s\n", step->completed ? "Completed" : "Pending");
+        if (step->result) {
+            printf("    Result: %s\n", step->result);
+        }
+    }
+}
+
+// Update agent_status to include multi-step execution status
+void agent_status(void) {
+    printf("  Agent: %s\n", g_agent.running ? "running" : "stopped");
+    printf("  Model: %s\n", g_agent.model);
+    printf("  Tools: %d\n", g_agent.tool_count);
+    printf("  Memory entries: %d\n", g_agent.memory_count);
+    printf("  Debug mode: %s\n", g_agent.debug_mode ? "enabled" : "disabled");
+    
+    // Print status
+    const char *status_str;
+    switch (g_agent.status) {
+        case AGENT_STATUS_IDLE:
+            status_str = "Idle";
+            break;
+        case AGENT_STATUS_EXECUTING:
+            status_str = "Executing";
+            break;
+        case AGENT_STATUS_PAUSED:
+            status_str = "Paused";
+            break;
+        case AGENT_STATUS_ERROR:
+            status_str = "Error";
+            break;
+        default:
+            status_str = "Unknown";
+            break;
+    }
+    printf("  Status: %s\n", status_str);
+    
+    // Print steps information
+    if (g_agent.step_count > 0) {
+        printf("  Steps: %d\n", g_agent.step_count);
+        printf("  Current step: %d\n", g_agent.current_step + 1);
+    }
 }

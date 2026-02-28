@@ -16,17 +16,40 @@ typedef struct {
     char *value;
 } MemoryEntry;
 
+// Step structure for multi-step execution
+typedef struct {
+    char *id;
+    char *description;
+    char *tool_name;
+    char *params;
+    char *result;
+    bool completed;
+} Step;
+
+// Agent status
+typedef enum {
+    AGENT_STATUS_IDLE,
+    AGENT_STATUS_EXECUTING,
+    AGENT_STATUS_PAUSED,
+    AGENT_STATUS_ERROR
+} AgentStatus;
+
 // Agent structure
 typedef struct {
     char *model;
     bool running;
     bool debug_mode;
+    AgentStatus status;
     Tool *tools;
     int tool_count;
     int tool_capacity;
     MemoryEntry *memory;
     int memory_count;
     int memory_capacity;
+    Step *steps;
+    int step_count;
+    int step_capacity;
+    int current_step;
 } Agent;
 
 // Global agent instance
@@ -44,5 +67,14 @@ void agent_set_debug_mode(bool enabled);
 bool agent_memory_set(const char *key, const char *value);
 char *agent_memory_get(const char *key);
 bool agent_memory_clear(void);
+
+// Multi-step execution functions
+bool agent_add_step(const char *description, const char *tool_name, const char *params);
+bool agent_execute_steps(void);
+bool agent_pause_execution(void);
+bool agent_resume_execution(void);
+bool agent_stop_execution(void);
+void agent_clear_steps(void);
+void agent_print_steps(void);
 
 #endif // AGENT_H
