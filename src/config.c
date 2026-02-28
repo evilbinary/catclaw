@@ -130,3 +130,41 @@ void config_print(void) {
     printf("  Workspace Dir: %s\n", g_config.workspace_dir);
     printf("  Browser Enabled: %s\n", g_config.browser_enabled ? "true" : "false");
 }
+
+bool config_set(const char *key, const char *value) {
+    if (strcmp(key, "model") == 0) {
+        if (g_config.model) {
+            free(g_config.model);
+        }
+        g_config.model = strdup(value);
+        return true;
+    } else if (strcmp(key, "gateway_port") == 0) {
+        g_config.gateway_port = atoi(value);
+        return true;
+    } else if (strcmp(key, "workspace_dir") == 0) {
+        if (g_config.workspace_dir) {
+            free(g_config.workspace_dir);
+        }
+        g_config.workspace_dir = strdup(value);
+        return true;
+    } else if (strcmp(key, "browser_enabled") == 0) {
+        g_config.browser_enabled = (strcmp(value, "true") == 0 || strcmp(value, "1") == 0);
+        return true;
+    }
+    return false;
+}
+
+const char *config_get(const char *key) {
+    static char buffer[256];
+    if (strcmp(key, "model") == 0) {
+        return g_config.model;
+    } else if (strcmp(key, "gateway_port") == 0) {
+        snprintf(buffer, sizeof(buffer), "%d", g_config.gateway_port);
+        return buffer;
+    } else if (strcmp(key, "workspace_dir") == 0) {
+        return g_config.workspace_dir;
+    } else if (strcmp(key, "browser_enabled") == 0) {
+        return g_config.browser_enabled ? "true" : "false";
+    }
+    return NULL;
+}

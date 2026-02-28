@@ -186,35 +186,118 @@ int main(int argc, char *argv[]) {
         } else if (strcmp(command, "config list") == 0) {
             config_print();
         } else if (strncmp(command, "config set", 10) == 0) {
-            // TODO: Implement config set command
-            printf("Config set command not implemented yet\n");
+            char *params = command + 11;
+            char *key = strtok(params, " ");
+            char *value = strtok(NULL, "");
+            if (key && value) {
+                if (config_set(key, value)) {
+                    printf("Config set: %s = %s\n", key, value);
+                } else {
+                    printf("Error: Invalid config key\n");
+                }
+            } else {
+                printf("Usage: config set <key> <value>\n");
+            }
         } else if (strncmp(command, "config get", 10) == 0) {
-            // TODO: Implement config get command
-            printf("Config get command not implemented yet\n");
+            char *key = command + 11;
+            if (*key) {
+                const char *value = config_get(key);
+                if (value) {
+                    printf("Config %s: %s\n", key, value);
+                } else {
+                    printf("Error: Invalid config key\n");
+                }
+            } else {
+                printf("Usage: config get <key>\n");
+            }
         } else if (strncmp(command, "channel enable", 14) == 0) {
-            // TODO: Implement channel enable command
-            printf("Channel enable command not implemented yet\n");
+            char *channel_name = command + 15;
+            if (*channel_name) {
+                ChannelType type = channel_name_to_type(channel_name);
+                if (type != CHANNEL_MAX) {
+                    channel_enable(type);
+                } else {
+                    printf("Error: Invalid channel name\n");
+                }
+            } else {
+                printf("Usage: channel enable <name>\n");
+            }
         } else if (strncmp(command, "channel disable", 15) == 0) {
-            // TODO: Implement channel disable command
-            printf("Channel disable command not implemented yet\n");
+            char *channel_name = command + 16;
+            if (*channel_name) {
+                ChannelType type = channel_name_to_type(channel_name);
+                if (type != CHANNEL_MAX) {
+                    channel_disable(type);
+                } else {
+                    printf("Error: Invalid channel name\n");
+                }
+            } else {
+                printf("Usage: channel disable <name>\n");
+            }
         } else if (strncmp(command, "channel connect", 15) == 0) {
-            // TODO: Implement channel connect command
-            printf("Channel connect command not implemented yet\n");
+            char *channel_name = command + 16;
+            if (*channel_name) {
+                ChannelType type = channel_name_to_type(channel_name);
+                if (type != CHANNEL_MAX) {
+                    channel_connect(type);
+                } else {
+                    printf("Error: Invalid channel name\n");
+                }
+            } else {
+                printf("Usage: channel connect <name>\n");
+            }
         } else if (strncmp(command, "channel disconnect", 18) == 0) {
-            // TODO: Implement channel disconnect command
-            printf("Channel disconnect command not implemented yet\n");
+            char *channel_name = command + 19;
+            if (*channel_name) {
+                ChannelType type = channel_name_to_type(channel_name);
+                if (type != CHANNEL_MAX) {
+                    channel_disconnect(type);
+                } else {
+                    printf("Error: Invalid channel name\n");
+                }
+            } else {
+                printf("Usage: channel disconnect <name>\n");
+            }
         } else if (strcmp(command, "model list") == 0) {
-            // TODO: Implement model list command
-            printf("Model list command not implemented yet\n");
+            printf("Available models:\n");
+            printf("  openai/gpt-4o\n");
+            printf("  openai/gpt-3.5-turbo\n");
+            printf("  anthropic/claude-3-opus-20240229\n");
+            printf("  anthropic/claude-3-sonnet-20240229\n");
+            printf("  gemini/gemini-1.5-pro\n");
+            printf("  llama/llama3-70b\n");
         } else if (strncmp(command, "model set", 8) == 0) {
-            // TODO: Implement model set command
-            printf("Model set command not implemented yet\n");
+            char *model = command + 9;
+            if (*model) {
+                if (config_set("model", model)) {
+                    printf("Model set to: %s\n", model);
+                    printf("Note: You need to restart CatClaw for this change to take effect\n");
+                } else {
+                    printf("Error: Failed to set model\n");
+                }
+            } else {
+                printf("Usage: model set <model>\n");
+            }
         } else if (strcmp(command, "system restart") == 0) {
-            // TODO: Implement system restart command
-            printf("System restart command not implemented yet\n");
+            printf("Restarting CatClaw...\n");
+            // TODO: Implement actual restart functionality
+            printf("Restart functionality not yet implemented\n");
         } else if (strcmp(command, "system shutdown") == 0) {
-            // TODO: Implement system shutdown command
-            printf("System shutdown command not implemented yet\n");
+            printf("Shutting down CatClaw...\n");
+            // Cleanup and exit
+            stop_gateway_server();
+            agent_cleanup();
+            channels_cleanup();
+            plugin_system_cleanup();
+            if (g_thread_pool) {
+                thread_pool_destroy(g_thread_pool);
+            }
+            gateway_cleanup();
+            config_cleanup();
+            log_info("CatClaw exiting");
+            log_cleanup();
+            printf("CatClaw shutdown\n");
+            exit(0);
         } else if (strlen(command) > 0) {
             printf("Unknown command: %s\n", command);
             printf("Type 'help' for available commands\n");

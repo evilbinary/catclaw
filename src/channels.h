@@ -55,5 +55,10 @@ void channels_handle_websocket_message(const char *message);
 bool channels_register_channel(ChannelType type, ChannelConfig *config);
 bool channels_unregister_channel(ChannelType type);
 void channels_process_message(ChannelMessage *message);
+bool channel_enable(ChannelType type);
+bool channel_disable(ChannelType type);
+bool channel_connect(ChannelType type);
+bool channel_disconnect(ChannelType type);
+ChannelType channel_name_to_type(const char *name);
 
 #endif // CHANNELS_H

@@ -206,4 +206,77 @@ void channels_process_message(ChannelMessage *message) {
     // For example, forward to other channels if needed
 }
 
+bool channel_enable(ChannelType type) {
+    if (type < 0 || type >= CHANNEL_MAX) {
+        fprintf(stderr, "Invalid channel type\n");
+        return false;
+    }
+
+    Channel *channel = &channels[type];
+    channel->enabled = true;
+    printf("Channel %s enabled\n", channel->name);
+    return true;
+}
+
+bool channel_disable(ChannelType type) {
+    if (type < 0 || type >= CHANNEL_MAX) {
+        fprintf(stderr, "Invalid channel type\n");
+        return false;
+    }
+
+    Channel *channel = &channels[type];
+    channel->enabled = false;
+    if (channel->connected) {
+        channel->disconnect(channel);
+    }
+    printf("Channel %s disabled\n", channel->name);
+    return true;
+}
+
+bool channel_connect(ChannelType type) {
+    if (type < 0 || type >= CHANNEL_MAX) {
+        fprintf(stderr, "Invalid channel type\n");
+        return false;
+    }
+
+    Channel *channel = &channels[type];
+    if (!channel->enabled) {
+        fprintf(stderr, "Channel %s is disabled\n", channel->name);
+        return false;
+    }
+
+    if (channel->connected) {
+        fprintf(stderr, "Channel %s is already connected\n", channel->name);
+        return false;
+    }
+
+    channel->connect(channel);
+    return true;
+}
+
+bool channel_disconnect(ChannelType type) {
+    if (type < 0 || type >= CHANNEL_MAX) {
+        fprintf(stderr, "Invalid channel type\n");
+        return false;
+    }
+
+    Channel *channel = &channels[type];
+    if (!channel->connected) {
+        fprintf(stderr, "Channel %s is not connected\n", channel->name);
+        return false;
+    }
+
+    channel->disconnect(channel);
+    return true;
+}
+
+ChannelType channel_name_to_type(const char *name) {
+    for (int i = 0; i < CHANNEL_MAX; i++) {
+        if (strcmp(name, channel_names[i]) == 0) {
+            return i;
+        }
+    }
+    return CHANNEL_MAX;
+}
+
 
