@@ -15,18 +15,45 @@ typedef enum {
 } ChannelType;
 
 // Channel structure
-typedef struct {
+typedef struct Channel {
     ChannelType type;
     char *name;
     bool enabled;
     bool connected;
+    void *config;
+    void (*connect)(struct Channel *channel);
+    void (*disconnect)(struct Channel *channel);
+    bool (*send_message)(struct Channel *channel, const char *message);
+    bool (*receive_message)(struct Channel *channel, const char *message);
 } Channel;
+
+// Channel configuration structure
+typedef struct {
+    char *api_key;
+    char *username;
+    char *password;
+    char *server;
+    int port;
+    bool enable_ssl;
+} ChannelConfig;
+
+// Message structure
+typedef struct {
+    ChannelType source;
+    char *sender;
+    char *content;
+    char *timestamp;
+} ChannelMessage;
 
 // Functions
 bool channels_init(void);
 void channels_cleanup(void);
 void channels_status(void);
 bool channel_send_message(ChannelType type, const char *message);
+bool channel_send_message_to_all(const char *message);
 void channels_handle_websocket_message(const char *message);
+bool channels_register_channel(ChannelType type, ChannelConfig *config);
+bool channels_unregister_channel(ChannelType type);
+void channels_process_message(ChannelMessage *message);
 
 #endif // CHANNELS_H

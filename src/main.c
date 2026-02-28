@@ -7,10 +7,16 @@
 #include "gateway.h"
 #include "channels.h"
 #include "agent.h"
+#include "plugin.h"
+#include "log.h"
+#include "thread_pool.h"
 
 // Gateway server thread
 static pthread_t gateway_thread;
 static bool gateway_thread_running = false;
+
+// Thread pool
+static ThreadPool *g_thread_pool = NULL;
 
 // Thread function for gateway server
 static void *gateway_server_thread(void *arg) {
@@ -55,39 +61,57 @@ int main(int argc, char *argv[]) {
     printf("🐦 CatClaw - C version\n");
     printf("Based on OpenClaw functionality\n\n");
 
+    // Initialize log system
+    log_init();
+    log_info("CatClaw starting up");
+
     // Load configuration
     if (!config_load()) {
-        fprintf(stderr, "Failed to load configuration\n");
+        log_fatal("Failed to load configuration");
         return 1;
     }
 
     // Initialize gateway
     if (!gateway_init()) {
-        fprintf(stderr, "Failed to initialize gateway\n");
+        log_fatal("Failed to initialize gateway");
         return 1;
     }
 
     // Initialize channels
     if (!channels_init()) {
-        fprintf(stderr, "Failed to initialize channels\n");
+        log_fatal("Failed to initialize channels");
         return 1;
     }
 
     // Initialize agent
     if (!agent_init()) {
-        fprintf(stderr, "Failed to initialize agent\n");
+        log_fatal("Failed to initialize agent");
         return 1;
+    }
+
+    // Initialize plugin system
+    if (!plugin_system_init()) {
+        log_error("Failed to initialize plugin system");
+        // Continue anyway
+    }
+
+    // Initialize thread pool
+    g_thread_pool = thread_pool_create(4, 100);
+    if (!g_thread_pool) {
+        log_error("Failed to initialize thread pool");
+        // Continue anyway
     }
 
     // Start gateway server
     if (!start_gateway_server()) {
-        fprintf(stderr, "Failed to start gateway server\n");
+        log_error("Failed to start gateway server");
         // Continue anyway
     }
 
-    printf("CatClaw initialized successfully!\n");
-    printf("WebSocket server running on port %d\n", g_config.gateway_port);
-    printf("Use 'help' for available commands\n\n");
+    log_info("CatClaw initialized successfully!");
+    log_info("WebSocket server running on port %d", g_config.gateway_port);
+    log_info("Use 'help' for available commands");
+    printf("\n");
 
     // Simple command loop
     char command[256];
@@ -102,11 +126,16 @@ int main(int argc, char *argv[]) {
 
         if (strcmp(command, "help") == 0) {
             printf("Available commands:\n");
-            printf("  help        - Show this help\n");
-            printf("  status      - Show status\n");
-            printf("  message     - Send a message to AI\n");
-            printf("  gateway     - Manage gateway server\n");
-            printf("  exit        - Exit\n");
+            printf("  help              - Show this help\n");
+            printf("  status            - Show status\n");
+            printf("  message           - Send a message to AI\n");
+            printf("  gateway           - Manage gateway server\n");
+            printf("  plugin            - Manage plugins\n");
+            printf("  config            - Manage configuration\n");
+            printf("  channel           - Manage channels\n");
+            printf("  model             - Manage AI models\n");
+            printf("  system            - Manage system\n");
+            printf("  exit              - Exit\n");
         } else if (strcmp(command, "status") == 0) {
             printf("Status:\n");
             gateway_status();
@@ -127,6 +156,54 @@ int main(int argc, char *argv[]) {
             stop_gateway_server();
         } else if (strcmp(command, "gateway status") == 0) {
             gateway_status();
+        } else if (strcmp(command, "plugin list") == 0) {
+            plugin_list();
+        } else if (strncmp(command, "plugin load", 11) == 0) {
+            char *path = command + 12;
+            if (*path) {
+                plugin_load(path);
+            } else {
+                printf("Usage: plugin load <path>\n");
+            }
+        } else if (strncmp(command, "plugin unload", 13) == 0) {
+            char *name = command + 14;
+            if (*name) {
+                plugin_unload(name);
+            } else {
+                printf("Usage: plugin unload <name>\n");
+            }
+        } else if (strcmp(command, "config list") == 0) {
+            config_print();
+        } else if (strncmp(command, "config set", 10) == 0) {
+            // TODO: Implement config set command
+            printf("Config set command not implemented yet\n");
+        } else if (strncmp(command, "config get", 10) == 0) {
+            // TODO: Implement config get command
+            printf("Config get command not implemented yet\n");
+        } else if (strncmp(command, "channel enable", 14) == 0) {
+            // TODO: Implement channel enable command
+            printf("Channel enable command not implemented yet\n");
+        } else if (strncmp(command, "channel disable", 15) == 0) {
+            // TODO: Implement channel disable command
+            printf("Channel disable command not implemented yet\n");
+        } else if (strncmp(command, "channel connect", 15) == 0) {
+            // TODO: Implement channel connect command
+            printf("Channel connect command not implemented yet\n");
+        } else if (strncmp(command, "channel disconnect", 18) == 0) {
+            // TODO: Implement channel disconnect command
+            printf("Channel disconnect command not implemented yet\n");
+        } else if (strcmp(command, "model list") == 0) {
+            // TODO: Implement model list command
+            printf("Model list command not implemented yet\n");
+        } else if (strncmp(command, "model set", 8) == 0) {
+            // TODO: Implement model set command
+            printf("Model set command not implemented yet\n");
+        } else if (strcmp(command, "system restart") == 0) {
+            // TODO: Implement system restart command
+            printf("System restart command not implemented yet\n");
+        } else if (strcmp(command, "system shutdown") == 0) {
+            // TODO: Implement system shutdown command
+            printf("System shutdown command not implemented yet\n");
         } else if (strlen(command) > 0) {
             printf("Unknown command: %s\n", command);
             printf("Type 'help' for available commands\n");
@@ -137,8 +214,14 @@ int main(int argc, char *argv[]) {
     stop_gateway_server();
     agent_cleanup();
     channels_cleanup();
+    plugin_system_cleanup();
+    if (g_thread_pool) {
+        thread_pool_destroy(g_thread_pool);
+    }
     gateway_cleanup();
     config_cleanup();
+    log_info("CatClaw exiting");
+    log_cleanup();
 
     printf("\nCatClaw exited\n");
     return 0;

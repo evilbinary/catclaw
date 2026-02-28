@@ -16,7 +16,7 @@ OBJECTS = $(patsubst $(SRC_DIR)/%.c, $(OBJ_DIR)/%.o, $(SOURCES))
 TARGET = catclaw
 
 # Check if curl is available
-CURL_AVAILABLE := $(shell $(CC) -lcurl -o /dev/null 2>&1 && echo yes || echo no)
+CURL_AVAILABLE := $(shell $(CC) -lcurl -o NUL 2>&1 && echo yes || echo no)
 
 ifeq ($(CURL_AVAILABLE), yes)
 	LDFLAGS += -lcurl

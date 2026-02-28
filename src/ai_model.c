@@ -240,6 +240,45 @@ AIModelResponse *ai_model_send_message(const char *message) {
             }
             break;
 
+        case AI_MODEL_GEMINI:
+            url = g_model_config.base_url ? g_model_config.base_url : "https://generativelanguage.googleapis.com/v1/models/gemini-1.5-pro:generateContent";
+            headers = curl_slist_append(headers, "Content-Type: application/json");
+            {
+                char auth_header[256];
+                snprintf(auth_header, sizeof(auth_header), "Authorization: Bearer %s", g_model_config.api_key);
+                headers = curl_slist_append(headers, auth_header);
+            }
+            {
+                cJSON *root = cJSON_CreateObject();
+                cJSON *contents = cJSON_CreateArray();
+                cJSON *content_obj = cJSON_CreateObject();
+                cJSON *parts = cJSON_CreateArray();
+                cJSON *part_obj = cJSON_CreateObject();
+                cJSON_AddStringToObject(part_obj, "text", message);
+                cJSON_AddItemToArray(parts, part_obj);
+                cJSON_AddItemToObject(content_obj, "parts", parts);
+                cJSON_AddStringToObject(content_obj, "role", "user");
+                cJSON_AddItemToArray(contents, content_obj);
+                cJSON_AddItemToObject(root, "contents", contents);
+                payload = cJSON_Print(root);
+                cJSON_Delete(root);
+            }
+            break;
+
+        case AI_MODEL_LLAMA:
+            url = g_model_config.base_url ? g_model_config.base_url : "http://localhost:11434/api/generate";
+            headers = curl_slist_append(headers, "Content-Type: application/json");
+            {
+                cJSON *root = cJSON_CreateObject();
+                cJSON_AddStringToObject(root, "model", g_model_config.model_name ? g_model_config.model_name : "llama3");
+                cJSON_AddStringToObject(root, "prompt", message);
+                cJSON_AddNumberToObject(root, "max_tokens", 1024);
+                cJSON_AddBoolToObject(root, "stream", false);
+                payload = cJSON_Print(root);
+                cJSON_Delete(root);
+            }
+            break;
+
         default:
             curl_easy_cleanup(curl);
             free(response_buffer);
@@ -293,6 +332,39 @@ AIModelResponse *ai_model_send_message(const char *message) {
                                     response = create_response(text->valuestring, true, NULL);
                                 }
                             }
+                        }
+                    }
+                    break;
+
+                case AI_MODEL_GEMINI:
+                    {
+                        cJSON *candidates = cJSON_GetObjectItem(root, "candidates");
+                        if (candidates && cJSON_IsArray(candidates)) {
+                            cJSON *candidate = cJSON_GetArrayItem(candidates, 0);
+                            if (candidate) {
+                                cJSON *content = cJSON_GetObjectItem(candidate, "content");
+                                if (content) {
+                                    cJSON *parts = cJSON_GetObjectItem(content, "parts");
+                                    if (parts && cJSON_IsArray(parts)) {
+                                        cJSON *part = cJSON_GetArrayItem(parts, 0);
+                                        if (part) {
+                                            cJSON *text = cJSON_GetObjectItem(part, "text");
+                                            if (text && cJSON_IsString(text)) {
+                                                response = create_response(text->valuestring, true, NULL);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    break;
+
+                case AI_MODEL_LLAMA:
+                    {
+                        cJSON *response_obj = cJSON_GetObjectItem(root, "response");
+                        if (response_obj && cJSON_IsString(response_obj)) {
+                            response = create_response(response_obj->valuestring, true, NULL);
                         }
                     }
                     break;
