@@ -40,6 +40,7 @@ typedef struct {
     bool running;
     bool debug_mode;
     AgentStatus status;
+    char *error_message;
     Tool *tools;
     int tool_count;
     int tool_capacity;
@@ -76,5 +77,10 @@ bool agent_resume_execution(void);
 bool agent_stop_execution(void);
 void agent_clear_steps(void);
 void agent_print_steps(void);
+
+// Error handling functions
+void agent_set_error(const char *format, ...);
+void agent_clear_error(void);
+const char *agent_get_error(void);
 
 #endif // AGENT_H

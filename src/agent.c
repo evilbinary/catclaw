@@ -15,6 +15,7 @@ Agent g_agent = {
     .running = false,
     .debug_mode = false,
     .status = AGENT_STATUS_IDLE,
+    .error_message = NULL,
     .tools = NULL,
     .tool_count = 0,
     .tool_capacity = 20,
@@ -634,19 +635,14 @@ void agent_cleanup(void) {
         g_agent.current_step = 0;
     }
 
+    // Cleanup error message
+    agent_clear_error();
+
     // Cleanup AI model
     ai_model_cleanup();
 
     g_agent.running = false;
     printf("Agent cleaned up\n");
-}
-
-void agent_status(void) {
-    printf("  Agent: %s\n", g_agent.running ? "running" : "stopped");
-    printf("  Model: %s\n", g_agent.model);
-    printf("  Tools: %d\n", g_agent.tool_count);
-    printf("  Memory entries: %d\n", g_agent.memory_count);
-    printf("  Debug mode: %s\n", g_agent.debug_mode ? "enabled" : "disabled");
 }
 
 bool agent_send_message(const char *message) {
@@ -666,6 +662,41 @@ bool agent_send_message(const char *message) {
     
     free(result);
     return true;
+}
+
+// Error handling functions
+void agent_set_error(const char *format, ...) {
+    va_list args;
+    va_start(args, format);
+    
+    // Free existing error message
+    if (g_agent.error_message) {
+        free(g_agent.error_message);
+        g_agent.error_message = NULL;
+    }
+    
+    // Allocate buffer for error message
+    char buffer[1024];
+    vsnprintf(buffer, 1024, format, args);
+    
+    g_agent.error_message = strdup(buffer);
+    g_agent.status = AGENT_STATUS_ERROR;
+    
+    debug_log("Error: %s", buffer);
+    
+    va_end(args);
+}
+
+void agent_clear_error(void) {
+    if (g_agent.error_message) {
+        free(g_agent.error_message);
+        g_agent.error_message = NULL;
+    }
+    g_agent.status = AGENT_STATUS_IDLE;
+}
+
+const char *agent_get_error(void) {
+    return g_agent.error_message;
 }
 
 // Multi-step execution functions
@@ -849,6 +880,11 @@ void agent_status(void) {
             break;
     }
     printf("  Status: %s\n", status_str);
+    
+    // Print error message if any
+    if (g_agent.error_message) {
+        printf("  Error: %s\n", g_agent.error_message);
+    }
     
     // Print steps information
     if (g_agent.step_count > 0) {
