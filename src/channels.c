@@ -18,7 +18,7 @@ static const char *channel_names[] = {
 };
 
 // Channels array
-static Channel channels[CHANNEL_MAX];
+Channel channels[CHANNEL_MAX];
 
 // Default channel callback functions
 static void default_connect(struct Channel *channel) {
