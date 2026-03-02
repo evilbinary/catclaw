@@ -309,7 +309,8 @@ AIModelResponse *ai_model_send_message(const char *message) {
 
         case AI_MODEL_LLAMA:
             url = g_model_config.base_url ? g_model_config.base_url : "http://localhost:11434/api/generate";
-            headers = curl_slist_append(headers, "Content-Type: application/json");
+            headers = curl_slist_append(headers, "Content-Type: application/json; charset=utf-8");
+            headers = curl_slist_append(headers, "Accept: application/json; charset=utf-8");
             {
                 cJSON *root = cJSON_CreateObject();
                 cJSON_AddStringToObject(root, "model", g_model_config.model_name ? g_model_config.model_name : "llama3");
