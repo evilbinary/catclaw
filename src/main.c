@@ -8,6 +8,7 @@
 #include "channels.h"
 #include "agent.h"
 #include "plugin.h"
+#include "skill.h"
 #include "log.h"
 #include "thread_pool.h"
 
@@ -95,6 +96,12 @@ int main(int argc, char *argv[]) {
         // Continue anyway
     }
 
+    // Initialize skill system
+    if (!skill_system_init()) {
+        log_error("Failed to initialize skill system");
+        // Continue anyway
+    }
+
     // Initialize thread pool
     g_thread_pool = thread_pool_create(4, 100);
     if (!g_thread_pool) {
@@ -146,6 +153,12 @@ int main(int argc, char *argv[]) {
             printf("  model set <model> - Set AI model\n");
             printf("  system restart    - Restart system\n");
             printf("  system shutdown   - Shutdown system\n");
+            printf("  skill load <path> - Load a skill\n");
+            printf("  skill unload <name> - Unload a skill\n");
+            printf("  skill execute <name> [params] - Execute a skill\n");
+            printf("  skills list       - List loaded skills\n");
+            printf("  skill enable <name> - Enable a skill\n");
+            printf("  skill disable <name> - Disable a skill\n");
             printf("  exit              - Exit\n");
         } else if (strcmp(command, "status") == 0) {
             printf("Status:\n");
@@ -298,6 +311,47 @@ int main(int argc, char *argv[]) {
             log_cleanup();
             printf("CatClaw shutdown\n");
             exit(0);
+        } else if (strncmp(command, "skill load", 10) == 0) {
+            char *path = command + 11;
+            if (*path) {
+                agent_load_skill(path);
+            } else {
+                printf("Usage: skill load <path>\n");
+            }
+        } else if (strncmp(command, "skill unload", 12) == 0) {
+            char *name = command + 13;
+            if (*name) {
+                agent_unload_skill(name);
+            } else {
+                printf("Usage: skill unload <name>\n");
+            }
+        } else if (strncmp(command, "skill execute", 13) == 0) {
+            char *params = command + 14;
+            char *name = strtok(params, " ");
+            char *skill_params = strtok(NULL, "");
+            if (name) {
+                char *result = agent_execute_skill(name, skill_params);
+                printf("%s\n", result);
+                free(result);
+            } else {
+                printf("Usage: skill execute <name> [params]\n");
+            }
+        } else if (strcmp(command, "skills list") == 0) {
+            agent_list_skills();
+        } else if (strncmp(command, "skill enable", 12) == 0) {
+            char *name = command + 13;
+            if (*name) {
+                agent_enable_skill(name);
+            } else {
+                printf("Usage: skill enable <name>\n");
+            }
+        } else if (strncmp(command, "skill disable", 13) == 0) {
+            char *name = command + 14;
+            if (*name) {
+                agent_disable_skill(name);
+            } else {
+                printf("Usage: skill disable <name>\n");
+            }
         } else if (strlen(command) > 0) {
             printf("Unknown command: %s\n", command);
             printf("Type 'help' for available commands\n");
@@ -309,6 +363,7 @@ int main(int argc, char *argv[]) {
     agent_cleanup();
     channels_cleanup();
     plugin_system_cleanup();
+    skill_system_cleanup();
     if (g_thread_pool) {
         thread_pool_destroy(g_thread_pool);
     }

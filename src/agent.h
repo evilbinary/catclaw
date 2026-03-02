@@ -83,4 +83,12 @@ void agent_set_error(const char *format, ...);
 void agent_clear_error(void);
 const char *agent_get_error(void);
 
+// Skill functions
+bool agent_load_skill(const char *path);
+bool agent_unload_skill(const char *name);
+char *agent_execute_skill(const char *name, const char *params);
+void agent_list_skills(void);
+bool agent_enable_skill(const char *name);
+bool agent_disable_skill(const char *name);
+
 #endif // AGENT_H

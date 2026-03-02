@@ -10,7 +10,7 @@ endif
 SRC_DIR = src
 OBJ_DIR = obj
 
-SOURCES = $(wildcard $(SRC_DIR)/*.c)
+SOURCES = $(filter-out $(SRC_DIR)/skill_weather.c, $(wildcard $(SRC_DIR)/*.c))
 OBJECTS = $(patsubst $(SRC_DIR)/%.c, $(OBJ_DIR)/%.o, $(SOURCES))
 
 TARGET = catclaw

@@ -2,6 +2,7 @@
 #include "config.h"
 #include "channels.h"
 #include "ai_model.h"
+#include "skill.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -891,4 +892,29 @@ void agent_status(void) {
         printf("  Steps: %d\n", g_agent.step_count);
         printf("  Current step: %d\n", g_agent.current_step + 1);
     }
+}
+
+// Skill functions
+bool agent_load_skill(const char *path) {
+    return skill_load(path);
+}
+
+bool agent_unload_skill(const char *name) {
+    return skill_unload(name);
+}
+
+char *agent_execute_skill(const char *name, const char *params) {
+    return skill_execute_skill(name, params);
+}
+
+void agent_list_skills(void) {
+    skill_list();
+}
+
+bool agent_enable_skill(const char *name) {
+    return skill_enable(name);
+}
+
+bool agent_disable_skill(const char *name) {
+    return skill_disable(name);
 }
