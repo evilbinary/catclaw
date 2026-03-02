@@ -12,14 +12,22 @@
 static size_t write_callback(void *contents, size_t size, size_t nmemb, void *userp) {
     size_t realsize = size * nmemb;
     char **buffer = (char **)userp;
+    size_t current_len = *buffer ? strlen(*buffer) : 0;
 
-    *buffer = (char *)realloc(*buffer, strlen(*buffer) + realsize + 1);
-    if (*buffer == NULL) {
+    // Reallocate buffer to fit new data
+    char *new_buffer = (char *)realloc(*buffer, current_len + realsize + 1);
+    if (new_buffer == NULL) {
         fprintf(stderr, "realloc failed\n");
         return 0;
     }
 
-    strcat(*buffer, (char *)contents);
+    // Copy new data to buffer
+    memcpy(new_buffer + current_len, contents, realsize);
+    new_buffer[current_len + realsize] = '\0';
+
+    // Update buffer pointer
+    *buffer = new_buffer;
+
     return realsize;
 }
 #else
