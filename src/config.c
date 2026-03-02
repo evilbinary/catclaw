@@ -7,12 +7,15 @@
 
 // Global config instance
 Config g_config = {
-    .model = "anthropic/claude-opus-4-6",
+    .model = NULL,
     .gateway_port = 18789,
     .workspace_dir = NULL,
     .browser_enabled = false,
     .base_url = NULL
 };
+
+// Default model
+#define DEFAULT_MODEL "anthropic/claude-opus-4-6"
 
 static char *get_home_dir(void) {
     char *home = getenv("HOME");
@@ -54,11 +57,20 @@ bool config_load(void) {
         return false;
     }
 
+    // Set default model
+    g_config.model = strdup(DEFAULT_MODEL);
+    if (!g_config.model) {
+        perror("strdup");
+        return false;
+    }
+
     // Set default workspace directory
     size_t len = strlen(home) + 20;
     g_config.workspace_dir = (char *)malloc(len);
     if (!g_config.workspace_dir) {
         perror("malloc");
+        free(g_config.model);
+        g_config.model = NULL;
         return false;
     }
     snprintf(g_config.workspace_dir, len, "%s/.catclaw/workspace", home);
