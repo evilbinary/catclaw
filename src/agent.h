@@ -91,4 +91,7 @@ void agent_list_skills(void);
 bool agent_enable_skill(const char *name);
 bool agent_disable_skill(const char *name);
 
+// Command parsing function
+char *agent_parse_command(const char *command);
+
 #endif // AGENT_H

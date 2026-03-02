@@ -159,6 +159,24 @@ int main(int argc, char *argv[]) {
             printf("  skills list       - List loaded skills\n");
             printf("  skill enable <name> - Enable a skill\n");
             printf("  skill disable <name> - Disable a skill\n");
+            printf("  calculate <expr>  - Calculate an expression\n");
+            printf("  time              - Get current time\n");
+            printf("  reverse string <text> - Reverse a string\n");
+            printf("  read file <name>  - Read a file\n");
+            printf("  write file <name> <content> - Write to a file\n");
+            printf("  search <query>    - Search the web\n");
+            printf("  memory save <key> <value> - Save to memory\n");
+            printf("  memory load <key> - Load from memory\n");
+            printf("  memory clear      - Clear memory\n");
+            printf("  step add <desc>|<tool>|<params> - Add a step\n");
+            printf("  steps execute     - Execute steps\n");
+            printf("  steps pause       - Pause execution\n");
+            printf("  steps resume      - Resume execution\n");
+            printf("  steps stop        - Stop execution\n");
+            printf("  steps clear       - Clear steps\n");
+            printf("  steps list        - List steps\n");
+            printf("  debug on          - Enable debug mode\n");
+            printf("  debug off         - Disable debug mode\n");
             printf("  exit              - Exit\n");
         } else if (strcmp(command, "status") == 0) {
             printf("Status:\n");
@@ -351,6 +369,30 @@ int main(int argc, char *argv[]) {
                 agent_disable_skill(name);
             } else {
                 printf("Usage: skill disable <name>\n");
+            }
+        } else if (strncmp(command, "calculate", 9) == 0 || strncmp(command, "calc", 4) == 0 ||
+                   strcmp(command, "time") == 0 || strcmp(command, "now") == 0 ||
+                   strstr(command, "reverse string") != NULL ||
+                   strstr(command, "read file") != NULL ||
+                   strstr(command, "write file") != NULL ||
+                   strstr(command, "search") != NULL || strstr(command, "web search") != NULL ||
+                   strstr(command, "memory save") != NULL ||
+                   strstr(command, "memory load") != NULL ||
+                   strcmp(command, "memory clear") == 0 ||
+                   strstr(command, "step add") != NULL ||
+                   strstr(command, "steps execute") != NULL ||
+                   strstr(command, "steps pause") != NULL ||
+                   strstr(command, "steps resume") != NULL ||
+                   strstr(command, "steps stop") != NULL ||
+                   strstr(command, "steps clear") != NULL ||
+                   strstr(command, "steps list") != NULL ||
+                   strstr(command, "debug on") != NULL ||
+                   strstr(command, "debug off") != NULL) {
+            // Handle tool, multi-step, and debug commands through agent
+            char *result = agent_parse_command(command);
+            if (result) {
+                printf("%s\n", result);
+                free(result);
             }
         } else if (strlen(command) > 0) {
             printf("Unknown command: %s\n", command);

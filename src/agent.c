@@ -353,7 +353,7 @@ void agent_list_tools(void) {
 }
 
 // Parse user command and execute tools
-static char *agent_parse_command(const char *command) {
+char *agent_parse_command(const char *command) {
     char *result = (char *)malloc(2048);
     if (!result) {
         return "Error: Memory allocation failed";
