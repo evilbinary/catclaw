@@ -395,8 +395,12 @@ int main(int argc, char *argv[]) {
                 free(result);
             }
         } else if (strlen(command) > 0) {
-            printf("Unknown command: %s\n", command);
-            printf("Type 'help' for available commands\n");
+            // Conversation mode: treat any other input as a message to the agent
+            char *result = agent_parse_command(command);
+            if (result) {
+                printf("%s\n", result);
+                free(result);
+            }
         }
     }
 
