@@ -536,12 +536,20 @@ bool agent_init(void) {
     } else if (strstr(g_config.model, "openai") != NULL) {
         model_config.type = AI_MODEL_OPENAI;
         model_config.model_name = strstr(g_config.model, "/") ? strstr(g_config.model, "/") + 1 : g_config.model;
+    } else if (strstr(g_config.model, "llama") != NULL || strstr(g_config.model, "gemini") != NULL) {
+        if (strstr(g_config.model, "llama") != NULL) {
+            model_config.type = AI_MODEL_LLAMA;
+            model_config.model_name = strstr(g_config.model, "/") ? strstr(g_config.model, "/") + 1 : g_config.model;
+        } else {
+            model_config.type = AI_MODEL_GEMINI;
+            model_config.model_name = strstr(g_config.model, "/") ? strstr(g_config.model, "/") + 1 : g_config.model;
+        }
     } else {
         model_config.type = AI_MODEL_ANTHROPIC;
         model_config.model_name = "claude-3-opus-20240229";
     }
     model_config.api_key = getenv("ANTHROPIC_API_KEY") ? getenv("ANTHROPIC_API_KEY") : getenv("OPENAI_API_KEY");
-    model_config.base_url = NULL;
+    model_config.base_url = g_config.base_url;
 
     if (!ai_model_init(&model_config)) {
         fprintf(stderr, "Failed to initialize AI model\n");

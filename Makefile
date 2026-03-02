@@ -15,9 +15,22 @@ OBJECTS = $(patsubst $(SRC_DIR)/%.c, $(OBJ_DIR)/%.o, $(SOURCES))
 
 TARGET = catclaw
 
-# Use curl from MSYS2
-LDFLAGS += -L/E/soft/msys2/mingw64/lib -lcurl
-CFLAGS += -I/E/soft/msys2/mingw64/include -DHAVE_CURL
+# Check for curl availability
+ifeq ($(OS),Windows_NT)
+    # Windows with MSYS2
+    LDFLAGS += -L/E/soft/msys2/mingw64/lib -lcurl
+    CFLAGS += -I/E/soft/msys2/mingw64/include -DHAVE_CURL
+else
+    # Linux or other Unix-like systems
+    # Check if curl is available
+    CURL_AVAILABLE := $(shell $(CC) -lcurl -o /dev/null 2>&1 && echo yes || echo no)
+    ifeq ($(CURL_AVAILABLE), yes)
+        LDFLAGS += -lcurl
+        CFLAGS += -DHAVE_CURL
+    else
+        CFLAGS += -DNO_CURL
+    endif
+endif
 
 all: $(TARGET)
 

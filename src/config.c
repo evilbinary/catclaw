@@ -10,7 +10,8 @@ Config g_config = {
     .model = "anthropic/claude-opus-4-6",
     .gateway_port = 18789,
     .workspace_dir = NULL,
-    .browser_enabled = false
+    .browser_enabled = false,
+    .base_url = NULL
 };
 
 static char *get_home_dir(void) {
@@ -98,6 +99,15 @@ bool config_load(void) {
                 g_config.browser_enabled = cJSON_IsTrue(browser);
             }
 
+            // Parse base URL
+            cJSON *base_url = cJSON_GetObjectItem(root, "base_url");
+            if (base_url && cJSON_IsString(base_url)) {
+                if (g_config.base_url) {
+                    free(g_config.base_url);
+                }
+                g_config.base_url = strdup(base_url->valuestring);
+            }
+
             cJSON_Delete(root);
         } else {
             fprintf(stderr, "Error parsing config.json: %s\n", cJSON_GetErrorPtr());
@@ -122,6 +132,10 @@ void config_cleanup(void) {
         free(g_config.workspace_dir);
         g_config.workspace_dir = NULL;
     }
+    if (g_config.base_url) {
+        free(g_config.base_url);
+        g_config.base_url = NULL;
+    }
 }
 
 void config_print(void) {
@@ -129,6 +143,7 @@ void config_print(void) {
     printf("  Gateway Port: %d\n", g_config.gateway_port);
     printf("  Workspace Dir: %s\n", g_config.workspace_dir);
     printf("  Browser Enabled: %s\n", g_config.browser_enabled ? "true" : "false");
+    printf("  Base URL: %s\n", g_config.base_url ? g_config.base_url : "(not set)");
 }
 
 bool config_set(const char *key, const char *value) {
@@ -150,6 +165,12 @@ bool config_set(const char *key, const char *value) {
     } else if (strcmp(key, "browser_enabled") == 0) {
         g_config.browser_enabled = (strcmp(value, "true") == 0 || strcmp(value, "1") == 0);
         return true;
+    } else if (strcmp(key, "base_url") == 0) {
+        if (g_config.base_url) {
+            free(g_config.base_url);
+        }
+        g_config.base_url = strdup(value);
+        return true;
     }
     return false;
 }
@@ -165,6 +186,8 @@ const char *config_get(const char *key) {
         return g_config.workspace_dir;
     } else if (strcmp(key, "browser_enabled") == 0) {
         return g_config.browser_enabled ? "true" : "false";
+    } else if (strcmp(key, "base_url") == 0) {
+        return g_config.base_url;
     }
     return NULL;
 }

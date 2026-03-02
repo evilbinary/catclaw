@@ -9,6 +9,7 @@ typedef struct {
     int gateway_port;
     char *workspace_dir;
     bool browser_enabled;
+    char *base_url;
 } Config;
 
 // Global config instance
