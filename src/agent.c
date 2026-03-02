@@ -371,6 +371,48 @@ char *agent_parse_command(const char *command) {
         agent_set_debug_mode(false);
         snprintf(result, 2048, "Debug mode disabled");
         return result;
+    } else if (strstr(command, "/model") == command) {
+        // Handle model switching command
+        char *model_name = command + 7; // Skip "/model "
+        if (*model_name) {
+            // Create temporary model config
+            AIModelConfig model_config;
+            if (strstr(model_name, "anthropic") != NULL) {
+                model_config.type = AI_MODEL_ANTHROPIC;
+                model_config.model_name = strstr(model_name, "/") ? strstr(model_name, "/") + 1 : model_name;
+            } else if (strstr(model_name, "openai") != NULL) {
+                model_config.type = AI_MODEL_OPENAI;
+                model_config.model_name = strstr(model_name, "/") ? strstr(model_name, "/") + 1 : model_name;
+            } else if (strstr(model_name, "llama") != NULL || strstr(model_name, "gemini") != NULL) {
+                if (strstr(model_name, "llama") != NULL) {
+                    model_config.type = AI_MODEL_LLAMA;
+                    model_config.model_name = strstr(model_name, "/") ? strstr(model_name, "/") + 1 : model_name;
+                } else {
+                    model_config.type = AI_MODEL_GEMINI;
+                    model_config.model_name = strstr(model_name, "/") ? strstr(model_name, "/") + 1 : model_name;
+                }
+            } else {
+                model_config.type = AI_MODEL_ANTHROPIC;
+                model_config.model_name = "claude-3-opus-20240229";
+            }
+            model_config.api_key = getenv("ANTHROPIC_API_KEY") ? getenv("ANTHROPIC_API_KEY") : getenv("OPENAI_API_KEY");
+            model_config.base_url = g_config.base_url;
+            
+            // Update AI model config
+            if (ai_model_set_config(&model_config)) {
+                // Update agent's model name for display
+                if (g_agent.model) {
+                    free(g_agent.model);
+                }
+                g_agent.model = strdup(model_name);
+                snprintf(result, 2048, "Model switched to: %s", model_name);
+            } else {
+                snprintf(result, 2048, "Error: Failed to switch model");
+            }
+        } else {
+            snprintf(result, 2048, "Usage: /model <model_name>");
+        }
+        return result;
     }
     
     // Simple command parsing
