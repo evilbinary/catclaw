@@ -8,7 +8,7 @@
 #ifdef HAVE_CURL
 #include <curl/curl.h>
 
-// Write callback function for curl
+// Write callback function for curl with streaming support
 static size_t write_callback(void *contents, size_t size, size_t nmemb, void *userp) {
     size_t realsize = size * nmemb;
     char **buffer = (char **)userp;
@@ -27,6 +27,25 @@ static size_t write_callback(void *contents, size_t size, size_t nmemb, void *us
 
     // Update buffer pointer
     *buffer = new_buffer;
+
+    // Process streaming data for Llama model
+    // Check if this is a streaming response line
+    char *line_start = new_buffer + current_len;
+    char *line_end = strchr(line_start, '\n');
+    if (line_end) {
+        *line_end = '\0';
+        cJSON *line_root = cJSON_Parse(line_start);
+        if (line_root) {
+            cJSON *response_obj = cJSON_GetObjectItem(line_root, "response");
+            if (response_obj && cJSON_IsString(response_obj)) {
+                // Print streaming response in real-time
+                printf("%s", response_obj->valuestring);
+                fflush(stdout);
+            }
+            cJSON_Delete(line_root);
+        }
+        *line_end = '\n'; // Restore newline
+    }
 
     return realsize;
 }
@@ -296,7 +315,7 @@ AIModelResponse *ai_model_send_message(const char *message) {
                 cJSON_AddStringToObject(root, "model", g_model_config.model_name ? g_model_config.model_name : "llama3");
                 cJSON_AddStringToObject(root, "prompt", message);
                 cJSON_AddNumberToObject(root, "max_tokens", 1024);
-                cJSON_AddBoolToObject(root, "stream", false);
+                cJSON_AddBoolToObject(root, "stream", true);
                 payload = cJSON_Print(root);
                 cJSON_Delete(root);
             }
@@ -385,9 +404,44 @@ AIModelResponse *ai_model_send_message(const char *message) {
 
                 case AI_MODEL_LLAMA:
                     {
-                        cJSON *response_obj = cJSON_GetObjectItem(root, "response");
-                        if (response_obj && cJSON_IsString(response_obj)) {
-                            response = create_response(response_obj->valuestring, true, NULL);
+                        // Handle streaming response (each line is a JSON object)
+                        char *line = strtok(response_buffer, "\n");
+                        char *full_response = NULL;
+                        size_t full_response_len = 0;
+
+                        while (line) {
+                            cJSON *line_root = cJSON_Parse(line);
+                            if (line_root) {
+                                // Check for response field in streaming format
+                                cJSON *response_obj = cJSON_GetObjectItem(line_root, "response");
+                                if (response_obj && cJSON_IsString(response_obj)) {
+                                    // Append to full response
+                                    size_t line_len = strlen(response_obj->valuestring);
+                                    char *new_response = (char *)realloc(full_response, full_response_len + line_len + 1);
+                                    if (new_response) {
+                                        if (full_response) {
+                                            strcat(new_response, response_obj->valuestring);
+                                        } else {
+                                            strcpy(new_response, response_obj->valuestring);
+                                        }
+                                        full_response = new_response;
+                                        full_response_len += line_len;
+                                    }
+                                }
+                                cJSON_Delete(line_root);
+                            }
+                            line = strtok(NULL, "\n");
+                        }
+
+                        if (full_response) {
+                            response = create_response(full_response, true, NULL);
+                            free(full_response);
+                        } else {
+                            // Fallback to non-streaming format
+                            cJSON *response_obj = cJSON_GetObjectItem(root, "response");
+                            if (response_obj && cJSON_IsString(response_obj)) {
+                                response = create_response(response_obj->valuestring, true, NULL);
+                            }
                         }
                     }
                     break;
