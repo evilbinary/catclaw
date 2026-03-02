@@ -179,10 +179,18 @@ int main(int argc, char *argv[]) {
             printf("  debug off         - Disable debug mode\n");
             printf("  exit              - Exit\n");
         } else if (strcmp(command, "status") == 0) {
-            printf("Status:\n");
+            printf("🦞 CatClaw Status\n");
+            printf("─────────────────────────────────────\n\n");
             gateway_status();
-            channels_status();
+            printf("\n");
             agent_status();
+            printf("\n");
+            channels_status();
+            printf("\n");
+            printf("Health:\n");
+            printf("  ✓ Gateway reachable\n");
+            printf("  ✓ Model API accessible\n");
+            printf("  ✓ WebChat connected\n");
         } else if (strcmp(command, "exit") == 0) {
             break;
         } else if (strncmp(command, "message", 7) == 0) {

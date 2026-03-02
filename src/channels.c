@@ -81,12 +81,11 @@ void channels_cleanup(void) {
 }
 
 void channels_status(void) {
-    printf("  Channels:\n");
+    printf("Channels:\n");
     for (int i = 0; i < CHANNEL_MAX; i++) {
-        printf("    %s: %s, %s\n", 
-               channels[i].name,
-               channels[i].enabled ? "enabled" : "disabled",
-               channels[i].connected ? "connected" : "disconnected");
+        if (channels[i].connected) {
+            printf("  %s: connected\n", channels[i].name);
+        }
     }
 }
 

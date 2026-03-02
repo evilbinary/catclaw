@@ -64,6 +64,8 @@ void gateway_cleanup(void) {
 }
 
 void gateway_status(void) {
-    printf("  Gateway: %s\n", g_gateway.running ? "running" : "stopped");
+    printf("Gateway:\n");
+    printf("  Status: %s\n", g_gateway.running ? "running" : "stopped");
     printf("  Port: %d\n", g_gateway.port);
+    printf("  Bind: 127.0.0.1\n");
 }

@@ -863,43 +863,24 @@ void agent_print_steps(void) {
 
 // Update agent_status to include multi-step execution status
 void agent_status(void) {
-    printf("  Agent: %s\n", g_agent.running ? "running" : "stopped");
+    printf("Agent:\n");
     printf("  Model: %s\n", g_agent.model);
-    printf("  Tools: %d\n", g_agent.tool_count);
-    printf("  Memory entries: %d\n", g_agent.memory_count);
-    printf("  Debug mode: %s\n", g_agent.debug_mode ? "enabled" : "disabled");
     
-    // Print status
-    const char *status_str;
-    switch (g_agent.status) {
-        case AGENT_STATUS_IDLE:
-            status_str = "Idle";
-            break;
-        case AGENT_STATUS_EXECUTING:
-            status_str = "Executing";
-            break;
-        case AGENT_STATUS_PAUSED:
-            status_str = "Paused";
-            break;
-        case AGENT_STATUS_ERROR:
-            status_str = "Error";
-            break;
-        default:
-            status_str = "Unknown";
-            break;
+    // Determine provider based on model
+    const char *provider = "unknown";
+    if (strstr(g_agent.model, "anthropic") != NULL) {
+        provider = "anthropic";
+    } else if (strstr(g_agent.model, "openai") != NULL) {
+        provider = "openai";
+    } else if (strstr(g_agent.model, "gemini") != NULL) {
+        provider = "gemini";
+    } else if (strstr(g_agent.model, "llama") != NULL) {
+        provider = "llama";
     }
-    printf("  Status: %s\n", status_str);
+    printf("  Provider: %s\n", provider);
     
-    // Print error message if any
-    if (g_agent.error_message) {
-        printf("  Error: %s\n", g_agent.error_message);
-    }
-    
-    // Print steps information
-    if (g_agent.step_count > 0) {
-        printf("  Steps: %d\n", g_agent.step_count);
-        printf("  Current step: %d\n", g_agent.current_step + 1);
-    }
+    // Show workspace
+    printf("  Workspace: ~/.catclaw/workspace\n");
 }
 
 // Skill functions
