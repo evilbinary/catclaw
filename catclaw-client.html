@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CatClaw Client</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            padding: 20px;
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+        }
+        .connection-status {
+            text-align: center;
+            margin-bottom: 20px;
+            padding: 10px;
+            border-radius: 4px;
+        }
+        .connected {
+            background-color: #d4edda;
+            color: #155724;
+        }
+        .disconnected {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+        .chat-container {
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            height: 400px;
+            overflow-y: auto;
+            padding: 10px;
+            margin-bottom: 10px;
+        }
+        .message {
+            margin-bottom: 10px;
+            padding: 8px 12px;
+            border-radius: 18px;
+            max-width: 70%;
+        }
+        .user-message {
+            background-color: #e3f2fd;
+            align-self: flex-end;
+            margin-left: auto;
+        }
+        .server-message {
+            background-color: #f1f0f0;
+            align-self: flex-start;
+        }
+        .input-container {
+            display: flex;
+        }
+        input {
+            flex: 1;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px 0 0 4px;
+        }
+        button {
+            padding: 10px 20px;
+            background-color: #2196f3;
+            color: white;
+            border: none;
+            border-radius: 0 4px 4px 0;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #1976d2;
+        }
+        .command-list {
+            margin-top: 20px;
+        }
+        h3 {
+            color: #555;
+        }
+        ul {
+            list-style-type: none;
+            padding: 0;
+        }
+        li {
+            margin-bottom: 5px;
+            padding: 5px;
+            background-color: #f9f9f9;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>CatClaw Web Client</h1>
+        
+        <div class="connection-status disconnected" id="status">
+            未连接到服务器
+        </div>
+        
+        <div class="chat-container" id="chat">
+            <div class="message server-message">
+                欢迎使用CatClaw Web客户端！请点击连接按钮连接到服务器。
+            </div>
+        </div>
+        
+        <div class="input-container">
+            <input type="text" id="messageInput" placeholder="输入消息或命令...">
+            <button id="sendBtn">发送</button>
+        </div>
+        
+        <div class="command-list">
+            <h3>常用命令：</h3>
+            <ul>
+                <li>help - 显示帮助信息</li>
+                <li>status - 显示系统状态</li>
+                <li>calculate 表达式 - 计算数学表达式</li>
+                <li>time - 获取当前时间</li>
+                <li>search 查询词 - 搜索信息</li>
+                <li>memory save 键 值 - 保存记忆</li>
+                <li>memory load 键 - 加载记忆</li>
+            </ul>
+        </div>
+    </div>
+    
+    <script>
+        let socket;
+        const statusElement = document.getElementById('status');
+        const chatElement = document.getElementById('chat');
+        const messageInput = document.getElementById('messageInput');
+        const sendBtn = document.getElementById('sendBtn');
+        
+        // 连接到WebSocket服务器
+        function connect() {
+            // 默认端口是18789
+            socket = new WebSocket('ws://localhost:18789');
+            
+            socket.onopen = function() {
+                statusElement.className = 'connection-status connected';
+                statusElement.textContent = '已连接到服务器';
+                addMessage('server', '已成功连接到CatClaw服务器！');
+            };
+            
+            socket.onmessage = function(event) {
+                addMessage('server', event.data);
+            };
+            
+            socket.onclose = function() {
+                statusElement.className = 'connection-status disconnected';
+                statusElement.textContent = '已断开连接';
+                addMessage('server', '与服务器的连接已断开');
+            };
+            
+            socket.onerror = function(error) {
+                console.error('WebSocket错误:', error);
+                addMessage('server', '连接错误，请检查服务器是否运行');
+            };
+        }
+        
+        // 发送消息
+        function sendMessage() {
+            const message = messageInput.value.trim();
+            if (message && socket && socket.readyState === WebSocket.OPEN) {
+                socket.send(message);
+                addMessage('user', message);
+                messageInput.value = '';
+            } else if (!socket || socket.readyState !== WebSocket.OPEN) {
+                addMessage('server', '未连接到服务器，请先连接');
+            }
+        }
+        
+        // 添加消息到聊天界面
+        function addMessage(type, content) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${type}-message`;
+            messageDiv.textContent = content;
+            chatElement.appendChild(messageDiv);
+            chatElement.scrollTop = chatElement.scrollHeight;
+        }
+        
+        // 事件监听器
+        sendBtn.addEventListener('click', sendMessage);
+        messageInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                sendMessage();
+            }
+        });
+        
+        // 页面加载时自动连接
+        window.onload = function() {
+            connect();
+        };
+    </script>
+</body>
+</html>

@@ -283,6 +283,129 @@ bool websocket_send(WebSocketConnection *conn, const char *message) {
     return websocket_send_frame(conn, message, strlen(message));
 }
 
+// Base64 encoding function
+static void base64_encode(const unsigned char *input, int length, char *output) {
+    const char base64_chars[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    int i, j;
+    unsigned char three_bytes[3];
+    int output_index = 0;
+
+    for (i = 0; i < length; i += 3) {
+        // Read up to 3 bytes
+        three_bytes[0] = (i < length) ? input[i] : 0;
+        three_bytes[1] = (i + 1 < length) ? input[i + 1] : 0;
+        three_bytes[2] = (i + 2 < length) ? input[i + 2] : 0;
+
+        // Encode into 4 bytes
+        output[output_index++] = base64_chars[three_bytes[0] >> 2];
+        output[output_index++] = base64_chars[((three_bytes[0] & 0x03) << 4) | (three_bytes[1] >> 4)];
+        output[output_index++] = base64_chars[((three_bytes[1] & 0x0F) << 2) | (three_bytes[2] >> 6)];
+        output[output_index++] = base64_chars[three_bytes[2] & 0x3F];
+    }
+
+    // Pad with '=' if necessary
+    if (length % 3 == 1) {
+        output[output_index - 2] = '=';
+        output[output_index - 1] = '=';
+    } else if (length % 3 == 2) {
+        output[output_index - 1] = '=';
+    }
+
+    output[output_index] = '\0';
+}
+
+// Simple SHA-1 implementation (from RFC 3174)
+static void sha1(const unsigned char *input, int length, unsigned char *output) {
+    uint32_t h0 = 0x67452301;
+    uint32_t h1 = 0xEFCDAB89;
+    uint32_t h2 = 0x98BADCFE;
+    uint32_t h3 = 0x10325476;
+    uint32_t h4 = 0xC3D2E1F0;
+
+    // Pad the input
+    unsigned char padded[1024];
+    memcpy(padded, input, length);
+    padded[length] = 0x80;
+    int padded_length = length + 1;
+    while (padded_length % 64 != 56) {
+        padded[padded_length++] = 0x00;
+    }
+    uint64_t bit_length = (uint64_t)length * 8;
+    for (int i = 0; i < 8; i++) {
+        padded[padded_length++] = (bit_length >> (56 - i * 8)) & 0xFF;
+    }
+
+    // Process each 512-bit block
+    for (int i = 0; i < padded_length; i += 64) {
+        uint32_t w[80];
+        for (int j = 0; j < 16; j++) {
+            w[j] = (padded[i + j * 4] << 24) | (padded[i + j * 4 + 1] << 16) | (padded[i + j * 4 + 2] << 8) | padded[i + j * 4 + 3];
+        }
+        for (int j = 16; j < 80; j++) {
+            w[j] = (w[j - 3] ^ w[j - 8] ^ w[j - 14] ^ w[j - 16]);
+            w[j] = (w[j] << 1) | (w[j] >> 31);
+        }
+
+        uint32_t a = h0;
+        uint32_t b = h1;
+        uint32_t c = h2;
+        uint32_t d = h3;
+        uint32_t e = h4;
+
+        for (int j = 0; j < 80; j++) {
+            uint32_t f, k;
+            if (j < 20) {
+                f = (b & c) | ((~b) & d);
+                k = 0x5A827999;
+            } else if (j < 40) {
+                f = b ^ c ^ d;
+                k = 0x6ED9EBA1;
+            } else if (j < 60) {
+                f = (b & c) | (b & d) | (c & d);
+                k = 0x8F1BBCDC;
+            } else {
+                f = b ^ c ^ d;
+                k = 0xCA62C1D6;
+            }
+
+            uint32_t temp = ((a << 5) | (a >> 27)) + f + e + k + w[j];
+            e = d;
+            d = c;
+            c = (b << 30) | (b >> 2);
+            b = a;
+            a = temp;
+        }
+
+        h0 += a;
+        h1 += b;
+        h2 += c;
+        h3 += d;
+        h4 += e;
+    }
+
+    // Output the hash
+    output[0] = (h0 >> 24) & 0xFF;
+    output[1] = (h0 >> 16) & 0xFF;
+    output[2] = (h0 >> 8) & 0xFF;
+    output[3] = h0 & 0xFF;
+    output[4] = (h1 >> 24) & 0xFF;
+    output[5] = (h1 >> 16) & 0xFF;
+    output[6] = (h1 >> 8) & 0xFF;
+    output[7] = h1 & 0xFF;
+    output[8] = (h2 >> 24) & 0xFF;
+    output[9] = (h2 >> 16) & 0xFF;
+    output[10] = (h2 >> 8) & 0xFF;
+    output[11] = h2 & 0xFF;
+    output[12] = (h3 >> 24) & 0xFF;
+    output[13] = (h3 >> 16) & 0xFF;
+    output[14] = (h3 >> 8) & 0xFF;
+    output[15] = h3 & 0xFF;
+    output[16] = (h4 >> 24) & 0xFF;
+    output[17] = (h4 >> 16) & 0xFF;
+    output[18] = (h4 >> 8) & 0xFF;
+    output[19] = h4 & 0xFF;
+}
+
 static bool websocket_handshake(WebSocketConnection *conn) {
     // Look for end of HTTP request
     char *end = strstr(conn->buffer, "\r\n\r\n");
@@ -310,13 +433,23 @@ static bool websocket_handshake(WebSocketConnection *conn) {
     strncpy(key, key_start, key_len);
     key[key_len] = '\0';
 
-    // Generate response key (simplified - in real implementation use SHA-1)
-    char response[256];
+    // Generate response key
+    char combined[512];
+    snprintf(combined, sizeof(combined), "%s258EAFA5-E914-47DA-95CA-C5AB0DC85B11", key);
+    
+    unsigned char hash[20];
+    sha1((unsigned char *)combined, strlen(combined), hash);
+    
+    char base64_hash[30];
+    base64_encode(hash, 20, base64_hash);
+
+    // Generate response
+    char response[512];
     snprintf(response, sizeof(response), "HTTP/1.1 101 Switching Protocols\r\n" 
              "Upgrade: websocket\r\n" 
              "Connection: Upgrade\r\n" 
-             "Sec-WebSocket-Accept: dGhlIHNhbXBsZSBub25jZQ==\r\n" 
-             "\r\n");
+             "Sec-WebSocket-Accept: %s\r\n" 
+             "\r\n", base64_hash);
 
     // Send response
     send(conn->socket, response, strlen(response), 0);
