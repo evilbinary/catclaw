@@ -371,7 +371,7 @@ char *agent_parse_command(const char *command) {
         agent_set_debug_mode(false);
         snprintf(result, 2048, "Debug mode disabled");
         return result;
-    } else if (strstr(command, "/model") == command) {
+    } else if (strstr(command, "model") == command) {
         // Handle model switching command
         char *model_name = command + 7; // Skip "/model "
         if (*model_name) {
