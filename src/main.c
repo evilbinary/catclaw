@@ -428,11 +428,8 @@ int main(int argc, char *argv[]) {
                 }
             } else {
                 // Conversation mode: input does not start with /
-                char *result = agent_parse_command(command);
-                if (result) {
-                    printf("%s\n", result);
-                    free(result);
-                }
+                // Send message to agent for processing
+                agent_send_message(command);
             }
         }
     }

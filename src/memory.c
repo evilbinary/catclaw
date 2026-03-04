@@ -4,6 +4,14 @@
 #include <time.h>
 #include <sys/stat.h>
 
+#ifdef _WIN32
+#include <direct.h>
+#define MKDIR(path) _mkdir(path)
+#else
+#include <sys/types.h>
+#define MKDIR(path) mkdir(path, 0755)
+#endif
+
 #include "memory.h"
 #include "cJSON.h"
 
@@ -225,7 +233,7 @@ bool memory_save(MemoryManager* manager) {
     // Create memory directory if it doesn't exist
     struct stat st;
     if (stat(manager->memory_dir, &st) != 0) {
-        if (mkdir(manager->memory_dir, 0755) != 0) {
+        if (MKDIR(manager->memory_dir) != 0) {
             return false;
         }
     }

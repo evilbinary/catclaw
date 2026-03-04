@@ -20,7 +20,7 @@ typedef struct {
 
 // Message list structure
 typedef struct {
-    Message* messages;
+    Message** messages;
     int count;
     int capacity;
 } MessageList;

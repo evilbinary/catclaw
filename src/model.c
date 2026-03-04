@@ -30,7 +30,7 @@ static char* build_api_request(const char* model, MessageList* context) {
     
     cJSON* messages = cJSON_CreateArray();
     for (int i = 0; i < context->count; i++) {
-        Message* msg = &context->messages[i];
+        Message* msg = context->messages[i];
         cJSON* message = cJSON_CreateObject();
         
         switch (msg->role) {

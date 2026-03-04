@@ -28,6 +28,10 @@ Agent g_agent = {
     .current_step = 0
 };
 
+// Worker thread
+static pthread_t g_worker_thread;
+static bool g_worker_thread_running = false;
+
 // Debug logging helper
 static void debug_log(const char *format, ...) {
     if (g_agent.debug_mode) {
@@ -122,76 +126,88 @@ static char *tool_time(const char *params) {
 }
 
 // String reverse tool
-static char *tool_reverse_string(const char *params) {
-    debug_log("Reverse string tool called with params: %s", params);
-    char *result = (char *)malloc(strlen(params) + 2);
-    if (!result) {
-        return "Error: Memory allocation failed";
+static int tool_reverse_string_impl(const char *args, char **result, int *result_len) {
+    debug_log("Reverse string tool called with args: %s", args);
+    *result = (char *)malloc(strlen(args) + 2);
+    if (!*result) {
+        *result = strdup("Error: Memory allocation failed");
+        *result_len = strlen(*result);
+        return -1;
     }
     
-    int len = strlen(params);
+    int len = strlen(args);
     for (int i = 0; i < len; i++) {
-        result[i] = params[len - i - 1];
+        (*result)[i] = args[len - i - 1];
     }
-    result[len] = '\0';
+    (*result)[len] = '\0';
+    *result_len = len;
     
-    return result;
+    return 0;
 }
 
 // File read tool
-static char *tool_read_file(const char *params) {
-    debug_log("Read file tool called with params: %s", params);
-    char *result = (char *)malloc(4096);
-    if (!result) {
-        return "Error: Memory allocation failed";
+static int tool_read_file_impl(const char *args, char **result, int *result_len) {
+    debug_log("Read file tool called with args: %s", args);
+    *result = (char *)malloc(4096);
+    if (!*result) {
+        *result = strdup("Error: Memory allocation failed");
+        *result_len = strlen(*result);
+        return -1;
     }
     
-    FILE *file = fopen(params, "r");
+    FILE *file = fopen(args, "r");
     if (!file) {
-        snprintf(result, 4096, "Error: Could not open file %s", params);
-        return result;
+        snprintf(*result, 4096, "Error: Could not open file %s", args);
+        *result_len = strlen(*result);
+        return -1;
     }
     
-    size_t read_bytes = fread(result, 1, 4095, file);
-    result[read_bytes] = '\0';
+    size_t read_bytes = fread(*result, 1, 4095, file);
+    (*result)[read_bytes] = '\0';
     fclose(file);
+    *result_len = read_bytes;
     
-    return result;
+    return 0;
 }
 
 // File write tool
-static char *tool_write_file(const char *params) {
-    debug_log("Write file tool called with params: %s", params);
-    char *result = (char *)malloc(256);
-    if (!result) {
-        return "Error: Memory allocation failed";
+static int tool_write_file_impl(const char *args, char **result, int *result_len) {
+    debug_log("Write file tool called with args: %s", args);
+    *result = (char *)malloc(256);
+    if (!*result) {
+        *result = strdup("Error: Memory allocation failed");
+        *result_len = strlen(*result);
+        return -1;
     }
     
-    // Split params into filename and content
-    char *space_pos = strchr(params, ' ');
+    // Split args into filename and content
+    char *space_pos = strchr(args, ' ');
     if (!space_pos) {
-        snprintf(result, 256, "Error: Invalid format. Use 'filename content'");
-        return result;
+        snprintf(*result, 256, "Error: Invalid format. Use 'filename content'");
+        *result_len = strlen(*result);
+        return -1;
     }
     
-    char *filename = (char *)malloc(space_pos - params + 1);
-    strncpy(filename, params, space_pos - params);
-    filename[space_pos - params] = '\0';
+    char *filename = (char *)malloc(space_pos - args + 1);
+    strncpy(filename, args, space_pos - args);
+    filename[space_pos - args] = '\0';
     char *content = space_pos + 1;
     
     FILE *file = fopen(filename, "w");
     if (!file) {
-        snprintf(result, 256, "Error: Could not open file %s for writing", filename);
+        snprintf(*result, 256, "Error: Could not open file %s for writing", filename);
         free(filename);
-        return result;
+        *result_len = strlen(*result);
+        return -1;
     }
     
     fprintf(file, "%s", content);
     fclose(file);
     free(filename);
     
-    snprintf(result, 256, "Successfully wrote to file %s", params);
-    return result;
+    snprintf(*result, 256, "Successfully wrote to file %s", args);
+    *result_len = strlen(*result);
+    return 0;
 }
 
 // Simulated web search tool
@@ -339,7 +355,7 @@ char *agent_parse_command(const char *command) {
                 model_config.model_name = "claude-3-opus-20240229";
             }
             model_config.api_key = getenv("ANTHROPIC_API_KEY") ? getenv("ANTHROPIC_API_KEY") : getenv("OPENAI_API_KEY");
-            model_config.base_url = g_config.base_url;
+            model_config.base_url = g_config.api_base_url;
             
             // Update AI model config
             if (ai_model_set_config(&model_config)) {
@@ -555,7 +571,9 @@ bool agent_init(void) {
 
     // Create model string from provider and name
     char model[256];
-    snprintf(model, sizeof(model), "%s/%s", g_config.model_provider, g_config.model_name);
+    const char* model_provider = g_config.model_provider ? g_config.model_provider : "anthropic";
+    const char* model_name = g_config.model_name ? g_config.model_name : "claude-3-opus-20240229";
+    snprintf(model, sizeof(model), "%s/%s", model_provider, model_name);
     g_agent.model = strdup(model);
     if (!g_agent.model) {
         perror("strdup");
@@ -565,13 +583,14 @@ bool agent_init(void) {
 
     // Initialize AI model
     AIModelConfig model_config;
-    if (strcmp(g_config.model_provider, "anthropic") == 0) {
+    const char* provider = g_config.model_provider ? g_config.model_provider : "anthropic";
+    if (strcmp(provider, "anthropic") == 0) {
         model_config.type = AI_MODEL_ANTHROPIC;
-    } else if (strcmp(g_config.model_provider, "openai") == 0) {
+    } else if (strcmp(provider, "openai") == 0) {
         model_config.type = AI_MODEL_OPENAI;
-    } else if (strcmp(g_config.model_provider, "llama") == 0) {
+    } else if (strcmp(provider, "llama") == 0) {
         model_config.type = AI_MODEL_LLAMA;
-    } else if (strcmp(g_config.model_provider, "gemini") == 0) {
+    } else if (strcmp(provider, "gemini") == 0) {
         model_config.type = AI_MODEL_GEMINI;
     } else {
         model_config.type = AI_MODEL_ANTHROPIC;
@@ -651,20 +670,32 @@ bool agent_init(void) {
     // Register default tools
     agent_register_tool("calculator", "Perform basic arithmetic calculations", NULL, tool_calculate);
     agent_register_tool("time", "Get current time", NULL, tool_get_time);
-    agent_register_tool("reverse_string", "Reverse a string", NULL, tool_reverse_string);
-    agent_register_tool("read_file", "Read a file from disk", NULL, tool_read_file);
-    agent_register_tool("write_file", "Write content to a file", NULL, tool_write_file);
+    agent_register_tool("reverse_string", "Reverse a string", NULL, tool_reverse_string_impl);
+    agent_register_tool("read_file", "Read a file from disk", NULL, tool_read_file_impl);
+    agent_register_tool("write_file", "Write content to a file", NULL, tool_write_file_impl);
     agent_register_tool("web_search", "Simulate web search", NULL, tool_search_web);
     agent_register_tool("memory_save", "Save a key-value pair to memory", NULL, tool_save_memory);
     agent_register_tool("memory_load", "Load a value from memory by key", NULL, tool_read_memory);
 
     g_agent.running = true;
+    
+    // Start worker thread
+    if (!agent_start_worker_thread()) {
+        fprintf(stderr, "Failed to start worker thread\n");
+        // Cleanup resources
+        agent_cleanup();
+        return false;
+    }
+    
     printf("Agent initialized with model: %s\n", g_agent.model);
     agent_list_tools();
     return true;
 }
 
 void agent_cleanup(void) {
+    // Stop worker thread
+    agent_stop_worker_thread();
+
     if (g_agent.model) {
         free(g_agent.model);
         g_agent.model = NULL;
@@ -725,14 +756,29 @@ bool agent_send_message(const char *message) {
 
     printf("Agent received message: %s\n", message);
 
-    // Parse command and execute
-    char *result = agent_parse_command(message);
-    printf("Agent response: %s\n", result);
-    
-    // Send response to WebChat channel
-    channel_send_message(CHANNEL_WEBCHAT, result);
-    
-    free(result);
+    // Create a new message
+    Message *msg = message_create(ROLE_USER, message);
+    if (!msg) {
+        fprintf(stderr, "Failed to create message\n");
+        return false;
+    }
+
+    // Create a queue item
+    QueueItem *item = queue_item_create("default", msg, QUEUE_MODE_COLLECT);
+    if (!item) {
+        message_destroy(msg);
+        fprintf(stderr, "Failed to create queue item\n");
+        return false;
+    }
+
+    // Enqueue the message
+    if (!queue_enqueue(g_agent.message_queue, item)) {
+        queue_item_destroy(item);
+        fprintf(stderr, "Failed to enqueue message\n");
+        return false;
+    }
+
+    printf("Message enqueued for processing\n");
     return true;
 }
 
@@ -981,4 +1027,31 @@ bool agent_enable_skill(const char *name) {
 
 bool agent_disable_skill(const char *name) {
     return skill_disable(name);
+}
+
+// Start worker thread (using context.c implementation)
+bool agent_start_worker_thread(void) {
+    // For now, use the legacy implementation
+    // In the future, this should use agent_node_start_worker
+    if (g_worker_thread_running) {
+        printf("Worker thread is already running\n");
+        return true;
+    }
+
+    g_worker_thread_running = true;
+    // Note: The actual worker thread implementation is in context.c
+    // This is a placeholder that will be replaced when fully migrating to AgentNode
+    printf("Worker thread started (legacy mode)\n");
+    return true;
+}
+
+// Stop worker thread
+void agent_stop_worker_thread(void) {
+    if (!g_worker_thread_running) {
+        printf("Worker thread is not running\n");
+        return;
+    }
+
+    g_worker_thread_running = false;
+    printf("Worker thread stopped (legacy mode)\n");
 }

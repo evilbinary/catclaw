@@ -21,7 +21,7 @@ typedef struct {
 
 // Message queue structure
 typedef struct {
-    QueueItem* items;
+    QueueItem** items;
     int front;
     int rear;
     int count;

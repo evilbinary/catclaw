@@ -8,10 +8,6 @@
 #include "tool.h"
 #include "memory.h"
 
-
-
-
-
 // Step structure for multi-step execution
 typedef struct {
     char *id;
@@ -87,5 +83,9 @@ bool agent_disable_skill(const char *name);
 
 // Command parsing function
 char *agent_parse_command(const char *command);
+
+// Worker thread functions
+bool agent_start_worker_thread(void);
+void agent_stop_worker_thread(void);
 
 #endif // AGENT_H

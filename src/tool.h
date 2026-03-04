@@ -11,7 +11,7 @@ typedef struct {
 
 // Tool registry structure
 typedef struct {
-    Tool* tools;
+    Tool** tools;
     int count;
     int capacity;
 } ToolRegistry;
