@@ -1,4 +1,4 @@
-# Mini OpenClaw 核心功能与流程设计
+# CatClaw 核心功能与流程设计
 
 ## 一、核心功能
 

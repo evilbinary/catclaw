@@ -1,4 +1,4 @@
-# Mini OpenClaw (C 语言版) 详细设计文档
+# CatClaw (C 语言版) 详细设计文档
 
 ## 一、项目概述
 
@@ -161,7 +161,7 @@ typedef struct {
 ```c
 int main(int argc, char* argv[]) {
     // 1. 加载配置
-    Config* config = config_load("~/.mini-openclaw/config.json");
+    Config* config = config_load("~/.catclaw/config.json");
     if (!config) {
         fprintf(stderr, "Failed to load config\n");
         return 1;
@@ -351,7 +351,7 @@ void* worker_thread(void* arg) {
 
 **会话文件格式：**
 ```
-~/.mini-openclaw/
+~/.catclaw/
 ├── config.json
 ├── workspace/
 │   ├── AGENTS.md
@@ -620,7 +620,7 @@ Content-Type: application/json
 ## 五、目录结构设计
 
 ```
-mini-openclaw/
+catclaw/
 ├── src/
 │   ├── main.c              # 主入口
 │   ├── config.c/h          # 配置管理
@@ -637,7 +637,7 @@ mini-openclaw/
 │   ├── cli.c/h             # CLI 界面
 │   └── util.c/h            # 工具函数
 ├── include/
-│   └── mini-openclaw/      # 公共头文件
+│   └── catclaw/      # 公共头文件
 ├── tests/
 │   ├── test_config.c
 │   ├── test_session.c
@@ -645,7 +645,6 @@ mini-openclaw/
 │   └── test_queue.c
 ├── examples/
 │   └── workspace/           # 示例工作区
-├── CMakeLists.txt           # CMake 构建文件
 ├── Makefile                 # Make 构建文件
 └── README.md
 ```
@@ -678,7 +677,7 @@ mini-openclaw/
 
 ## 七、API 设计
 
-### 7.1 公共 API (mini-openclaw.h)
+### 7.1 公共 API (catclaw.h)
 
 ```c
 #ifndef MINI_OPENCLAW_H
@@ -716,22 +715,22 @@ const char* get_config(const char* key);
 
 ```bash
 # 启动交互模式
-mini-openclaw
+catclaw
 
 # 发送单条消息
-mini-openclaw --message "你好"
+catclaw --message "你好"
 
 # 指定会话
-mini-openclaw --session "agent:main:main"
+catclaw --session "agent:main:main"
 
 # 指定配置文件
-mini-openclaw --config ~/.mini-openclaw/config.json
+catclaw --config ~/.catclaw/config.json
 
 # 列出会话
-mini-openclaw --list-sessions
+catclaw --list-sessions
 
 # 删除会话
-mini-openclaw --delete-session "agent:main:main"
+catclaw --delete-session "agent:main:main"
 ```
 
 ---
@@ -742,7 +741,7 @@ mini-openclaw --delete-session "agent:main:main"
 
 ```json
 {
-  "workspace": "~/.mini-openclaw/workspace",
+  "workspace": "~/.catclaw/workspace",
   "model": {
     "provider": "openai",
     "name": "gpt-3.5-turbo",
@@ -841,7 +840,7 @@ mini-openclaw --delete-session "agent:main:main"
 ### 11.1 API 密钥安全
 - 配置文件权限：0600
 - 不在日志中打印 API 密钥
-- 支持环境变量：`MINI_OPENCLAW_API_KEY`
+- 支持环境变量：`CATCLAW_API_KEY`
 
 ### 11.2 工具执行安全
 - 默认禁用 exec 工具
