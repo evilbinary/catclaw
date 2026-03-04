@@ -134,14 +134,14 @@ bool session_save(Session* session, const char* sessions_dir) {
     
     // Create session metadata object
     cJSON* session_metadata = cJSON_CreateObject();
-    cJSON_AddStringToObject(session_metadata, "sessionId", session->session_id);
-    cJSON_AddStringToObject(session_metadata, "sessionKey", session->session_key);
+    cJSON_AddStringToObject(session_metadata, "sessionId", session->session_id ? session->session_id : "");
+    cJSON_AddStringToObject(session_metadata, "sessionKey", session->session_key ? session->session_key : "");
     cJSON_AddNumberToObject(session_metadata, "createdAt", session->created_at);
     cJSON_AddNumberToObject(session_metadata, "updatedAt", session->updated_at);
     cJSON_AddNumberToObject(session_metadata, "compactionCount", session->compaction_count);
     
     // Add to root
-    cJSON_AddItemToObject(metadata_root, session->session_key, session_metadata);
+    cJSON_AddItemToObject(metadata_root, session->session_key ? session->session_key : "default", session_metadata);
     
     // Write back
     char* metadata_json = cJSON_PrintUnformatted(metadata_root);

@@ -169,10 +169,8 @@ char* message_to_json(const Message* message) {
     }
     cJSON_AddStringToObject(root, "role", role_str);
     
-    // Content
-    if (message->content) {
-        cJSON_AddStringToObject(root, "content", message->content);
-    }
+    // Content (use empty string if NULL)
+    cJSON_AddStringToObject(root, "content", message->content ? message->content : "");
     
     // Tool name (for tool messages)
     if (message->tool_name) {
@@ -264,6 +262,7 @@ char* message_list_to_jsonl(const MessageList* list) {
     // Calculate total length
     int total_length = 0;
     for (int i = 0; i < list->count; i++) {
+        if (!list->messages[i]) continue;  // Skip NULL messages
         char* json = message_to_json(list->messages[i]);
         if (json) {
             total_length += strlen(json) + 1; // +1 for newline
@@ -280,6 +279,7 @@ char* message_list_to_jsonl(const MessageList* list) {
     // Build JSONL
     char* ptr = jsonl;
     for (int i = 0; i < list->count; i++) {
+        if (!list->messages[i]) continue;  // Skip NULL messages
         char* json = message_to_json(list->messages[i]);
         if (json) {
             strcpy(ptr, json);
