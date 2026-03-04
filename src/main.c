@@ -345,47 +345,19 @@ int main(int argc, char *argv[]) {
                         printf("Usage: /model set <model>\n");
                     }
                 } else if (strncmp(cmd, "model", 5) == 0 && cmd[5] == ' ') {
-                    // Handle temporary model switching: /model <model_name>
-                    char *model_name = cmd + 6;
-                    if (*model_name) {
-                        // Create temporary model config
-                        AIModelConfig model_config;
-                        if (strstr(model_name, "anthropic") != NULL) {
-                            model_config.type = AI_MODEL_ANTHROPIC;
-                            model_config.model_name = strstr(model_name, "/") ? strstr(model_name, "/") + 1 : model_name;
-                        } else if (strstr(model_name, "openai") != NULL) {
-                            model_config.type = AI_MODEL_OPENAI;
-                            model_config.model_name = strstr(model_name, "/") ? strstr(model_name, "/") + 1 : model_name;
-                        } else if (strstr(model_name, "llama") != NULL || strstr(model_name, "gemini") != NULL) {
-                            if (strstr(model_name, "llama") != NULL) {
-                                model_config.type = AI_MODEL_LLAMA;
-                                model_config.model_name = strstr(model_name, "/") ? strstr(model_name, "/") + 1 : model_name;
-                            } else {
-                                model_config.type = AI_MODEL_GEMINI;
-                                model_config.model_name = strstr(model_name, "/") ? strstr(model_name, "/") + 1 : model_name;
+                        // Handle temporary model switching: /model <model_name>
+                        char *model_name = cmd + 6;
+                        if (*model_name) {
+                            // Let agent_parse_command handle model switching
+                            char *result = agent_parse_command(cmd);
+                            if (result) {
+                                printf("%s\n", result);
+                                free(result);
                             }
                         } else {
-                            model_config.type = AI_MODEL_ANTHROPIC;
-                            model_config.model_name = "claude-3-opus-20240229";
+                            printf("Usage: /model <model_name>\n");
                         }
-                        model_config.api_key = getenv("ANTHROPIC_API_KEY") ? getenv("ANTHROPIC_API_KEY") : getenv("OPENAI_API_KEY");
-                        model_config.base_url = g_config.base_url;
-                        
-                        // Update AI model config
-                        if (ai_model_set_config(&model_config)) {
-                            // Update agent's model name for display
-                            if (g_agent.model) {
-                                free(g_agent.model);
-                            }
-                            g_agent.model = strdup(model_name);
-                            printf("Model switched to: %s\n", model_name);
-                        } else {
-                            printf("Error: Failed to switch model\n");
-                        }
-                    } else {
-                        printf("Usage: /model <model_name>\n");
-                    }
-                } else if (strcmp(cmd, "system restart") == 0) {
+                    } else if (strcmp(cmd, "system restart") == 0) {
                     printf("Restarting CatClaw...\n");
                     // TODO: Implement actual restart functionality
                     printf("Restart functionality not yet implemented\n");

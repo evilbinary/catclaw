@@ -2,19 +2,15 @@
 #define AGENT_H
 
 #include <stdbool.h>
+#include "message.h"
+#include "session.h"
+#include "queue.h"
+#include "tool.h"
+#include "memory.h"
 
-// Tool structure
-typedef struct {
-    char *name;
-    char *description;
-    char *(*execute)(const char *params);
-} Tool;
 
-// Memory entry structure
-typedef struct {
-    char *key;
-    char *value;
-} MemoryEntry;
+
+
 
 // Step structure for multi-step execution
 typedef struct {
@@ -41,12 +37,10 @@ typedef struct {
     bool debug_mode;
     AgentStatus status;
     char *error_message;
-    Tool *tools;
-    int tool_count;
-    int tool_capacity;
-    MemoryEntry *memory;
-    int memory_count;
-    int memory_capacity;
+    SessionManager* session_manager;
+    MessageQueue* message_queue;
+    ToolRegistry* tool_registry;
+    MemoryManager* memory_manager;
     Step *steps;
     int step_count;
     int step_capacity;
@@ -61,8 +55,8 @@ bool agent_init(void);
 void agent_cleanup(void);
 void agent_status(void);
 bool agent_send_message(const char *message);
-bool agent_register_tool(const char *name, const char *description, char *(*execute)(const char *params));
-char *agent_execute_tool(const char *name, const char *params);
+bool agent_register_tool(const char *name, const char *description, const char *parameters_schema, int (*execute)(const char *args, char** result, int* result_len));
+int agent_execute_tool(const char *name, const char *args, char** result, int* result_len);
 void agent_list_tools(void);
 void agent_set_debug_mode(bool enabled);
 bool agent_memory_set(const char *key, const char *value);

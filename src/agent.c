@@ -3,6 +3,7 @@
 #include "channels.h"
 #include "ai_model.h"
 #include "skill.h"
+#include "workspace.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -17,12 +18,10 @@ Agent g_agent = {
     .debug_mode = false,
     .status = AGENT_STATUS_IDLE,
     .error_message = NULL,
-    .tools = NULL,
-    .tool_count = 0,
-    .tool_capacity = 20,
-    .memory = NULL,
-    .memory_count = 0,
-    .memory_capacity = 50,
+    .session_manager = NULL,
+    .message_queue = NULL,
+    .tool_registry = NULL,
+    .memory_manager = NULL,
     .steps = NULL,
     .step_count = 0,
     .step_capacity = 10,
@@ -44,53 +43,18 @@ static void debug_log(const char *format, ...) {
 // Memory system functions
 bool agent_memory_set(const char *key, const char *value) {
     debug_log("Memory set: %s = %s", key, value);
-    
-    // Check if key already exists
-    for (int i = 0; i < g_agent.memory_count; i++) {
-        if (strcmp(g_agent.memory[i].key, key) == 0) {
-            free(g_agent.memory[i].value);
-            g_agent.memory[i].value = strdup(value);
-            return true;
-        }
-    }
-    
-    // Resize memory array if needed
-    if (g_agent.memory_count >= g_agent.memory_capacity) {
-        g_agent.memory_capacity *= 2;
-        MemoryEntry *new_memory = (MemoryEntry *)realloc(g_agent.memory, sizeof(MemoryEntry) * g_agent.memory_capacity);
-        if (!new_memory) {
-            return false;
-        }
-        g_agent.memory = new_memory;
-    }
-    
-    // Add new entry
-    g_agent.memory[g_agent.memory_count].key = strdup(key);
-    g_agent.memory[g_agent.memory_count].value = strdup(value);
-    g_agent.memory_count++;
-    
-    return true;
+    return memory_set(g_agent.memory_manager, key, value);
 }
 
 char *agent_memory_get(const char *key) {
-    for (int i = 0; i < g_agent.memory_count; i++) {
-        if (strcmp(g_agent.memory[i].key, key) == 0) {
-            debug_log("Memory get: %s = %s", key, g_agent.memory[i].value);
-            return g_agent.memory[i].value;
-        }
-    }
-    debug_log("Memory get: %s not found", key);
-    return NULL;
+    char *value = memory_get(g_agent.memory_manager, key);
+    debug_log("Memory get: %s = %s", key, value);
+    return value;
 }
 
 bool agent_memory_clear(void) {
     debug_log("Memory clear: clearing all entries");
-    for (int i = 0; i < g_agent.memory_count; i++) {
-        free(g_agent.memory[i].key);
-        free(g_agent.memory[i].value);
-    }
-    g_agent.memory_count = 0;
-    return true;
+    return memory_clear(g_agent.memory_manager);
 }
 
 void agent_set_debug_mode(bool enabled) {
@@ -297,59 +261,38 @@ static char *tool_memory_load(const char *params) {
 }
 
 // Tool registration
-bool agent_register_tool(const char *name, const char *description, char *(*execute)(const char *params)) {
+bool agent_register_tool(const char *name, const char *description, const char *parameters_schema, int (*execute)(const char *args, char** result, int* result_len)) {
     debug_log("Registering tool: %s", name);
     
-    // Check if tool already exists
-    for (int i = 0; i < g_agent.tool_count; i++) {
-        if (strcmp(g_agent.tools[i].name, name) == 0) {
-            return false;
-        }
+    // Create tool
+    Tool* tool = tool_create(name, description, parameters_schema, execute);
+    if (!tool) {
+        return false;
     }
     
-    // Resize tool array if needed
-    if (g_agent.tool_count >= g_agent.tool_capacity) {
-        g_agent.tool_capacity *= 2;
-        Tool *new_tools = (Tool *)realloc(g_agent.tools, sizeof(Tool) * g_agent.tool_capacity);
-        if (!new_tools) {
-            return false;
-        }
-        g_agent.tools = new_tools;
-    }
-    
-    // Add tool
-    g_agent.tools[g_agent.tool_count].name = strdup(name);
-    g_agent.tools[g_agent.tool_count].description = strdup(description);
-    g_agent.tools[g_agent.tool_count].execute = execute;
-    g_agent.tool_count++;
-    
-    return true;
+    // Register tool
+    return tool_registry_register(g_agent.tool_registry, tool);
 }
 
 // Execute a tool
-char *agent_execute_tool(const char *name, const char *params) {
-    debug_log("Executing tool: %s with params: %s", name, params);
-    for (int i = 0; i < g_agent.tool_count; i++) {
-        if (strcmp(g_agent.tools[i].name, name) == 0) {
-            return g_agent.tools[i].execute(params);
-        }
+int agent_execute_tool(const char *name, const char *args, char** result, int* result_len) {
+    debug_log("Executing tool: %s with args: %s", name, args);
+    
+    // Get tool
+    Tool* tool = tool_registry_get(g_agent.tool_registry, name);
+    if (!tool) {
+        *result = strdup("Error: Tool not found");
+        *result_len = strlen(*result);
+        return -1;
     }
-    char *error = (char *)malloc(256);
-    snprintf(error, 256, "Error: Tool '%s' not found", name);
-    return error;
+    
+    // Execute tool
+    return tool->execute(args, result, result_len);
 }
 
 // List all tools
 void agent_list_tools(void) {
-    if (g_agent.tool_count == 0) {
-        printf("No tools registered\n");
-        return;
-    }
-    
-    printf("Available tools:\n");
-    for (int i = 0; i < g_agent.tool_count; i++) {
-        printf("  %s: %s\n", g_agent.tools[i].name, g_agent.tools[i].description);
-    }
+    tool_registry_list(g_agent.tool_registry);
 }
 
 // Parse user command and execute tools
@@ -421,24 +364,39 @@ char *agent_parse_command(const char *command) {
         char *expr = strchr(command, ' ');
         if (expr) {
             expr++;
-            char *tool_result = agent_execute_tool("calculator", expr);
-            snprintf(result, 2048, "Calculator result: %s", tool_result);
-            free(tool_result);
+            char *tool_result;
+            int result_len;
+            if (agent_execute_tool("calculator", expr, &tool_result, &result_len) == 0) {
+                snprintf(result, 2048, "Calculator result: %s", tool_result);
+                free(tool_result);
+            } else {
+                snprintf(result, 2048, "Error executing calculator tool");
+            }
         } else {
             snprintf(result, 2048, "Error: No expression provided for calculator");
         }
     } else if (strstr(command, "time") != NULL || strstr(command, "clock") != NULL || strstr(command, "now") != NULL) {
-        char *tool_result = agent_execute_tool("time", "");
-        snprintf(result, 2048, "%s", tool_result);
-        free(tool_result);
+        char *tool_result;
+        int result_len;
+        if (agent_execute_tool("time", "", &tool_result, &result_len) == 0) {
+            snprintf(result, 2048, "%s", tool_result);
+            free(tool_result);
+        } else {
+            snprintf(result, 2048, "Error executing time tool");
+        }
     } else if (strstr(command, "reverse") != NULL && strstr(command, "string") != NULL) {
         // Extract string to reverse
         char *str = strstr(command, "string");
         if (str) {
             str += 7; // Skip "string "
-            char *tool_result = agent_execute_tool("reverse_string", str);
-            snprintf(result, 2048, "Reversed string: %s", tool_result);
-            free(tool_result);
+            char *tool_result;
+            int result_len;
+            if (agent_execute_tool("reverse_string", str, &tool_result, &result_len) == 0) {
+                snprintf(result, 2048, "Reversed string: %s", tool_result);
+                free(tool_result);
+            } else {
+                snprintf(result, 2048, "Error executing reverse_string tool");
+            }
         } else {
             snprintf(result, 2048, "Error: No string provided for reversal");
         }
@@ -446,9 +404,14 @@ char *agent_parse_command(const char *command) {
         char *str = strstr(command, "read file");
         if (str) {
             str += 10; // Skip "read file "
-            char *tool_result = agent_execute_tool("read_file", str);
-            snprintf(result, 2048, "File content:\n%s", tool_result);
-            free(tool_result);
+            char *tool_result;
+            int result_len;
+            if (agent_execute_tool("read_file", str, &tool_result, &result_len) == 0) {
+                snprintf(result, 2048, "File content:\n%s", tool_result);
+                free(tool_result);
+            } else {
+                snprintf(result, 2048, "Error executing read_file tool");
+            }
         } else {
             snprintf(result, 2048, "Error: No filename provided");
         }
@@ -456,9 +419,14 @@ char *agent_parse_command(const char *command) {
         char *str = strstr(command, "write file");
         if (str) {
             str += 11; // Skip "write file "
-            char *tool_result = agent_execute_tool("write_file", str);
-            snprintf(result, 2048, "%s", tool_result);
-            free(tool_result);
+            char *tool_result;
+            int result_len;
+            if (agent_execute_tool("write_file", str, &tool_result, &result_len) == 0) {
+                snprintf(result, 2048, "%s", tool_result);
+                free(tool_result);
+            } else {
+                snprintf(result, 2048, "Error executing write_file tool");
+            }
         } else {
             snprintf(result, 2048, "Error: Invalid format. Use 'write file filename content'");
         }
@@ -470,16 +438,26 @@ char *agent_parse_command(const char *command) {
         } else {
             str += 7;
         }
-        char *tool_result = agent_execute_tool("web_search", str);
-        snprintf(result, 2048, "%s", tool_result);
-        free(tool_result);
+        char *tool_result;
+        int result_len;
+        if (agent_execute_tool("web_search", str, &tool_result, &result_len) == 0) {
+            snprintf(result, 2048, "%s", tool_result);
+            free(tool_result);
+        } else {
+            snprintf(result, 2048, "Error executing web_search tool");
+        }
     } else if (strstr(command, "memory save") != NULL) {
         char *str = strstr(command, "memory save");
         if (str) {
             str += 12; // Skip "memory save "
-            char *tool_result = agent_execute_tool("memory_save", str);
-            snprintf(result, 2048, "%s", tool_result);
-            free(tool_result);
+            char *tool_result;
+            int result_len;
+            if (agent_execute_tool("memory_save", str, &tool_result, &result_len) == 0) {
+                snprintf(result, 2048, "%s", tool_result);
+                free(tool_result);
+            } else {
+                snprintf(result, 2048, "Error executing memory_save tool");
+            }
         } else {
             snprintf(result, 2048, "Error: Invalid format. Use 'memory save key value'");
         }
@@ -487,9 +465,14 @@ char *agent_parse_command(const char *command) {
         char *str = strstr(command, "memory load");
         if (str) {
             str += 12; // Skip "memory load "
-            char *tool_result = agent_execute_tool("memory_load", str);
-            snprintf(result, 2048, "%s", tool_result);
-            free(tool_result);
+            char *tool_result;
+            int result_len;
+            if (agent_execute_tool("memory_load", str, &tool_result, &result_len) == 0) {
+                snprintf(result, 2048, "%s", tool_result);
+                free(tool_result);
+            } else {
+                snprintf(result, 2048, "Error executing memory_load tool");
+            }
         } else {
             snprintf(result, 2048, "Error: No key provided");
         }
@@ -564,57 +547,87 @@ char *agent_parse_command(const char *command) {
 }
 
 bool agent_init(void) {
-    g_agent.model = strdup(g_config.model);
+    // Initialize workspace
+    if (!workspace_init(g_config.workspace_path)) {
+        fprintf(stderr, "Failed to initialize workspace\n");
+        return false;
+    }
+
+    // Create model string from provider and name
+    char model[256];
+    snprintf(model, sizeof(model), "%s/%s", g_config.model_provider, g_config.model_name);
+    g_agent.model = strdup(model);
     if (!g_agent.model) {
         perror("strdup");
+        workspace_cleanup();
         return false;
     }
 
     // Initialize AI model
     AIModelConfig model_config;
-    if (strstr(g_config.model, "anthropic") != NULL) {
+    if (strcmp(g_config.model_provider, "anthropic") == 0) {
         model_config.type = AI_MODEL_ANTHROPIC;
-        model_config.model_name = strstr(g_config.model, "/") ? strstr(g_config.model, "/") + 1 : g_config.model;
-    } else if (strstr(g_config.model, "openai") != NULL) {
+    } else if (strcmp(g_config.model_provider, "openai") == 0) {
         model_config.type = AI_MODEL_OPENAI;
-        model_config.model_name = strstr(g_config.model, "/") ? strstr(g_config.model, "/") + 1 : g_config.model;
-    } else if (strstr(g_config.model, "llama") != NULL || strstr(g_config.model, "gemini") != NULL) {
-        if (strstr(g_config.model, "llama") != NULL) {
-            model_config.type = AI_MODEL_LLAMA;
-            model_config.model_name = strstr(g_config.model, "/") ? strstr(g_config.model, "/") + 1 : g_config.model;
-        } else {
-            model_config.type = AI_MODEL_GEMINI;
-            model_config.model_name = strstr(g_config.model, "/") ? strstr(g_config.model, "/") + 1 : g_config.model;
-        }
+    } else if (strcmp(g_config.model_provider, "llama") == 0) {
+        model_config.type = AI_MODEL_LLAMA;
+    } else if (strcmp(g_config.model_provider, "gemini") == 0) {
+        model_config.type = AI_MODEL_GEMINI;
     } else {
         model_config.type = AI_MODEL_ANTHROPIC;
-        model_config.model_name = "claude-3-opus-20240229";
     }
-    model_config.api_key = getenv("ANTHROPIC_API_KEY") ? getenv("ANTHROPIC_API_KEY") : getenv("OPENAI_API_KEY");
-    model_config.base_url = g_config.base_url;
+    model_config.model_name = g_config.model_name;
+    model_config.api_key = g_config.api_key ? g_config.api_key : (getenv("ANTHROPIC_API_KEY") ? getenv("ANTHROPIC_API_KEY") : getenv("OPENAI_API_KEY"));
+    model_config.base_url = g_config.api_base_url;
 
     if (!ai_model_init(&model_config)) {
         fprintf(stderr, "Failed to initialize AI model\n");
         free(g_agent.model);
         g_agent.model = NULL;
+        workspace_cleanup();
         return false;
     }
 
-    // Initialize tool array
-    g_agent.tools = (Tool *)malloc(sizeof(Tool) * g_agent.tool_capacity);
-    if (!g_agent.tools) {
-        fprintf(stderr, "Failed to allocate tools array\n");
+    // Initialize session manager
+    g_agent.session_manager = session_manager_init(g_config.workspace_path, 100);
+    if (!g_agent.session_manager) {
+        fprintf(stderr, "Failed to initialize session manager\n");
         free(g_agent.model);
         g_agent.model = NULL;
         ai_model_cleanup();
         return false;
     }
 
-    // Initialize memory array
-    g_agent.memory = (MemoryEntry *)malloc(sizeof(MemoryEntry) * g_agent.memory_capacity);
-    if (!g_agent.memory) {
-        fprintf(stderr, "Failed to allocate memory array\n");
-        free(g_agent.tools);
+    // Initialize message queue
+    g_agent.message_queue = queue_init(100);
+    if (!g_agent.message_queue) {
+        fprintf(stderr, "Failed to initialize message queue\n");
+        session_manager_destroy(g_agent.session_manager);
+        free(g_agent.model);
+        g_agent.model = NULL;
+        ai_model_cleanup();
+        return false;
+    }
+
+    // Initialize tool registry
+    g_agent.tool_registry = tool_registry_init();
+    if (!g_agent.tool_registry) {
+        fprintf(stderr, "Failed to initialize tool registry\n");
+        queue_destroy(g_agent.message_queue);
+        session_manager_destroy(g_agent.session_manager);
+        free(g_agent.model);
+        g_agent.model = NULL;
+        ai_model_cleanup();
+        return false;
+    }
+
+    // Initialize memory manager
+    g_agent.memory_manager = memory_manager_init(g_config.workspace_path);
+    if (!g_agent.memory_manager) {
+        fprintf(stderr, "Failed to initialize memory manager\n");
+        tool_registry_destroy(g_agent.tool_registry);
+        queue_destroy(g_agent.message_queue);
+        session_manager_destroy(g_agent.session_manager);
         free(g_agent.model);
         g_agent.model = NULL;
         ai_model_cleanup();
@@ -625,8 +638,10 @@ bool agent_init(void) {
     g_agent.steps = (Step *)malloc(sizeof(Step) * g_agent.step_capacity);
     if (!g_agent.steps) {
         fprintf(stderr, "Failed to allocate steps array\n");
-        free(g_agent.memory);
-        free(g_agent.tools);
+        memory_manager_destroy(g_agent.memory_manager);
+        tool_registry_destroy(g_agent.tool_registry);
+        queue_destroy(g_agent.message_queue);
+        session_manager_destroy(g_agent.session_manager);
         free(g_agent.model);
         g_agent.model = NULL;
         ai_model_cleanup();
@@ -634,14 +649,14 @@ bool agent_init(void) {
     }
 
     // Register default tools
-    agent_register_tool("calculator", "Perform basic arithmetic calculations", tool_calculator);
-    agent_register_tool("time", "Get current time", tool_time);
-    agent_register_tool("reverse_string", "Reverse a string", tool_reverse_string);
-    agent_register_tool("read_file", "Read a file from disk", tool_read_file);
-    agent_register_tool("write_file", "Write content to a file", tool_write_file);
-    agent_register_tool("web_search", "Simulate web search", tool_web_search);
-    agent_register_tool("memory_save", "Save a key-value pair to memory", tool_memory_save);
-    agent_register_tool("memory_load", "Load a value from memory by key", tool_memory_load);
+    agent_register_tool("calculator", "Perform basic arithmetic calculations", NULL, tool_calculate);
+    agent_register_tool("time", "Get current time", NULL, tool_get_time);
+    agent_register_tool("reverse_string", "Reverse a string", NULL, tool_reverse_string);
+    agent_register_tool("read_file", "Read a file from disk", NULL, tool_read_file);
+    agent_register_tool("write_file", "Write content to a file", NULL, tool_write_file);
+    agent_register_tool("web_search", "Simulate web search", NULL, tool_search_web);
+    agent_register_tool("memory_save", "Save a key-value pair to memory", NULL, tool_save_memory);
+    agent_register_tool("memory_load", "Load a value from memory by key", NULL, tool_read_memory);
 
     g_agent.running = true;
     printf("Agent initialized with model: %s\n", g_agent.model);
@@ -655,25 +670,28 @@ void agent_cleanup(void) {
         g_agent.model = NULL;
     }
 
-    // Cleanup tools
-    if (g_agent.tools) {
-        for (int i = 0; i < g_agent.tool_count; i++) {
-            free(g_agent.tools[i].name);
-            free(g_agent.tools[i].description);
-        }
-        free(g_agent.tools);
-        g_agent.tools = NULL;
-        g_agent.tool_count = 0;
-        g_agent.tool_capacity = 20;
+    // Cleanup session manager
+    if (g_agent.session_manager) {
+        session_manager_destroy(g_agent.session_manager);
+        g_agent.session_manager = NULL;
     }
 
-    // Cleanup memory
-    agent_memory_clear();
-    if (g_agent.memory) {
-        free(g_agent.memory);
-        g_agent.memory = NULL;
-        g_agent.memory_count = 0;
-        g_agent.memory_capacity = 50;
+    // Cleanup message queue
+    if (g_agent.message_queue) {
+        queue_destroy(g_agent.message_queue);
+        g_agent.message_queue = NULL;
+    }
+
+    // Cleanup tool registry
+    if (g_agent.tool_registry) {
+        tool_registry_destroy(g_agent.tool_registry);
+        g_agent.tool_registry = NULL;
+    }
+
+    // Cleanup memory manager
+    if (g_agent.memory_manager) {
+        memory_manager_destroy(g_agent.memory_manager);
+        g_agent.memory_manager = NULL;
     }
 
     // Cleanup steps
@@ -691,6 +709,9 @@ void agent_cleanup(void) {
 
     // Cleanup AI model
     ai_model_cleanup();
+
+    // Cleanup workspace
+    workspace_cleanup();
 
     g_agent.running = false;
     printf("Agent cleaned up\n");
@@ -796,12 +817,18 @@ bool agent_execute_steps(void) {
         printf("Executing step %d: %s\n", g_agent.current_step + 1, step->description);
         
         // Execute the tool
-        char *result = agent_execute_tool(step->tool_name, step->params);
-        step->result = strdup(result);
-        step->completed = true;
-        
-        printf("Step %d result: %s\n", g_agent.current_step + 1, result);
-        free(result);
+        char *tool_result;
+        int result_len;
+        if (agent_execute_tool(step->tool_name, step->params, &tool_result, &result_len) == 0) {
+            step->result = strdup(tool_result);
+            step->completed = true;
+            printf("Step %d result: %s\n", g_agent.current_step + 1, tool_result);
+            free(tool_result);
+        } else {
+            step->result = strdup("Error executing tool");
+            step->completed = true;
+            printf("Step %d result: Error executing tool\n", g_agent.current_step + 1);
+        }
         
         g_agent.current_step++;
     }
@@ -839,12 +866,18 @@ bool agent_resume_execution(void) {
         printf("Executing step %d: %s\n", g_agent.current_step + 1, step->description);
         
         // Execute the tool
-        char *result = agent_execute_tool(step->tool_name, step->params);
-        step->result = strdup(result);
-        step->completed = true;
-        
-        printf("Step %d result: %s\n", g_agent.current_step + 1, result);
-        free(result);
+        char *tool_result;
+        int result_len;
+        if (agent_execute_tool(step->tool_name, step->params, &tool_result, &result_len) == 0) {
+            step->result = strdup(tool_result);
+            step->completed = true;
+            printf("Step %d result: %s\n", g_agent.current_step + 1, tool_result);
+            free(tool_result);
+        } else {
+            step->result = strdup("Error executing tool");
+            step->completed = true;
+            printf("Step %d result: Error executing tool\n", g_agent.current_step + 1);
+        }
         
         g_agent.current_step++;
     }
