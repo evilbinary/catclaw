@@ -1,4 +1,5 @@
 #include "agent.h"
+#include "context.h"
 #include "config.h"
 #include "channels.h"
 #include "ai_model.h"
@@ -27,10 +28,6 @@ Agent g_agent = {
     .step_capacity = 10,
     .current_step = 0
 };
-
-// Worker thread
-static pthread_t g_worker_thread;
-static bool g_worker_thread_running = false;
 
 // Debug logging helper
 static void debug_log(const char *format, ...) {
@@ -1029,29 +1026,28 @@ bool agent_disable_skill(const char *name) {
     return skill_disable(name);
 }
 
-// Start worker thread (using context.c implementation)
+// Start worker thread - uses context.c implementation
 bool agent_start_worker_thread(void) {
-    // For now, use the legacy implementation
-    // In the future, this should use agent_node_start_worker
-    if (g_worker_thread_running) {
-        printf("Worker thread is already running\n");
-        return true;
+    // Create default agent node if not exists
+    if (!g_default_agent_node) {
+        g_default_agent_node = agent_node_create("default", g_agent.model);
+        if (!g_default_agent_node) {
+            fprintf(stderr, "Failed to create default agent node\n");
+            return false;
+        }
+        // Copy agent components to the node
+        g_default_agent_node->agent.session_manager = g_agent.session_manager;
+        g_default_agent_node->agent.message_queue = g_agent.message_queue;
+        g_default_agent_node->agent.tool_registry = g_agent.tool_registry;
+        g_default_agent_node->agent.memory_manager = g_agent.memory_manager;
     }
-
-    g_worker_thread_running = true;
-    // Note: The actual worker thread implementation is in context.c
-    // This is a placeholder that will be replaced when fully migrating to AgentNode
-    printf("Worker thread started (legacy mode)\n");
-    return true;
+    
+    return agent_node_start_worker(g_default_agent_node);
 }
 
 // Stop worker thread
 void agent_stop_worker_thread(void) {
-    if (!g_worker_thread_running) {
-        printf("Worker thread is not running\n");
-        return;
+    if (g_default_agent_node) {
+        agent_node_stop_worker(g_default_agent_node);
     }
-
-    g_worker_thread_running = false;
-    printf("Worker thread stopped (legacy mode)\n");
 }

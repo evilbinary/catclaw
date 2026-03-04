@@ -94,6 +94,12 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
+    // Start worker thread
+    if (!agent_start_worker_thread()) {
+        log_error("Failed to start worker thread");
+        // Continue anyway
+    }
+
     // Initialize plugin system
     if (!plugin_system_init()) {
         log_error("Failed to initialize plugin system");
@@ -436,6 +442,7 @@ int main(int argc, char *argv[]) {
 
     // Cleanup
     stop_gateway_server();
+    agent_stop_worker_thread();
     agent_cleanup();
     channels_cleanup();
     plugin_system_cleanup();
