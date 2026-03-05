@@ -71,8 +71,11 @@ bool config_load(void) {
     if (config_content) {
         cJSON *root = cJSON_Parse(config_content);
         if (root) {
-            // Parse workspace path
+            // Parse workspace path (support both workspace_path and workspace_dir)
             cJSON *workspace = cJSON_GetObjectItem(root, "workspace_path");
+            if (!workspace) {
+                workspace = cJSON_GetObjectItem(root, "workspace_dir");
+            }
             if (workspace && cJSON_IsString(workspace)) {
                 free(g_config.workspace_path);
                 g_config.workspace_path = strdup(workspace->valuestring);
@@ -84,8 +87,11 @@ bool config_load(void) {
                 g_config.model_provider = strdup(provider->valuestring);
             }
 
-            // Parse model name
+            // Parse model name (support both model_name and model)
             cJSON *model = cJSON_GetObjectItem(root, "model_name");
+            if (!model) {
+                model = cJSON_GetObjectItem(root, "model");
+            }
             if (model && cJSON_IsString(model)) {
                 g_config.model_name = strdup(model->valuestring);
             }
@@ -96,10 +102,21 @@ bool config_load(void) {
                 g_config.api_key = strdup(api_key->valuestring);
             }
 
-            // Parse API base URL
+            // Parse API base URL (support both api_base_url and base_url)
             cJSON *api_base_url = cJSON_GetObjectItem(root, "api_base_url");
+            if (!api_base_url) {
+                api_base_url = cJSON_GetObjectItem(root, "base_url");
+            }
             if (api_base_url && cJSON_IsString(api_base_url)) {
                 g_config.api_base_url = strdup(api_base_url->valuestring);
+            }
+
+            // Set default values if not provided
+            if (!g_config.model_provider) {
+                g_config.model_provider = strdup("llama");
+            }
+            if (!g_config.model_name) {
+                g_config.model_name = strdup("llama3.2");
             }
 
             // Parse max context tokens

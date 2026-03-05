@@ -70,6 +70,11 @@ MessageList* message_list_create(void) {
         return NULL;
     }
     
+    // Initialize all message pointers to NULL
+    for (int i = 0; i < list->capacity; i++) {
+        list->messages[i] = NULL;
+    }
+    
     return list;
 }
 
@@ -99,6 +104,12 @@ bool message_list_append(MessageList* list, Message* message) {
         if (!new_messages) {
             return false;
         }
+        
+        // Initialize new memory to NULL
+        for (int i = list->capacity; i < new_capacity; i++) {
+            new_messages[i] = NULL;
+        }
+        
         list->messages = new_messages;
         list->capacity = new_capacity;
     }

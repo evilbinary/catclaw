@@ -149,6 +149,12 @@ bool agent_node_start_worker(AgentNode* node) {
     int ret = pthread_create(&node->worker_thread, NULL, agent_node_worker_thread, node);
     if (ret != 0) {
         fprintf(stderr, "Failed to create worker thread: %d\n", ret);
+        switch (ret) {
+            case EAGAIN: fprintf(stderr, "Error: Resource temporarily unavailable\n"); break;
+            case EINVAL: fprintf(stderr, "Error: Invalid argument\n"); break;
+            case EPERM: fprintf(stderr, "Error: Operation not permitted\n"); break;
+            default: fprintf(stderr, "Error: Unknown error\n"); break;
+        }
         node->worker_running = false;
         return false;
     }
