@@ -43,6 +43,9 @@ $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c | $(OBJ_DIR)
 $(OBJ_DIR):
 	mkdir -p $(OBJ_DIR)
 
+gdb: $(TARGET)
+	gdb -x  gdb.gdb ./catclaw
+
 clean:
 	rm -rf $(OBJ_DIR) $(TARGET)
 

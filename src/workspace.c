@@ -62,91 +62,60 @@ bool workspace_init(const char* workspace_path) {
     }
     
     // Create subdirectories
-    char* sessions_dir = (char*)malloc(strlen(workspace_path) + strlen("/sessions") + 1);
-    if (!sessions_dir) {
-        return false;
-    }
-    sprintf(sessions_dir, "%s/sessions", workspace_path);
+    char sessions_dir[512];
+    snprintf(sessions_dir, sizeof(sessions_dir), "%s/sessions", workspace_path);
     if (!create_directory(sessions_dir)) {
-        free(sessions_dir);
         return false;
     }
-    free(sessions_dir);
     
-    char* memory_dir = (char*)malloc(strlen(workspace_path) + strlen("/memory") + 1);
-    if (!memory_dir) {
-        return false;
-    }
-    sprintf(memory_dir, "%s/memory", workspace_path);
+    char memory_dir[512];
+    snprintf(memory_dir, sizeof(memory_dir), "%s/memory", workspace_path);
     if (!create_directory(memory_dir)) {
-        free(memory_dir);
         return false;
     }
-    free(memory_dir);
     
-    char* skills_dir = (char*)malloc(strlen(workspace_path) + strlen("/skills") + 1);
-    if (!skills_dir) {
-        return false;
-    }
-    sprintf(skills_dir, "%s/skills", workspace_path);
+    char skills_dir[512];
+    snprintf(skills_dir, sizeof(skills_dir), "%s/skills", workspace_path);
     if (!create_directory(skills_dir)) {
-        free(skills_dir);
         return false;
     }
-    free(skills_dir);
     
     // Create workspace files
-    char* boot_file = (char*)malloc(strlen(workspace_path) + strlen("/BOOT.md") + 1);
-    if (!boot_file) {
-        return false;
-    }
-    sprintf(boot_file, "%s/BOOT.md", workspace_path);
+    char boot_file[512];
+    snprintf(boot_file, sizeof(boot_file), "%s/BOOT.md", workspace_path);
     
     FILE* fp = fopen(boot_file, "w");
     if (fp) {
         fprintf(fp, "# CatClaw Workspace\n\nThis is the workspace directory for CatClaw.\n");
         fclose(fp);
     }
-    free(boot_file);
     
-    char* identity_file = (char*)malloc(strlen(workspace_path) + strlen("/IDENTITY.md") + 1);
-    if (!identity_file) {
-        return false;
-    }
-    sprintf(identity_file, "%s/IDENTITY.md", workspace_path);
+    char identity_file[512];
+    snprintf(identity_file, sizeof(identity_file), "%s/IDENTITY.md", workspace_path);
     
     fp = fopen(identity_file, "w");
     if (fp) {
         fprintf(fp, "# Agent Identity\n\nI am CatClaw, a C-based AI assistant.\n");
         fclose(fp);
     }
-    free(identity_file);
     
-    char* soul_file = (char*)malloc(strlen(workspace_path) + strlen("/SOUL.md") + 1);
-    if (!soul_file) {
-        return false;
-    }
-    sprintf(soul_file, "%s/SOUL.md", workspace_path);
+    char soul_file[512];
+    snprintf(soul_file, sizeof(soul_file), "%s/SOUL.md", workspace_path);
     
     fp = fopen(soul_file, "w");
     if (fp) {
         fprintf(fp, "# Agent Soul\n\nI am designed to be helpful, honest, and harmless.\n");
         fclose(fp);
     }
-    free(soul_file);
     
-    char* tools_file = (char*)malloc(strlen(workspace_path) + strlen("/TOOLS.md") + 1);
-    if (!tools_file) {
-        return false;
-    }
-    sprintf(tools_file, "%s/TOOLS.md", workspace_path);
+    char tools_file[512];
+    snprintf(tools_file, sizeof(tools_file), "%s/TOOLS.md", workspace_path);
     
     fp = fopen(tools_file, "w");
     if (fp) {
         fprintf(fp, "# Available Tools\n\n- calculator: Perform basic arithmetic calculations\n- time: Get current time\n- reverse_string: Reverse a string\n- read_file: Read a file from disk\n- write_file: Write content to a file\n- web_search: Simulate web search\n- memory_save: Save a key-value pair to memory\n- memory_load: Load a value from memory by key\n");
         fclose(fp);
     }
-    free(tools_file);
     
     // Store workspace path
     g_workspace_path = strdup(workspace_path);

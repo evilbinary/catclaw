@@ -78,13 +78,10 @@ MessageList* message_list_create(void) {
     return list;
 }
 
-// Destroy a message list
+// Destroy a message list (without destroying the messages themselves)
 void message_list_destroy(MessageList* list) {
     if (list) {
         if (list->messages) {
-            for (int i = 0; i < list->count; i++) {
-                message_destroy(list->messages[i]);
-            }
             free(list->messages);
         }
         free(list);
@@ -283,36 +280,62 @@ char* message_list_to_jsonl(const MessageList* list) {
         return NULL;
     }
     
-    // Calculate total length
-    int total_length = 0;
-    for (int i = 0; i < list->count; i++) {
-        if (!list->messages[i]) continue;  // Skip NULL messages
-        char* json = message_to_json(list->messages[i]);
-        if (json) {
-            total_length += strlen(json) + 1; // +1 for newline
-            free(json);
-        }
-    }
-    
-    // Allocate buffer
-    char* jsonl = (char*)malloc(total_length + 1);
-    if (!jsonl) {
-        return NULL;
-    }
+    // Use a dynamic buffer to avoid length calculation issues with UTF-8
+    char* jsonl = NULL;
+    size_t current_size = 0;
+    size_t position = 0;
     
     // Build JSONL
-    char* ptr = jsonl;
     for (int i = 0; i < list->count; i++) {
         if (!list->messages[i]) continue;  // Skip NULL messages
+        
         char* json = message_to_json(list->messages[i]);
         if (json) {
-            strcpy(ptr, json);
-            ptr += strlen(json);
-            *ptr++ = '\n';
+            size_t json_len = strlen(json);
+            size_t needed = position + json_len + 2; // +2 for newline and null terminator
+            
+            // Reallocate buffer if needed
+            if (needed > current_size) {
+                size_t new_size = current_size ? current_size * 2 : 1024;
+                while (new_size < needed) {
+                    new_size *= 2;
+                }
+                
+                char* new_buffer = (char*)realloc(jsonl, new_size);
+                if (!new_buffer) {
+                    free(json);
+                    if (jsonl) free(jsonl);
+                    return NULL;
+                }
+                jsonl = new_buffer;
+                current_size = new_size;
+            }
+            
+            // Copy JSON and add newline
+            strcpy(jsonl + position, json);
+            position += json_len;
+            jsonl[position++] = '\n';
+            
             free(json);
         }
     }
-    *ptr = '\0';
+    
+    // Add null terminator
+    if (jsonl) {
+        if (position < current_size) {
+            jsonl[position] = '\0';
+        } else {
+            // Just in case we need one more byte
+            char* new_buffer = (char*)realloc(jsonl, current_size + 1);
+            if (new_buffer) {
+                new_buffer[position] = '\0';
+                jsonl = new_buffer;
+            } else {
+                free(jsonl);
+                return NULL;
+            }
+        }
+    }
     
     return jsonl;
 }
