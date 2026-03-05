@@ -189,6 +189,8 @@ void* agent_node_worker_thread(void* arg) {
         }
         
         // 3. Add user message to session
+        // Save content pointer before setting message to NULL
+        const char* message_content = item->message->content;
         session_add_message(session, item->message);
         // Set message to NULL so it won't be destroyed by queue_item_destroy
         item->message = NULL;
@@ -206,7 +208,7 @@ void* agent_node_worker_thread(void* arg) {
             // 6. Agent loop
             int max_iterations = 10;
             for (int i = 0; i < max_iterations; i++) {
-                AIModelResponse* response = ai_model_send_message(item->message->content);
+                AIModelResponse* response = ai_model_send_message(message_content);
                 if (!response) break;
                 
                 if (response->success) {
