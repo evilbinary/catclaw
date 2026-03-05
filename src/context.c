@@ -174,10 +174,18 @@ void* agent_node_worker_thread(void* arg) {
     AgentNode* node = (AgentNode*)arg;
     Agent* agent = &node->agent;
     
+    if (g_config.debug) {
+        printf("[DEBUG] Agent node worker thread started\n");
+    }
+    
     while (node->worker_running) {
         // 1. Dequeue message
         QueueItem* item = queue_dequeue(agent->message_queue, 1000);
         if (!item) continue;
+        
+        if (g_config.debug) {
+            printf("[DEBUG] Dequeued message: %s\n", item->message->content);
+        }
         
         // 2. Get or create session
         Session* session = session_manager_get_or_create(
@@ -188,12 +196,20 @@ void* agent_node_worker_thread(void* arg) {
             continue;
         }
         
+        if (g_config.debug) {
+            printf("[DEBUG] Got or created session: %s\n", session->session_id);
+        }
+        
         // 3. Add user message to session
         // Save content pointer before setting message to NULL
         const char* message_content = item->message->content;
         session_add_message(session, item->message);
         // Set message to NULL so it won't be destroyed by queue_item_destroy
         item->message = NULL;
+        
+        if (g_config.debug) {
+            printf("[DEBUG] Added user message to session\n");
+        }
         
         // 4. Build context
         MessageList* context = message_list_create();
@@ -203,19 +219,40 @@ void* agent_node_worker_thread(void* arg) {
                 message_list_append(context, session->history->messages[i]);
             }
             
+            if (g_config.debug) {
+                printf("[DEBUG] Built context with %d messages\n", context->count);
+            }
+            
             // 5. Check and execute compaction (TODO)
             
             // 6. Agent loop
             int max_iterations = 10;
             for (int i = 0; i < max_iterations; i++) {
+                if (g_config.debug) {
+                    printf("[DEBUG] Sending message to AI model: %s\n", message_content);
+                }
+                
                 AIModelResponse* response = ai_model_send_message(message_content);
-                if (!response) break;
+                if (!response) {
+                    if (g_config.debug) {
+                        printf("[DEBUG] No response from AI model\n");
+                    }
+                    break;
+                }
                 
                 if (response->success) {
+                    if (g_config.debug) {
+                        printf("[DEBUG] AI model returned success\n");
+                    }
+                    
                     Message* assistant_msg = message_create(ROLE_ASSISTANT, response->content);
                     session_add_message(session, assistant_msg);
                     
                     printf("\n[AI Response]: %s\n\n", response->content);
+                    
+                    if (g_config.debug) {
+                        printf("[DEBUG] Sending message to WebChat\n");
+                    }
                     channel_send_message(CHANNEL_WEBCHAT, response->content);
                     
                     // TODO: Parse and execute tool calls
@@ -230,13 +267,28 @@ void* agent_node_worker_thread(void* arg) {
             }
             
             message_list_destroy(context);
+            
+            if (g_config.debug) {
+                printf("[DEBUG] Destroyed context\n");
+            }
         }
         
         // 7. Save session
+        if (g_config.debug) {
+            printf("[DEBUG] Saving session: %s\n", session->session_id);
+        }
         session_save(session, g_config.workspace_path);
         
         // Cleanup
         queue_item_destroy(item);
+        
+        if (g_config.debug) {
+            printf("[DEBUG] Cleaned up queue item\n");
+        }
+    }
+    
+    if (g_config.debug) {
+        printf("[DEBUG] Agent node worker thread exiting\n");
     }
     
     return NULL;

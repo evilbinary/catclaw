@@ -16,6 +16,7 @@ typedef struct {
     int compaction_threshold;  // 压缩阈值（token 数）
     int gateway_port;          // 网关端口
     bool browser_enabled;      // 是否启用浏览器
+    bool debug;                // 是否启用调试日志
 } Config;
 
 // Global config instance

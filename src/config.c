@@ -17,7 +17,8 @@ Config g_config = {
     .enable_compaction = 1,
     .compaction_threshold = 3000,
     .gateway_port = 18789,
-    .browser_enabled = false
+    .browser_enabled = false,
+    .debug = true
 };
 
 static char *get_home_dir(void) {
@@ -154,6 +155,12 @@ bool config_load(void) {
             if (browser && (cJSON_IsTrue(browser) || cJSON_IsFalse(browser))) {
                 g_config.browser_enabled = cJSON_IsTrue(browser);
             }
+            
+            // Parse debug mode
+            cJSON *debug = cJSON_GetObjectItem(root, "debug");
+            if (debug && (cJSON_IsTrue(debug) || cJSON_IsFalse(debug))) {
+                g_config.debug = cJSON_IsTrue(debug);
+            }
 
             cJSON_Delete(root);
         } else {
@@ -220,6 +227,7 @@ void config_print(void) {
     printf("  Compaction Threshold: %d\n", g_config.compaction_threshold);
     printf("  Gateway Port: %d\n", g_config.gateway_port);
     printf("  Browser Enabled: %s\n", g_config.browser_enabled ? "true" : "false");
+    printf("  Debug Mode: %s\n", g_config.debug ? "true" : "false");
 }
 
 bool config_set(const char *key, const char *value) {
@@ -271,7 +279,11 @@ bool config_set(const char *key, const char *value) {
     } else if (strcmp(key, "browser_enabled") == 0) {
         g_config.browser_enabled = (strcmp(value, "true") == 0 || strcmp(value, "1") == 0);
         return true;
+    } else if (strcmp(key, "debug") == 0) {
+        g_config.debug = (strcmp(value, "true") == 0 || strcmp(value, "1") == 0);
+        return true;
     }
+    
     return false;
 }
 
@@ -304,6 +316,9 @@ const char *config_get(const char *key) {
         return buffer;
     } else if (strcmp(key, "browser_enabled") == 0) {
         return g_config.browser_enabled ? "true" : "false";
+    } else if (strcmp(key, "debug") == 0) {
+        return g_config.debug ? "true" : "false";
     }
+    
     return NULL;
 }
