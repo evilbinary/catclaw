@@ -190,6 +190,8 @@ void* agent_node_worker_thread(void* arg) {
         
         // 3. Add user message to session
         session_add_message(session, item->message);
+        // Set message to NULL so it won't be destroyed by queue_item_destroy
+        item->message = NULL;
         
         // 4. Build context
         MessageList* context = message_list_create();
