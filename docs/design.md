@@ -88,10 +88,15 @@
 ### 1. 配置文件
 ```json
 {
-  "agent": {
-    "workspace": "~/.mini-openclaw/workspace",
+  "agent": [{
+    "name": "default",
+    "baseUrl": "https://api.openai.com/v1",
     "model": "openai/gpt-3.5-turbo",
     "apiKey": "YOUR_API_KEY"
+  }],
+  "works":{
+    "workspace": "~/.catclaw/workspace",
+    "agent": "default"
   },
   "session": {
     "reset": {
@@ -101,7 +106,8 @@
   },
   "tools": {
     "allow": ["read", "exec", "write"]
-  }
+  },
+  "debug": true
 }
 ```
 
