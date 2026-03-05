@@ -314,7 +314,14 @@ AIModelResponse *ai_model_send_message(const char *message) {
             headers = curl_slist_append(headers, "Accept: application/json; charset=utf-8");
             {
                 cJSON *root = cJSON_CreateObject();
-                cJSON_AddStringToObject(root, "model", g_model_config.model_name ? g_model_config.model_name : "llama3");
+                // For Llama, extract just the model name without the provider
+                const char* model_name = g_model_config.model_name ? g_model_config.model_name : "llama3";
+                // Check if model name contains a slash (like "llama/llama3.2")
+                const char* slash_pos = strrchr(model_name, '/');
+                if (slash_pos) {
+                    model_name = slash_pos + 1;
+                }
+                cJSON_AddStringToObject(root, "model", model_name);
                 cJSON_AddStringToObject(root, "prompt", message);
                 cJSON_AddNumberToObject(root, "max_tokens", 1024);
                 cJSON_AddBoolToObject(root, "stream", true);
