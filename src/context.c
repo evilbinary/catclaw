@@ -2,10 +2,25 @@
 #include "config.h"
 #include "channels.h"
 #include "ai_model.h"
+#include "agent.h"
+#include "tool.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+
+// ToolCall structure for tool execution
+typedef struct {
+    char* id;
+    char* name;
+    char* arguments;
+} ToolCall;
+
+// ToolCallList structure
+typedef struct {
+    ToolCall* calls;
+    int count;
+} ToolCallList;
 
 // Global agent manager
 AgentNode* g_agent_node_list = NULL;
@@ -169,6 +184,13 @@ void agent_node_stop_worker(AgentNode* node) {
     pthread_join(node->worker_thread, NULL);
 }
 
+// Parse tool calls from AI response
+static ToolCallList* parse_tool_calls(const char* content) {
+    // Simple JSON parsing for tool calls
+    // This is a placeholder implementation
+    return NULL;
+}
+
 // Worker thread function
 void* agent_node_worker_thread(void* arg) {
     AgentNode* node = (AgentNode*)arg;
@@ -225,11 +247,16 @@ void* agent_node_worker_thread(void* arg) {
             
             // 5. Check and execute compaction (TODO)
             
-            // 6. Agent loop
+            // 6. Agent loop (ReAct paradigm: Think -> Act -> Observe)
             int max_iterations = 10;
             for (int i = 0; i < max_iterations; i++) {
                 if (g_config.debug) {
-                    printf("[DEBUG] Sending message to AI model: %s\n", message_content);
+                    printf("[DEBUG] Agent loop iteration %d\n", i + 1);
+                }
+                
+                // 6.1 Think: Call AI model with current context
+                if (g_config.debug) {
+                    printf("[DEBUG] Calling AI model\n");
                 }
                 
                 AIModelResponse* response = ai_model_send_message(message_content);
@@ -245,20 +272,81 @@ void* agent_node_worker_thread(void* arg) {
                         printf("[DEBUG] AI model returned success\n");
                     }
                     
+                    // 6.2 Act: Add assistant message to session
                     Message* assistant_msg = message_create(ROLE_ASSISTANT, response->content);
                     session_add_message(session, assistant_msg);
                     
                     printf("\n[AI Response]: %s\n\n", response->content);
                     
+                    // 6.3 Observe: Check for tool calls
                     if (g_config.debug) {
-                        printf("[DEBUG] Sending message to WebChat\n");
+                        printf("[DEBUG] Checking for tool calls\n");
                     }
-                    channel_send_message(CHANNEL_WEBCHAT, response->content);
                     
-                    // TODO: Parse and execute tool calls
-                    
-                    ai_model_free_response(response);
-                    break;
+                    ToolCallList* tool_call_list = parse_tool_calls(response->content);
+                    if (tool_call_list && tool_call_list->count > 0) {
+                        // Execute tool calls
+                        if (g_config.debug) {
+                            printf("[DEBUG] Executing %d tool calls\n", tool_call_list->count);
+                        }
+                        
+                        for (int j = 0; j < tool_call_list->count; j++) {
+                            ToolCall* call = &tool_call_list->calls[j];
+                            char* result = NULL;
+                            int result_len = 0;
+                            
+                            if (g_config.debug) {
+                                printf("[DEBUG] Executing tool: %s with args: %s\n", call->name, call->arguments);
+                            }
+                            
+                            // Execute tool
+                            Tool* tool = tool_registry_get(agent->tool_registry, call->name);
+                            int status = -1;
+                            if (tool) {
+                                status = tool->execute(call->arguments, &result, &result_len);
+                            } else {
+                                result = strdup("Error: Tool not found");
+                                result_len = strlen(result);
+                            }
+                            
+                            // Add tool result to session
+                            Message* tool_msg = message_create_tool(call->id, call->name, result ? result : "Error executing tool");
+                            session_add_message(session, tool_msg);
+                            
+                            if (result) {
+                                free(result);
+                            }
+                        }
+                        
+                        // Free tool calls
+                        for (int j = 0; j < tool_call_list->count; j++) {
+                            free(tool_call_list->calls[j].id);
+                            free(tool_call_list->calls[j].name);
+                            free(tool_call_list->calls[j].arguments);
+                        }
+                        free(tool_call_list->calls);
+                        free(tool_call_list);
+                        
+                        // Update context for next iteration
+                        message_list_destroy(context);
+                        context = message_list_create();
+                        for (int i = 0; i < session->history->count; i++) {
+                            message_list_append(context, session->history->messages[i]);
+                        }
+                        
+                        // Continue loop to get model's response to tool results
+                        ai_model_free_response(response);
+                        continue;
+                    } else {
+                        // No tool calls, send response to user
+                        if (g_config.debug) {
+                            printf("[DEBUG] Sending message to WebChat\n");
+                        }
+                        channel_send_message(CHANNEL_WEBCHAT, response->content);
+                        
+                        ai_model_free_response(response);
+                        break;
+                    }
                 } else {
                     printf("\n[AI Error]: %s\n\n", response->error);
                     ai_model_free_response(response);

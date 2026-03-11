@@ -615,6 +615,137 @@ Content-Type: application/json
 }
 ```
 
+class ReActAgent:
+    """ReAct 范式实现"""
+    
+    def run(self, initial_goal, max_steps=10):
+        """运行 ReAct 循环"""
+        goal = initial_goal
+        history = []
+        
+        for step in range(max_steps):
+            # 1. 思考 (Think)
+            thought = self.think(goal, history)
+            history.append({"type": "thought", "content": thought})
+            
+            # 2. 行动 (Act)
+            action = self.decide_action(thought, history)
+            history.append({"type": "action", "content": action})
+            
+            if action["type"] == "finish":
+                return action["result"]
+            
+            # 3. 观察 (Observe)
+            observation = self.execute_action(action)
+            history.append({"type": "observation", "content": observation})
+            
+            # 4. 更新目标
+            goal = self.update_goal(goal, observation, history)
+            
+            # 5. 检查终止条件
+            if self.is_goal_achieved(goal, history):
+                return self.conclude(history)
+        
+        return self.handle_timeout(history)
+    
+    def think(self, goal, history):
+        """思考步骤"""
+        prompt = f"""
+        目标：{goal}
+        
+        历史记录：
+        {self.format_history(history[-3:])}  # 最近3条记录
+        
+        当前思考：基于以上信息，我应该：
+        1. 分析当前状况
+        2. 确定下一步行动
+        3. 考虑可能的结果
+        
+        思考：
+        """
+        return self.llm.generate(prompt)
+    
+    def decide_action(self, thought, history):
+        """决定行动"""
+        prompt = f"""
+        思考：{thought}
+        
+        可用的工具：
+        {self.format_tools()}
+        
+        请决定下一步行动。格式：
+        行动类型：[tool_call|answer|finish]
+        内容：[工具名和参数|答案|结果]
+        """
+        
+        response = self.llm.generate(prompt)
+        return self.parse_action(response)
+
+
+class PromptEngineering:
+    """Agent 提示工程"""
+    
+    SYSTEM_PROMPT = """你是一个自主智能体，可以调用工具完成任务。
+
+能力：
+1. 规划：将复杂任务分解为步骤
+2. 工具使用：根据需要调用合适的工具
+3. 推理：基于观察进行逻辑推理
+4. 学习：从经验中改进策略
+
+工作流程：
+思考 → 行动 → 观察 → 调整
+
+工具调用格式：
+json
+{
+"action": "tool_name",
+"parameters": {...}
+}
+复制
+如果任务完成，返回：
+json
+{
+"action": "finish",
+"result": "最终结果"
+}
+复制
+"""
+    
+    def create_agent_prompt(self, task, context, tools, memory):
+        """创建 Agent 提示"""
+        prompt_template = """
+# 系统角色
+{system_prompt}
+
+# 可用工具
+{tools_description}
+
+# 相关记忆
+{relevant_memories}
+
+# 任务上下文
+{task_context}
+
+# 当前任务
+{current_task}
+
+# 历史交互
+{interaction_history}
+
+# 输出要求
+{output_format}
+"""
+        return prompt_template.format(
+            system_prompt=self.SYSTEM_PROMPT,
+            tools_description=self._format_tools(tools),
+            relevant_memories=self._format_memories(memory),
+            task_context=context,
+            current_task=task,
+            interaction_history=self._format_history(),
+            output_format=self._get_output_format()
+        )
+
 ---
 
 ## 五、目录结构设计

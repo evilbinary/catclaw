@@ -94,6 +94,79 @@ OpenClaw 采用了以下核心设计理念：
   - **块流式传输**：以粗块发送助手输出
   - **预览流式传输**：在生成时更新临时预览消息
 
+
+
+### 4. Agent 架构设计
+
+Agent（智能体）​ 是一个能够感知环境、自主决策、执行动作以实现目标的智能系统。在 AI 语境中，特指基于大语言模型的自主智能体。
+
+#### Agent 的核心定义
+class Agent:
+    def __init__(self):
+        self.perception = PerceptionSystem()  # 感知
+        self.memory = MemorySystem()         # 记忆
+        self.reasoning = ReasoningSystem()   # 推理
+        self.action = ActionSystem()         # 执行
+        self.goal = GoalSystem()             # 目标
+
+#### 核心设计范式
+
+ReAct 范式 (Reasoning + Acting)
+├── 思考链 (Chain-of-Thought)
+├── 工具调用 (Tool Calling)
+└── 动作执行 (Action Execution)
+
+Agent = LLM (大脑) + Tools (四肢) + Memory (记忆) + Planning (规划)
+
+应用层 (Application Layer)
+├── 任务分解器 (Task Decomposer)
+├── 规划器 (Planner)
+└── 执行器 (Executor)
+
+认知层 (Cognitive Layer)
+├── 工作记忆 (Working Memory)
+├── 长期记忆 (Long-term Memory)
+└── 反思机制 (Reflection)
+
+基础层 (Foundation Layer)
+├── 大语言模型 (LLM)
+├── 向量数据库 (Vector DB)
+└── 工具集 (Toolkit)
+
+
+```graph
+graph TD
+    A[接收任务/目标] --> B[规划与分解]
+    B --> C[选择子任务]
+    C --> D{需要工具?}
+    D -->|是| E[工具选择与调用]
+    D -->|否| F[直接推理]
+    E --> G[执行工具]
+    F --> H[生成回答]
+    G --> I[处理工具结果]
+    H --> J[评估结果]
+    I --> J
+    J --> K{目标完成?}
+    K -->|是| L[任务完成]
+    K -->|否| M[反思与调整]
+    M --> C
+    
+    subgraph "记忆系统"
+        N[存储经验]
+        O[检索相关记忆]
+        P[反思学习]
+    end
+    
+    C --> O
+    J --> N
+    M --> P
+```
+
+### 4 规划与决策模块
+
+
+
+
 ### 5. 模型选择与故障转移
 
 - **选择顺序**：主模型 → 回退模型
