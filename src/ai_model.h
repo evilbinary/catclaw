@@ -3,6 +3,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include "message.h"
 
 // AI model types
 typedef enum {
@@ -32,6 +33,7 @@ bool ai_model_init(const AIModelConfig *config);
 void ai_model_cleanup(void);
 bool ai_model_set_config(const AIModelConfig *config);
 AIModelResponse *ai_model_send_message(const char *message);
+AIModelResponse *ai_model_send_messages(MessageList *messages, const char *system_prompt);
 void ai_model_free_response(AIModelResponse *response);
 
 #endif // AI_MODEL_H

@@ -9,6 +9,10 @@
 #include <string.h>
 #include <unistd.h>
 
+// System prompt for the agent
+static const char* SYSTEM_PROMPT = "你是一个有用的助手，可以帮助用户完成各种任务。请保持对话的连贯性，基于上下文进行回复。";
+#include "log.h"
+
 // ToolCall structure for tool execution
 typedef struct {
     char* id;
@@ -34,7 +38,7 @@ AgentNode* g_default_agent_node = NULL;
 AgentNode* agent_node_create(const char* id, const char* model) {
     AgentNode* node = (AgentNode*)calloc(1, sizeof(AgentNode));
     if (!node) {
-        fprintf(stderr, "Failed to allocate agent node\n");
+        log_error("Failed to allocate agent node\n");
         return NULL;
     }
     
@@ -50,7 +54,7 @@ AgentNode* agent_node_create(const char* id, const char* model) {
     // Initialize message queue
     node->agent.message_queue = queue_init(100);
     if (!node->agent.message_queue) {
-        fprintf(stderr, "Failed to create message queue\n");
+        log_error("Failed to create message queue\n");
         free(node->id);
         free(node->agent.model);
         free(node->agent.steps);
@@ -163,12 +167,12 @@ bool agent_node_start_worker(AgentNode* node) {
     node->worker_running = true;
     int ret = pthread_create(&node->worker_thread, NULL, agent_node_worker_thread, node);
     if (ret != 0) {
-        fprintf(stderr, "Failed to create worker thread: %d\n", ret);
+        log_error("Failed to create worker thread: %d\n", ret);
         switch (ret) {
-            case EAGAIN: fprintf(stderr, "Error: Resource temporarily unavailable\n"); break;
-            case EINVAL: fprintf(stderr, "Error: Invalid argument\n"); break;
-            case EPERM: fprintf(stderr, "Error: Operation not permitted\n"); break;
-            default: fprintf(stderr, "Error: Unknown error\n"); break;
+            case EAGAIN: log_error("Error: Resource temporarily unavailable\n"); break;
+            case EINVAL: log_error("Error: Invalid argument\n"); break;
+            case EPERM: log_error("Error: Operation not permitted\n"); break;
+            default: log_error("Error: Unknown error\n"); break;
         }
         node->worker_running = false;
         return false;
@@ -197,7 +201,7 @@ void* agent_node_worker_thread(void* arg) {
     Agent* agent = &node->agent;
     
     if (g_config.debug) {
-        printf("[DEBUG] Agent node worker thread started\n");
+        log_debug("Agent node worker thread started\n");
     }
     
     while (node->worker_running) {
@@ -206,20 +210,20 @@ void* agent_node_worker_thread(void* arg) {
         if (!item) continue;
         
         if (g_config.debug) {
-            printf("[DEBUG] Dequeued message: %s\n", item->message->content);
+            log_debug("Dequeued message: %s\n", item->message->content);
         }
         
         // 2. Get or create session
         Session* session = session_manager_get_or_create(
             agent->session_manager, item->session_key);
         if (!session) {
-            fprintf(stderr, "Failed to get or create session\n");
+            log_error("Failed to get or create session\n");
             queue_item_destroy(item);
             continue;
         }
         
         if (g_config.debug) {
-            printf("[DEBUG] Got or created session: %s\n", session->session_id);
+            log_debug("Got or created session: %s\n", session->session_id);
         }
         
         // 3. Add user message to session
@@ -230,7 +234,7 @@ void* agent_node_worker_thread(void* arg) {
         item->message = NULL;
         
         if (g_config.debug) {
-            printf("[DEBUG] Added user message to session\n");
+            log_debug("Added user message to session\n");
         }
         
         // 4. Build context
@@ -242,7 +246,7 @@ void* agent_node_worker_thread(void* arg) {
             }
             
             if (g_config.debug) {
-                printf("[DEBUG] Built context with %d messages\n", context->count);
+                log_debug("Built context with %d messages\n", context->count);
             }
             
             // 5. Check and execute compaction (TODO)
@@ -251,25 +255,25 @@ void* agent_node_worker_thread(void* arg) {
             int max_iterations = 10;
             for (int i = 0; i < max_iterations; i++) {
                 if (g_config.debug) {
-                    printf("[DEBUG] Agent loop iteration %d\n", i + 1);
+                    log_debug("Agent loop iteration %d\n", i + 1);
                 }
                 
                 // 6.1 Think: Call AI model with current context
                 if (g_config.debug) {
-                    printf("[DEBUG] Calling AI model\n");
+                    log_debug("Calling AI model with %d messages in context\n", context->count);
                 }
                 
-                AIModelResponse* response = ai_model_send_message(message_content);
+                AIModelResponse* response = ai_model_send_messages(context, SYSTEM_PROMPT);
                 if (!response) {
                     if (g_config.debug) {
-                        printf("[DEBUG] No response from AI model\n");
+                        log_debug("No response from AI model\n");
                     }
                     break;
                 }
                 
                 if (response->success) {
                     if (g_config.debug) {
-                        printf("[DEBUG] AI model returned success\n");
+                        log_debug("AI model returned success\n");
                     }
                     
                     // 6.2 Act: Add assistant message to session
@@ -280,14 +284,14 @@ void* agent_node_worker_thread(void* arg) {
                     
                     // 6.3 Observe: Check for tool calls
                     if (g_config.debug) {
-                        printf("[DEBUG] Checking for tool calls\n");
+                        log_debug("Checking for tool calls\n");
                     }
                     
                     ToolCallList* tool_call_list = parse_tool_calls(response->content);
                     if (tool_call_list && tool_call_list->count > 0) {
                         // Execute tool calls
                         if (g_config.debug) {
-                            printf("[DEBUG] Executing %d tool calls\n", tool_call_list->count);
+                            log_debug("Executing %d tool calls\n", tool_call_list->count);
                         }
                         
                         for (int j = 0; j < tool_call_list->count; j++) {
@@ -296,7 +300,7 @@ void* agent_node_worker_thread(void* arg) {
                             int result_len = 0;
                             
                             if (g_config.debug) {
-                                printf("[DEBUG] Executing tool: %s with args: %s\n", call->name, call->arguments);
+                                log_debug("Executing tool: %s with args: %s\n", call->name, call->arguments);
                             }
                             
                             // Execute tool
@@ -340,7 +344,7 @@ void* agent_node_worker_thread(void* arg) {
                     } else {
                         // No tool calls, send response to user
                         if (g_config.debug) {
-                            printf("[DEBUG] Sending message to WebChat\n");
+                            log_debug("Sending message to WebChat\n");
                         }
                         channel_send_message(CHANNEL_WEBCHAT, response->content);
                         
@@ -357,13 +361,13 @@ void* agent_node_worker_thread(void* arg) {
             message_list_destroy(context);
             
             if (g_config.debug) {
-                printf("[DEBUG] Destroyed context\n");
+                log_debug("Destroyed context\n");
             }
         }
         
         // 7. Save session
         if (g_config.debug) {
-            printf("[DEBUG] Saving session: %s\n", session->session_id);
+            log_debug("Saving session: %s\n", session->session_id);
         }
         session_save(session, g_config.workspace_path);
         
@@ -371,12 +375,12 @@ void* agent_node_worker_thread(void* arg) {
         queue_item_destroy(item);
         
         if (g_config.debug) {
-            printf("[DEBUG] Cleaned up queue item\n");
+            log_debug("Cleaned up queue item\n");
         }
     }
     
     if (g_config.debug) {
-        printf("[DEBUG] Agent node worker thread exiting\n");
+        log_debug("Agent node worker thread exiting\n");
     }
     
     return NULL;

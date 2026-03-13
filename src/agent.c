@@ -11,6 +11,7 @@
 #include <time.h>
 #include <math.h>
 #include <stdarg.h>
+#include "log.h"
 
 // Global agent instance
 Agent g_agent = {
@@ -354,7 +355,7 @@ char *agent_parse_command(const char *command) {
 bool agent_init(void) {
     // Initialize workspace
     if (!workspace_init(g_config.workspace_path)) {
-        fprintf(stderr, "Failed to initialize workspace\n");
+        log_error("Failed to initialize workspace\n");
         return false;
     }
 
@@ -389,7 +390,7 @@ bool agent_init(void) {
     model_config.base_url = g_config.api_base_url;
 
     if (!ai_model_init(&model_config)) {
-        fprintf(stderr, "Failed to initialize AI model\n");
+        log_error("Failed to initialize AI model\n");
         free(g_agent.model);
         g_agent.model = NULL;
         workspace_cleanup();
@@ -399,7 +400,7 @@ bool agent_init(void) {
     // Initialize session manager
     g_agent.session_manager = session_manager_init(g_config.workspace_path, 100);
     if (!g_agent.session_manager) {
-        fprintf(stderr, "Failed to initialize session manager\n");
+        log_error("Failed to initialize session manager\n");
         free(g_agent.model);
         g_agent.model = NULL;
         ai_model_cleanup();
@@ -409,7 +410,7 @@ bool agent_init(void) {
     // Initialize message queue
     g_agent.message_queue = queue_init(100);
     if (!g_agent.message_queue) {
-        fprintf(stderr, "Failed to initialize message queue\n");
+        log_error("Failed to initialize message queue\n");
         session_manager_destroy(g_agent.session_manager);
         free(g_agent.model);
         g_agent.model = NULL;
@@ -420,7 +421,7 @@ bool agent_init(void) {
     // Initialize tool registry
     g_agent.tool_registry = tool_registry_init();
     if (!g_agent.tool_registry) {
-        fprintf(stderr, "Failed to initialize tool registry\n");
+        log_error("Failed to initialize tool registry\n");
         queue_destroy(g_agent.message_queue);
         session_manager_destroy(g_agent.session_manager);
         free(g_agent.model);
@@ -432,7 +433,7 @@ bool agent_init(void) {
     // Initialize memory manager
     g_agent.memory_manager = memory_manager_init(g_config.workspace_path);
     if (!g_agent.memory_manager) {
-        fprintf(stderr, "Failed to initialize memory manager\n");
+        log_error("Failed to initialize memory manager\n");
         tool_registry_destroy(g_agent.tool_registry);
         queue_destroy(g_agent.message_queue);
         session_manager_destroy(g_agent.session_manager);
@@ -445,7 +446,7 @@ bool agent_init(void) {
     // Initialize steps array
     g_agent.steps = (Step *)malloc(sizeof(Step) * g_agent.step_capacity);
     if (!g_agent.steps) {
-        fprintf(stderr, "Failed to allocate steps array\n");
+        log_error("Failed to allocate steps array\n");
         memory_manager_destroy(g_agent.memory_manager);
         tool_registry_destroy(g_agent.tool_registry);
         queue_destroy(g_agent.message_queue);
@@ -470,7 +471,7 @@ bool agent_init(void) {
     
     // Start worker thread
     if (!agent_start_worker_thread()) {
-        fprintf(stderr, "Failed to start worker thread\n");
+        log_error("Failed to start worker thread\n");
         // Cleanup resources
         agent_cleanup();
         return false;
@@ -539,7 +540,7 @@ void agent_cleanup(void) {
 
 bool agent_send_message(const char *message) {
     if (!g_agent.running) {
-        fprintf(stderr, "Agent is not running\n");
+        log_error("Agent is not running\n");
         return false;
     }
 
@@ -548,7 +549,7 @@ bool agent_send_message(const char *message) {
     // Create a new message
     Message *msg = message_create(ROLE_USER, message);
     if (!msg) {
-        fprintf(stderr, "Failed to create message\n");
+        log_error("Failed to create message\n");
         return false;
     }
 
@@ -556,14 +557,14 @@ bool agent_send_message(const char *message) {
     QueueItem *item = queue_item_create("default", msg, QUEUE_MODE_COLLECT);
     if (!item) {
         message_destroy(msg);
-        fprintf(stderr, "Failed to create queue item\n");
+        log_error("Failed to create queue item\n");
         return false;
     }
 
     // Enqueue the message
     if (!queue_enqueue(g_agent.message_queue, item)) {
         queue_item_destroy(item);
-        fprintf(stderr, "Failed to enqueue message\n");
+        log_error("Failed to enqueue message\n");
         return false;
     }
 
@@ -824,7 +825,7 @@ bool agent_start_worker_thread(void) {
     if (!g_default_agent_node) {
         g_default_agent_node = agent_node_create("default", g_agent.model);
         if (!g_default_agent_node) {
-            fprintf(stderr, "Failed to create default agent node\n");
+            log_error("Failed to create default agent node\n");
             return false;
         }
         // Copy agent components to the node
