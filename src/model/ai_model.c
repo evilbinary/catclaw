@@ -138,6 +138,8 @@ bool ai_model_init(const AIModelConfig *config) {
     g_model_config.api_key = config->api_key ? strdup(config->api_key) : NULL;
     g_model_config.model_name = config->model_name ? strdup(config->model_name) : NULL;
     g_model_config.base_url = config->base_url ? strdup(config->base_url) : NULL;
+    g_model_config.temperature = config->temperature > 0 ? config->temperature : 0.7f;
+    g_model_config.max_tokens = config->max_tokens > 0 ? config->max_tokens : 1024;
 
     g_initialized = true;
     printf("AI model initialized: %s\n", g_model_config.model_name);
@@ -367,6 +369,15 @@ AIModelResponse *ai_model_send_message(const char *message) {
                                     cJSON *content = cJSON_GetObjectItem(message, "content");
                                     if (content && cJSON_IsString(content)) {
                                         response = create_response(content->valuestring, true, NULL);
+                                    }
+                                    
+                                    // Extract tool calls
+                                    cJSON *tool_calls = cJSON_GetObjectItem(message, "tool_calls");
+                                    if (tool_calls && cJSON_IsArray(tool_calls)) {
+                                        char *tool_calls_json = cJSON_Print(tool_calls);
+                                        if (response) {
+                                            response->tool_calls = tool_calls_json;
+                                        }
                                     }
                                 }
                             }
@@ -598,6 +609,8 @@ AIModelResponse *ai_model_send_messages(MessageList *messages, const char *syste
                 }
                 
                 cJSON_AddItemToObject(root, "messages", messages_json);
+                cJSON_AddNumberToObject(root, "temperature", g_model_config.temperature);
+                cJSON_AddNumberToObject(root, "max_tokens", g_model_config.max_tokens);
                 payload = cJSON_Print(root);
                 cJSON_Delete(root);
             }
@@ -639,7 +652,7 @@ AIModelResponse *ai_model_send_messages(MessageList *messages, const char *syste
                 }
                 
                 cJSON_AddItemToObject(root, "messages", messages_json);
-                cJSON_AddNumberToObject(root, "max_tokens", 1024);
+                cJSON_AddNumberToObject(root, "max_tokens", g_model_config.max_tokens);
                 payload = cJSON_Print(root);
                 cJSON_Delete(root);
             }
@@ -708,7 +721,7 @@ AIModelResponse *ai_model_send_messages(MessageList *messages, const char *syste
                 }
                 cJSON_AddStringToObject(root, "model", model_name);
                 cJSON_AddStringToObject(root, "prompt", messages && messages->count > 0 ? messages->messages[messages->count - 1]->content : "");
-                cJSON_AddNumberToObject(root, "max_tokens", 1024);
+                cJSON_AddNumberToObject(root, "max_tokens", g_model_config.max_tokens);
                 cJSON_AddBoolToObject(root, "stream", false);
                 payload = cJSON_Print(root);
                 cJSON_Delete(root);
@@ -859,6 +872,9 @@ void ai_model_free_response(AIModelResponse *response) {
         }
         if (response->error) {
             free(response->error);
+        }
+        if (response->tool_calls) {
+            free(response->tool_calls);
         }
         free(response);
     }

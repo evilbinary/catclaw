@@ -547,8 +547,10 @@ Tool* tool_read_create(void) {
 
 ### 4.6 模型调用流程
 
+#### 4.6.1 调用流程图
+
 ```
-输入：MessageList（上下文）
+输入：MessageList（上下文） + System Prompt
     ↓
 构建 API 请求 (build_api_request())
     ├─→ 序列化消息为 JSON
@@ -564,10 +566,12 @@ Tool* tool_read_create(void) {
     ├─→ 提取助手消息
     └─→ 提取工具调用
     ↓
-返回 ModelResponse
+返回 ModelResponse（包含 content 和 tool_calls）
 ```
 
-**HTTP 请求格式（OpenAI 兼容）：**
+#### 4.6.2 HTTP 请求格式
+
+**OpenAI 兼容格式：**
 ```http
 POST https://api.openai.com/v1/chat/completions
 Authorization: Bearer YOUR_API_KEY
@@ -584,7 +588,39 @@ Content-Type: application/json
 }
 ```
 
-**响应格式：**
+**Anthropic 格式：**
+```http
+POST https://api.anthropic.com/v1/messages
+x-api-key: YOUR_API_KEY
+anthropic-version: 2023-06-01
+Content-Type: application/json
+
+{
+  "model": "claude-3-opus-20240229",
+  "system": "你是一个有用的助手",
+  "messages": [
+    {"role": "user", "content": "你好"}
+  ],
+  "max_tokens": 1024
+}
+```
+
+**Llama 格式：**
+```http
+POST http://localhost:11434/api/generate
+Content-Type: application/json
+
+{
+  "model": "llama3.2",
+  "prompt": "你好",
+  "max_tokens": 1024,
+  "stream": false
+}
+```
+
+#### 4.6.3 响应格式
+
+**OpenAI 响应格式：**
 ```json
 {
   "id": "chatcmpl-123",
@@ -615,136 +651,212 @@ Content-Type: application/json
 }
 ```
 
-class ReActAgent:
-    """ReAct 范式实现"""
-    
-    def run(self, initial_goal, max_steps=10):
-        """运行 ReAct 循环"""
-        goal = initial_goal
-        history = []
-        
-        for step in range(max_steps):
-            # 1. 思考 (Think)
-            thought = self.think(goal, history)
-            history.append({"type": "thought", "content": thought})
-            
-            # 2. 行动 (Act)
-            action = self.decide_action(thought, history)
-            history.append({"type": "action", "content": action})
-            
-            if action["type"] == "finish":
-                return action["result"]
-            
-            # 3. 观察 (Observe)
-            observation = self.execute_action(action)
-            history.append({"type": "observation", "content": observation})
-            
-            # 4. 更新目标
-            goal = self.update_goal(goal, observation, history)
-            
-            # 5. 检查终止条件
-            if self.is_goal_achieved(goal, history):
-                return self.conclude(history)
-        
-        return self.handle_timeout(history)
-    
-    def think(self, goal, history):
-        """思考步骤"""
-        prompt = f"""
-        目标：{goal}
-        
-        历史记录：
-        {self.format_history(history[-3:])}  # 最近3条记录
-        
-        当前思考：基于以上信息，我应该：
-        1. 分析当前状况
-        2. 确定下一步行动
-        3. 考虑可能的结果
-        
-        思考：
-        """
-        return self.llm.generate(prompt)
-    
-    def decide_action(self, thought, history):
-        """决定行动"""
-        prompt = f"""
-        思考：{thought}
-        
-        可用的工具：
-        {self.format_tools()}
-        
-        请决定下一步行动。格式：
-        行动类型：[tool_call|answer|finish]
-        内容：[工具名和参数|答案|结果]
-        """
-        
-        response = self.llm.generate(prompt)
-        return self.parse_action(response)
-
-
-class PromptEngineering:
-    """Agent 提示工程"""
-    
-    SYSTEM_PROMPT = """你是一个自主智能体，可以调用工具完成任务。
-
-能力：
-1. 规划：将复杂任务分解为步骤
-2. 工具使用：根据需要调用合适的工具
-3. 推理：基于观察进行逻辑推理
-4. 学习：从经验中改进策略
-
-工作流程：
-思考 → 行动 → 观察 → 调整
-
-工具调用格式：
-json
+**Anthropic 响应格式：**
+```json
 {
-"action": "tool_name",
-"parameters": {...}
+  "id": "msg-123",
+  "type": "message",
+  "role": "assistant",
+  "content": [
+    {
+      "type": "text",
+      "text": "你好！有什么可以帮助你的？"
+    }
+  ],
+  "stop_reason": "end_turn",
+  "usage": {
+    "input_tokens": 50,
+    "output_tokens": 100
+  }
 }
-复制
-如果任务完成，返回：
-json
+```
+
+**Llama 响应格式：**
+```json
 {
-"action": "finish",
-"result": "最终结果"
+  "model": "llama3.2",
+  "created_at": "2026-03-13T05:05:01.759753189Z",
+  "response": "你好！有什么可以帮助你的？",
+  "done": true,
+  "done_reason": "stop",
+  "context": [128006, 9125, 128007, 271, 38766, 1303, 33025, 2696, 25, 6790, 220, 2366, 18, 271, 128009],
+  "total_duration": 8734927298,
+  "load_duration": 1611376481,
+  "prompt_eval_count": 26,
+  "prompt_eval_duration": 4986391830,
+  "eval_count": 10,
+  "eval_duration": 2103854783
 }
-复制
-"""
+```
+
+#### 4.6.4 错误处理
+
+**错误响应格式：**
+```json
+{
+  "error": {
+    "message": "Invalid API key",
+    "type": "invalid_request_error",
+    "param": null,
+    "code": "invalid_api_key"
+  }
+}
+```
+
+**错误处理流程：**
+```
+接收响应
+    ↓
+检查 HTTP 状态码
+    ├─→ 2xx → 继续处理
+    ├─→ 4xx → 客户端错误，检查参数
+    └─→ 5xx → 服务器错误，重试
+    ↓
+解析 JSON
+    ↓
+检查 error 字段
+    ├─→ 存在 → 返回错误信息
+    └─→ 不存在 → 提取内容
+    ↓
+返回 ModelResponse（success = false）
+```
+
+#### 4.6.5 工具调用处理
+
+**工具调用流程：**
+```
+AI 模型返回响应
+    ↓
+检查 tool_calls 字段
+    ├─→ 存在 → 解析工具调用
+    │   ├─→ 提取工具 ID
+    │   ├─→ 提取工具名称
+    │   └─→ 提取工具参数
+    │   ↓
+    │   执行工具
+    │   ├─→ 查找工具注册表
+    │   ├─→ 调用工具函数
+    │   └─→ 获取执行结果
+    │   ↓
+    │   添加工具结果到会话
+    │   ↓
+    │   继续循环，获取 AI 响应
+    │
+    └─→ 不存在 → 直接返回响应给用户
+```
+
+**工具调用数据结构：**
+```c
+typedef struct {
+    char* id;        // 工具调用 ID
+    char* name;      // 工具名称
+    char* arguments; // 工具参数（JSON 字符串）
+} ToolCall;
+
+typedef struct {
+    int count;
+    ToolCall* calls;
+} ToolCallList;
+```
+
+#### 4.6.6 C 语言实现示例
+
+```c
+// 模型调用函数
+AIModelResponse* ai_model_send_messages(MessageList* messages, const char* system_prompt) {
+    // 1. 初始化 curl
+    CURL* curl = curl_easy_init();
     
-    def create_agent_prompt(self, task, context, tools, memory):
-        """创建 Agent 提示"""
-        prompt_template = """
-# 系统角色
-{system_prompt}
+    // 2. 构建请求
+    cJSON* root = cJSON_CreateObject();
+    cJSON_AddStringToObject(root, "model", g_model_config.model_name);
+    
+    // 添加消息
+    cJSON* messages_json = cJSON_CreateArray();
+    
+    // 添加系统提示
+    if (system_prompt && strlen(system_prompt) > 0) {
+        cJSON* system_msg = cJSON_CreateObject();
+        cJSON_AddStringToObject(system_msg, "role", "system");
+        cJSON_AddStringToObject(system_msg, "content", system_prompt);
+        cJSON_AddItemToArray(messages_json, system_msg);
+    }
+    
+    // 添加对话历史
+    for (int i = 0; i < messages->count; i++) {
+        cJSON* msg_obj = cJSON_CreateObject();
+        const char* role_str = "user";
+        if (messages->messages[i]->role == ROLE_ASSISTANT) {
+            role_str = "assistant";
+        } else if (messages->messages[i]->role == ROLE_SYSTEM) {
+            role_str = "system";
+        } else if (messages->messages[i]->role == ROLE_TOOL) {
+            role_str = "tool";
+        }
+        cJSON_AddStringToObject(msg_obj, "role", role_str);
+        cJSON_AddStringToObject(msg_obj, "content", messages->messages[i]->content);
+        cJSON_AddItemToArray(messages_json, msg_obj);
+    }
+    
+    cJSON_AddItemToObject(root, "messages", messages_json);
+    cJSON_AddNumberToObject(root, "temperature", g_model_config.temperature);
+    cJSON_AddNumberToObject(root, "max_tokens", g_model_config.max_tokens);
+    
+    // 3. 发送请求
+    char* payload = cJSON_Print(root);
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, payload);
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+    CURLcode res = curl_easy_perform(curl);
+    
+    // 4. 解析响应
+    if (res == CURLE_OK) {
+        cJSON* response_json = cJSON_Parse(response_buffer);
+        if (response_json) {
+            // 提取内容
+            cJSON* choices = cJSON_GetObjectItem(response_json, "choices");
+            if (choices && cJSON_IsArray(choices)) {
+                cJSON* choice = cJSON_GetArrayItem(choices, 0);
+                cJSON* message = cJSON_GetObjectItem(choice, "message");
+                cJSON* content = cJSON_GetObjectItem(message, "content");
+                if (content && cJSON_IsString(content)) {
+                    response = create_response(content->valuestring, true, NULL);
+                }
+                
+                // 提取工具调用
+                cJSON* tool_calls = cJSON_GetObjectItem(message, "tool_calls");
+                if (tool_calls && cJSON_IsArray(tool_calls)) {
+                    char* tool_calls_json = cJSON_Print(tool_calls);
+                    if (response) {
+                        response->tool_calls = tool_calls_json;
+                    }
+                }
+            }
+        }
+    }
+    
+    // 5. 清理
+    curl_easy_cleanup(curl);
+    cJSON_Delete(root);
+    free(payload);
+    
+    return response;
+}
+```
 
-# 可用工具
-{tools_description}
+#### 4.6.7 参数说明
 
-# 相关记忆
-{relevant_memories}
-
-# 任务上下文
-{task_context}
-
-# 当前任务
-{current_task}
-
-# 历史交互
-{interaction_history}
-
-# 输出要求
-{output_format}
-"""
-        return prompt_template.format(
-            system_prompt=self.SYSTEM_PROMPT,
-            tools_description=self._format_tools(tools),
-            relevant_memories=self._format_memories(memory),
-            task_context=context,
-            current_task=task,
-            interaction_history=self._format_history(),
-            output_format=self._get_output_format()
-        )
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|----------|------|
+| model | string | - | 模型名称（如 gpt-3.5-turbo, claude-3-opus-20240229） |
+| messages | array | - | 消息数组，包含对话历史 |
+| system | string | - | 系统提示词（Anthropic 专用） |
+| temperature | float | 0.7 | 控制输出的随机性（0.0-2.0） |
+| max_tokens | integer | 1024 | 最大生成 token 数量 |
+| stream | boolean | false | 是否使用流式输出 |
+| top_p | float | 1.0 | 核采样参数 |
+| frequency_penalty | float | 0.0 | 频率惩罚参数 |
+| presence_penalty | float | 0.0 | 存在惩罚参数 |
 
 ---
 

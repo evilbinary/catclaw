@@ -19,6 +19,8 @@ typedef struct {
     char *api_key;
     char *model_name;
     char *base_url;
+    float temperature;
+    int max_tokens;
 } AIModelConfig;
 
 // AI model response
@@ -26,6 +28,7 @@ typedef struct {
     char *content;
     bool success;
     char *error;
+    char *tool_calls;  // JSON string of tool calls
 } AIModelResponse;
 
 // Functions

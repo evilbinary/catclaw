@@ -4,6 +4,7 @@
 #include "ai_model.h"
 #include "agent.h"
 #include "tool.h"
+#include "cJSON.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -195,6 +196,61 @@ static ToolCallList* parse_tool_calls(const char* content) {
     return NULL;
 }
 
+// Parse tool calls from JSON array
+static ToolCallList* parse_tool_calls_from_json(cJSON* tool_calls_json) {
+    if (!tool_calls_json || !cJSON_IsArray(tool_calls_json)) {
+        return NULL;
+    }
+    
+    ToolCallList* list = (ToolCallList*)malloc(sizeof(ToolCallList));
+    if (!list) {
+        return NULL;
+    }
+    
+    list->count = cJSON_GetArraySize(tool_calls_json);
+    list->calls = (ToolCall*)malloc(sizeof(ToolCall) * list->count);
+    if (!list->calls) {
+        free(list);
+        return NULL;
+    }
+    
+    for (int i = 0; i < list->count; i++) {
+        cJSON* tool_call = cJSON_GetArrayItem(tool_calls_json, i);
+        if (!tool_call) {
+            continue;
+        }
+        
+        cJSON* id = cJSON_GetObjectItem(tool_call, "id");
+        cJSON* type = cJSON_GetObjectItem(tool_call, "type");
+        cJSON* function = cJSON_GetObjectItem(tool_call, "function");
+        
+        if (id && cJSON_IsString(id) && function && cJSON_IsObject(function)) {
+            list->calls[i].id = strdup(id->valuestring);
+            
+            cJSON* name = cJSON_GetObjectItem(function, "name");
+            cJSON* arguments = cJSON_GetObjectItem(function, "arguments");
+            
+            if (name && cJSON_IsString(name)) {
+                list->calls[i].name = strdup(name->valuestring);
+            } else {
+                list->calls[i].name = strdup("unknown");
+            }
+            
+            if (arguments && cJSON_IsString(arguments)) {
+                list->calls[i].arguments = strdup(arguments->valuestring);
+            } else {
+                list->calls[i].arguments = strdup("{}");
+            }
+        } else {
+            list->calls[i].id = strdup("");
+            list->calls[i].name = strdup("unknown");
+            list->calls[i].arguments = strdup("{}");
+        }
+    }
+    
+    return list;
+}
+
 // Worker thread function
 void* agent_node_worker_thread(void* arg) {
     AgentNode* node = (AgentNode*)arg;
@@ -287,7 +343,22 @@ void* agent_node_worker_thread(void* arg) {
                         log_debug("Checking for tool calls\n");
                     }
                     
-                    ToolCallList* tool_call_list = parse_tool_calls(response->content);
+                    ToolCallList* tool_call_list = NULL;
+                    
+                    // First, try to use tool_calls from AI model response
+                    if (response->tool_calls && strlen(response->tool_calls) > 0) {
+                        cJSON *tool_calls_json = cJSON_Parse(response->tool_calls);
+                        if (tool_calls_json) {
+                            tool_call_list = parse_tool_calls_from_json(tool_calls_json);
+                            cJSON_Delete(tool_calls_json);
+                        }
+                    }
+                    
+                    // If no tool_calls in response, try to parse from content
+                    if (!tool_call_list || tool_call_list->count == 0) {
+                        tool_call_list = parse_tool_calls(response->content);
+                    }
+                    
                     if (tool_call_list && tool_call_list->count > 0) {
                         // Execute tool calls
                         if (g_config.debug) {
@@ -369,7 +440,11 @@ void* agent_node_worker_thread(void* arg) {
         if (g_config.debug) {
             log_debug("Saving session: %s\n", session->session_id);
         }
-        session_save(session, g_config.workspace_path);
+        
+        // Build sessions directory path
+        char sessions_dir[512];
+        snprintf(sessions_dir, sizeof(sessions_dir), "%s/sessions", g_config.workspace_path);
+        session_save(session, sessions_dir);
         
         // Cleanup
         queue_item_destroy(item);

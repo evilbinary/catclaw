@@ -388,6 +388,8 @@ bool agent_init(void) {
     model_config.model_name = g_config.model_name;
     model_config.api_key = g_config.api_key ? g_config.api_key : (getenv("ANTHROPIC_API_KEY") ? getenv("ANTHROPIC_API_KEY") : getenv("OPENAI_API_KEY"));
     model_config.base_url = g_config.api_base_url;
+    model_config.temperature = 0.7f;
+    model_config.max_tokens = 1024;
 
     if (!ai_model_init(&model_config)) {
         log_error("Failed to initialize AI model\n");
@@ -398,7 +400,9 @@ bool agent_init(void) {
     }
 
     // Initialize session manager
-    g_agent.session_manager = session_manager_init(g_config.workspace_path, 100);
+    char sessions_dir[512];
+    snprintf(sessions_dir, sizeof(sessions_dir), "%s/sessions", g_config.workspace_path);
+    g_agent.session_manager = session_manager_init(sessions_dir, 100);
     if (!g_agent.session_manager) {
         log_error("Failed to initialize session manager\n");
         free(g_agent.model);
