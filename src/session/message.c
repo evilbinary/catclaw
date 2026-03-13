@@ -3,9 +3,9 @@
 #include <string.h>
 #include <time.h>
 
-#include "log.h"
+#include "common/log.h"
 #include "message.h"
-#include "cJSON.h"
+ #include "common/cJSON.h"
 
 // Create a new message
 Message* message_create(MessageRole role, const char* content) {

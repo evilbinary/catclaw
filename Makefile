@@ -1,5 +1,5 @@
 CC = gcc
-CFLAGS = -Wall -Wextra -O2
+CFLAGS = -Wall -Wextra -O2 -I. -I./src
 
 # Platform-specific flags
 ifeq ($(OS),Windows_NT)
@@ -31,6 +31,7 @@ else
         CFLAGS += -DNO_CURL
     endif
 endif
+
 
 all: $(TARGET)
 

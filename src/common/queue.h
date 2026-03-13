@@ -2,7 +2,7 @@
 #define QUEUE_H
 
 #include <pthread.h>
-#include "message.h"
+#include "session/message.h"
 
 // Queue mode enumeration
 typedef enum {

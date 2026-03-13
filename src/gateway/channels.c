@@ -1,5 +1,5 @@
 #include "channels.h"
-#include "agent.h"
+#include "agent/agent.h"
 #include "telegram.h"
 #include "discord.h"
 #include <stdio.h>

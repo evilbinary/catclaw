@@ -4,7 +4,7 @@
 #include <time.h>
 
 #include "tool.h"
-#include "cJSON.h"
+ #include "common/cJSON.h"
 
 // Create a tool
 Tool* tool_create(const char* name, const char* description, const char* parameters_schema, int (*execute)(const char* args, char** result, int* result_len)) {

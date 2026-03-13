@@ -1,7 +1,7 @@
 #ifndef MODEL_H
 #define MODEL_H
 
-#include "message.h"
+#include "session/message.h"
 
 // Model response structure
 typedef struct {

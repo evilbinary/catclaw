@@ -13,7 +13,7 @@
 #endif
 
 #include "session.h"
-#include "cJSON.h"
+ #include "common/cJSON.h"
 
 // Create a new session
 Session* session_create(const char* session_key) {

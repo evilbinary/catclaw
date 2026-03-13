@@ -13,7 +13,7 @@
 #endif
 
 #include "memory.h"
-#include "cJSON.h"
+#include "common/cJSON.h"
 
 // Initialize memory manager
 MemoryManager* memory_manager_init(const char* memory_dir) {
