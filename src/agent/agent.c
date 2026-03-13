@@ -1,17 +1,21 @@
 #include "agent.h"
 #include "context.h"
-#include "config.h"
-#include "channels.h"
-#include "ai_model.h"
-#include "skill.h"
-#include "workspace.h"
+#include "common/config.h"
+#include "gateway/channels.h"
+#include "model/ai_model.h"
+#include "tool/skill.h"
+#include "common/workspace.h"
+#include "session/session.h"
+#include "session/message.h"
+#include "tool/tool.h"
+#include "memory/memory.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 #include <math.h>
 #include <stdarg.h>
-#include "log.h"
+#include "common/log.h"
 
 // Global agent instance
 Agent g_agent = {

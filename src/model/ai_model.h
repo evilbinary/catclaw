@@ -3,7 +3,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
-#include "message.h"
+#include "session/message.h"
 
 // AI model types
 typedef enum {

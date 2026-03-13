@@ -1,10 +1,13 @@
 #include "context.h"
-#include "config.h"
-#include "channels.h"
-#include "ai_model.h"
-#include "agent.h"
-#include "tool.h"
-#include "cJSON.h"
+#include "common/config.h"
+#include "gateway/channels.h"
+#include "model/ai_model.h"
+#include "agent/agent.h"
+#include "tool/tool.h"
+#include "common/cJSON.h"
+#include "session/session.h"
+#include "session/message.h"
+#include "common/queue.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -12,7 +15,7 @@
 
 // System prompt for the agent
 static const char* SYSTEM_PROMPT = "你是一个有用的助手，可以帮助用户完成各种任务。请保持对话的连贯性，基于上下文进行回复。";
-#include "log.h"
+#include "common/log.h"
 
 // ToolCall structure for tool execution
 typedef struct {

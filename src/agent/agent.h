@@ -2,11 +2,11 @@
 #define AGENT_H
 
 #include <stdbool.h>
-#include "message.h"
-#include "session.h"
-#include "queue.h"
-#include "tool.h"
-#include "memory.h"
+#include "session/message.h"
+#include "session/session.h"
+#include "common/queue.h"
+#include "tool/tool.h"
+#include "memory/memory.h"
 
 // Step structure for multi-step execution
 typedef struct {

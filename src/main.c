@@ -3,15 +3,15 @@
 #include <string.h>
 #include <pthread.h>
 
-#include "config.h"
-#include "gateway.h"
-#include "channels.h"
-#include "agent.h"
-#include "plugin.h"
-#include "skill.h"
-#include "log.h"
-#include "thread_pool.h"
-#include "ai_model.h"
+#include "common/config.h"
+#include "gateway/gateway.h"
+#include "gateway/channels.h"
+#include "agent/agent.h"
+#include "common/plugin.h"
+#include "tool/skill.h"
+#include "common/log.h"
+#include "common/thread_pool.h"
+#include "model/ai_model.h"
 
 // External reference to channels array
 extern Channel channels[CHANNEL_MAX];
