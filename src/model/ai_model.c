@@ -208,6 +208,7 @@ static AIModelResponse *create_response(const char *content, bool success, const
     response->content = content ? strdup(content) : NULL;
     response->success = success;
     response->error = error ? strdup(error) : NULL;
+    response->tool_calls = NULL;
 
     return response;
 }
