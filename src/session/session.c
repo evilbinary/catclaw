@@ -305,7 +305,7 @@ bool session_save(Session* session, const char* sessions_dir) {
             if (written != strlen(metadata_json)) {
                 log_error("Error: Failed to write all metadata to file\n");
             } else {
-                printf("Successfully wrote metadata to file\n");
+                log_debug("Successfully wrote metadata to file\n");
             }
             fclose(metadata_fp);
         } else {
