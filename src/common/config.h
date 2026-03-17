@@ -32,6 +32,7 @@ typedef struct {
     bool auto_save;           // 是否自动保存会话
     char *default_session_key; // 默认会话密钥
     int max_history_per_session; // 每个会话的最大历史消息数
+    int context_history_limit; // 构建上下文时加载的历史消息数量限制（默认5条）
 } SessionConfig;
 
 // Logging configuration

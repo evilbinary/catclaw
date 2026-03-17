@@ -302,13 +302,19 @@ void* agent_node_worker_thread(void* arg) {
         // 4. Build context
         MessageList* context = message_list_create();
         if (context) {
-            // Load session history
-            for (int i = 0; i < session->history->count; i++) {
+            // Load session history with limit (context_history_limit)
+            int limit = g_config.session.context_history_limit > 0 ? 
+                        g_config.session.context_history_limit : 5;
+            int start_idx = session->history->count > limit ? 
+                           session->history->count - limit : 0;
+            
+            for (int i = start_idx; i < session->history->count; i++) {
                 message_list_append(context, session->history->messages[i]);
             }
             
             if (g_config.debug) {
-                log_debug("Built context with %d messages\n", context->count);
+                log_debug("Built context with %d messages (limit: %d, total history: %d)\n", 
+                         context->count, limit, session->history->count);
             }
             
             // 5. Check and execute compaction (TODO)

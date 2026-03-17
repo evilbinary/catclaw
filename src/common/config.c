@@ -37,7 +37,8 @@ Config g_config = {
         .max_sessions = 100,
         .auto_save = true,
         .default_session_key = NULL,
-        .max_history_per_session = 1000
+        .max_history_per_session = 1000,
+        .context_history_limit = 5
     },
     // Logging config defaults
     .logging = {
@@ -196,6 +197,11 @@ static void parse_session_config(cJSON *session) {
     cJSON *max_history = cJSON_GetObjectItem(session, "max_history_per_session");
     if (max_history && cJSON_IsNumber(max_history)) {
         g_config.session.max_history_per_session = (int)max_history->valuedouble;
+    }
+    
+    cJSON *context_limit = cJSON_GetObjectItem(session, "context_history_limit");
+    if (context_limit && cJSON_IsNumber(context_limit)) {
+        g_config.session.context_history_limit = (int)context_limit->valuedouble;
     }
 }
 
@@ -517,6 +523,7 @@ void config_print(void) {
     printf("    Auto Save: %s\n", g_config.session.auto_save ? "true" : "false");
     printf("    Default Session Key: %s\n", g_config.session.default_session_key ? g_config.session.default_session_key : "default");
     printf("    Max History Per Session: %d\n", g_config.session.max_history_per_session);
+    printf("    Context History Limit: %d\n", g_config.session.context_history_limit);
     printf("  Logging:\n");
     printf("    Level: %s\n", g_config.logging.level ? g_config.logging.level : "(default)");
     printf("    File: %s\n", g_config.logging.file ? g_config.logging.file : "(none)");
