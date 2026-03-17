@@ -13,8 +13,8 @@
 #include <string.h>
 #include <unistd.h>
 
-// System prompt for the agent
-static const char* SYSTEM_PROMPT = "你是一个有用的助手，可以帮助用户完成各种任务。请保持对话的连贯性，基于上下文进行回复。";
+// Default system prompt for the agent
+static const char* DEFAULT_SYSTEM_PROMPT = "你是一个有用的助手，可以帮助用户完成各种任务。请保持对话的连贯性，基于上下文进行回复。";
 #include "common/log.h"
 
 // ToolCall structure for tool execution
@@ -325,7 +325,11 @@ void* agent_node_worker_thread(void* arg) {
                     log_debug("Calling AI model with %d messages in context\n", context->count);
                 }
                 
-                AIModelResponse* response = ai_model_send_messages(context, SYSTEM_PROMPT);
+                // Use configured system prompt or default
+                const char* system_prompt = g_config.agent.system_prompt ? 
+                                           g_config.agent.system_prompt : 
+                                           DEFAULT_SYSTEM_PROMPT;
+                AIModelResponse* response = ai_model_send_messages(context, system_prompt);
                 if (!response) {
                     if (g_config.debug) {
                         log_debug("No response from AI model\n");
@@ -358,11 +362,6 @@ void* agent_node_worker_thread(void* arg) {
                             tool_call_list = parse_tool_calls_from_json(tool_calls_json);
                             cJSON_Delete(tool_calls_json);
                         }
-                    }
-                    
-                    // If no tool_calls in response, try to parse from content
-                    if (!tool_call_list || tool_call_list->count == 0) {
-                        tool_call_list = parse_tool_calls(response->content);
                     }
                     
                     if (tool_call_list && tool_call_list->count > 0) {
