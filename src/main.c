@@ -3,6 +3,10 @@
 #include <string.h>
 #include <pthread.h>
 
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
 #include "common/config.h"
 #include "gateway/gateway.h"
 #include "gateway/channels.h"
@@ -63,6 +67,11 @@ static void stop_gateway_server(void) {
 }
 
 int main(int argc, char *argv[]) {
+#ifdef _WIN32
+    // Set console to UTF-8 mode for proper Chinese character display
+    SetConsoleOutputCP(CP_UTF8);
+    SetConsoleCP(CP_UTF8);
+#endif
     printf("🐦 CatClaw - C version\n");
     printf("Based on OpenClaw functionality\n\n");
 
@@ -131,15 +140,48 @@ int main(int argc, char *argv[]) {
     printf("\n");
 
     // Simple command loop
-    char command[256];
+    char command[1024];  // Increase buffer size for UTF-8 characters
     while (1) {
         printf("catclaw> ");
+        fflush(stdout);
+        
+#ifdef _WIN32
+        // Use Windows API to read UTF-8 input
+        wchar_t wcommand[1024];
+        DWORD read;
+        HANDLE hStdin = GetStdHandle(STD_INPUT_HANDLE);
+        if (ReadConsoleW(hStdin, wcommand, 1024, &read, NULL)) {
+            // Remove carriage return and newline
+            while (read > 0 && (wcommand[read-1] == L'\r' || wcommand[read-1] == L'\n')) {
+                wcommand[--read] = L'\0';
+            }
+            // Convert UTF-16 to UTF-8
+            int len = WideCharToMultiByte(CP_UTF8, 0, wcommand, -1, command, sizeof(command), NULL, NULL);
+            if (len > 0) {
+                command[len-1] = '\0';  // Remove null terminator
+            } else {
+                command[0] = '\0';
+            }
+        } else {
+            // Fallback to fgets
+            if (fgets(command, sizeof(command), stdin) == NULL) {
+                break;
+            }
+            command[strcspn(command, "\n")] = 0;
+        }
+#else
         if (fgets(command, sizeof(command), stdin) == NULL) {
             break;
         }
-
-        // Remove newline
         command[strcspn(command, "\n")] = 0;
+#endif
+        
+        // Debug: print raw input
+        printf("[DEBUG] Raw input length: %zu, content: ", strlen(command));
+        for (size_t i = 0; i < strlen(command); i++) {
+            printf("%02x ", (unsigned char)command[i]);
+        }
+        printf("\n");
 
         if (strlen(command) > 0) {
             if (command[0] == '/') {
