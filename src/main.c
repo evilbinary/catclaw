@@ -177,11 +177,11 @@ int main(int argc, char *argv[]) {
 #endif
         
         // Debug: print raw input
-        printf("[DEBUG] Raw input length: %zu, content: ", strlen(command));
+        log_debug("Raw input length: %zu, content: ", strlen(command));
         for (size_t i = 0; i < strlen(command); i++) {
-            printf("%02x ", (unsigned char)command[i]);
+            log_debug("%02x ", (unsigned char)command[i]);
         }
-        printf("\n");
+        log_debug("\n");
 
         if (strlen(command) > 0) {
             if (command[0] == '/') {
