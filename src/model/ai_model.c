@@ -721,7 +721,29 @@ AIModelResponse *ai_model_send_messages(MessageList *messages, const char *syste
                     model_name = slash_pos + 1;
                 }
                 cJSON_AddStringToObject(root, "model", model_name);
-                cJSON_AddStringToObject(root, "prompt", messages && messages->count > 0 ? messages->messages[messages->count - 1]->content : "");
+                
+                // Build full conversation history for Llama
+                char prompt[4096] = "";
+                if (system_prompt && strlen(system_prompt) > 0) {
+                    snprintf(prompt, sizeof(prompt), "[INST] %s [/INST]\n\n", system_prompt);
+                }
+                
+                if (messages) {
+                    for (int i = 0; i < messages->count; i++) {
+                        if (messages->messages[i]) {
+                            if (messages->messages[i]->role == ROLE_USER) {
+                                strncat(prompt, "[INST] ", sizeof(prompt) - strlen(prompt) - 1);
+                                strncat(prompt, messages->messages[i]->content, sizeof(prompt) - strlen(prompt) - 1);
+                                strncat(prompt, " [/INST]\n", sizeof(prompt) - strlen(prompt) - 1);
+                            } else if (messages->messages[i]->role == ROLE_ASSISTANT) {
+                                strncat(prompt, messages->messages[i]->content, sizeof(prompt) - strlen(prompt) - 1);
+                                strncat(prompt, "\n\n", sizeof(prompt) - strlen(prompt) - 1);
+                            }
+                        }
+                    }
+                }
+                
+                cJSON_AddStringToObject(root, "prompt", prompt);
                 cJSON_AddNumberToObject(root, "max_tokens", g_model_config.max_tokens);
                 cJSON_AddBoolToObject(root, "stream", false);
                 payload = cJSON_Print(root);

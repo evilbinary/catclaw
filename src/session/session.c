@@ -3,6 +3,7 @@
 #include <string.h>
 #include <time.h>
 #include <sys/stat.h>
+#include <errno.h>
 
 #ifdef _WIN32
 #include <direct.h>
@@ -73,30 +74,168 @@ bool session_add_message(Session* session, Message* message) {
 }
 
 // Save session to files
-bool session_save(Session* session, const char* sessions_dir) {
-    if (!session || !sessions_dir) {
+// Recursive directory creation
+static bool create_directory_recursive(const char* path) {
+    char* dir = strdup(path);
+    if (!dir) {
         return false;
     }
     
+    printf("Original path: %s\n", dir);
+    
+    // Handle tilde expansion first
+    if (dir[0] == '~') {
+        char* home = getenv("HOME");
+#ifdef _WIN32
+        if (!home) {
+            home = getenv("USERPROFILE");
+        }
+#endif
+        if (home) {
+            char* expanded = (char*)malloc(strlen(home) + strlen(dir) + 1);
+            if (expanded) {
+                strcpy(expanded, home);
+                strcat(expanded, dir + 1);
+                free(dir);
+                dir = expanded;
+                printf("Expanded path: %s\n", dir);
+            }
+        }
+    }
+    
+    // Convert slashes to backslashes for Windows
+    char* p = dir;
+    while (*p) {
+        if (*p == '/') {
+            *p = '\\';
+        }
+        p++;
+    }
+    
+    printf("Converted path: %s\n", dir);
+    
+    // Create directories recursively
+    char temp_path[512];
+    strcpy(temp_path, dir);
+    
+    p = temp_path;
+    // Skip the drive letter and colon (e.g., "E:\")
+    if (strlen(temp_path) > 2 && temp_path[1] == ':') {
+        p += 2;
+    }
+    
+    // Skip any leading backslashes
+    while (*p == '\\') {
+        p++;
+    }
+    
+    while ((p = strchr(p, '\\')) != NULL) {
+        *p = '\0';
+        
+        // Only create if it's not just the drive letter
+        if (strlen(temp_path) > 2 || (strlen(temp_path) == 2 && temp_path[1] != ':')) {
+            printf("Creating directory: %s\n", temp_path);
+            if (stat(temp_path, &(struct stat){}) != 0) {
+                if (MKDIR(temp_path) != 0) {
+                    printf("Error creating directory: %s. Error code: %d\n", temp_path, errno);
+                    perror("MKDIR");
+                    free(dir);
+                    return false;
+                } else {
+                    printf("Successfully created directory: %s\n", temp_path);
+                }
+            } else {
+                printf("Directory already exists: %s\n", temp_path);
+            }
+        }
+        *p = '\\';
+        p++;
+    }
+    
+    // Create the final directory
+    printf("Creating final directory: %s\n", dir);
+    if (stat(dir, &(struct stat){}) != 0) {
+        if (MKDIR(dir) != 0) {
+            printf("Error creating final directory: %s. Error code: %d\n", dir, errno);
+            perror("MKDIR");
+            free(dir);
+            return false;
+        } else {
+            printf("Successfully created final directory: %s\n", dir);
+        }
+    } else {
+        printf("Final directory already exists: %s\n", dir);
+    }
+    
+    free(dir);
+    return true;
+}
+
+bool session_save(Session* session, const char* sessions_dir) {
+    if (!session || !sessions_dir) {
+        printf("Error: Invalid session or sessions directory\n");
+        return false;
+    }
+    
+    printf("Saving session %s to %s\n", session->session_id, sessions_dir);
+    
+    // Expand tilde in sessions_dir
+    char* expanded_dir = NULL;
+    if (sessions_dir[0] == '~') {
+        char* home = getenv("HOME");
+#ifdef _WIN32
+        if (!home) {
+            home = getenv("USERPROFILE");
+        }
+#endif
+        if (home) {
+            expanded_dir = (char*)malloc(strlen(home) + strlen(sessions_dir) + 1);
+            if (expanded_dir) {
+                strcpy(expanded_dir, home);
+                strcat(expanded_dir, sessions_dir + 1);
+            }
+        }
+    }
+    
+    const char* actual_dir = expanded_dir ? expanded_dir : sessions_dir;
+    
     // Create sessions directory if it doesn't exist
     struct stat st;
-    if (stat(sessions_dir, &st) != 0) {
-        if (MKDIR(sessions_dir) != 0) {
+    if (stat(actual_dir, &st) != 0) {
+        printf("Creating sessions directory: %s\n", actual_dir);
+        if (!create_directory_recursive(actual_dir)) {
+            printf("Error: Failed to create sessions directory\n");
+            if (expanded_dir) free(expanded_dir);
             return false;
         }
     }
     
     // Save session history as JSONL
     char history_file[256];
-    snprintf(history_file, sizeof(history_file), "%s/%s.jsonl", sessions_dir, session->session_id);
+    snprintf(history_file, sizeof(history_file), "%s\\%s.jsonl", actual_dir, session->session_id);
+    
+    // Convert slashes to backslashes for Windows
+    char* p = history_file;
+    while (*p) {
+        if (*p == '/') {
+            *p = '\\';
+        }
+        p++;
+    }
+    
+    printf("Saving session history to: %s\n", history_file);
     
     char* jsonl = message_list_to_jsonl(session->history);
     if (!jsonl) {
+        printf("Error: Failed to convert message list to JSONL\n");
         return false;
     }
     
+    printf("JSONL content: %s\n", jsonl);
+    
     FILE* fp = fopen(history_file, "w");
     if (!fp) {
+        printf("Error: Failed to open history file for writing\n");
         free(jsonl);
         return false;
     }
@@ -107,7 +246,18 @@ bool session_save(Session* session, const char* sessions_dir) {
     
     // Save session metadata
     char metadata_file[256];
-    snprintf(metadata_file, sizeof(metadata_file), "%s/sessions.json", sessions_dir);
+    snprintf(metadata_file, sizeof(metadata_file), "%s\\sessions.json", actual_dir);
+    
+    // Convert slashes to backslashes for Windows
+    p = metadata_file;
+    while (*p) {
+        if (*p == '/') {
+            *p = '\\';
+        }
+        p++;
+    }
+    
+    printf("Saving session metadata to: %s\n", metadata_file);
     
     // Read existing metadata
     cJSON* metadata_root = NULL;
@@ -146,15 +296,33 @@ bool session_save(Session* session, const char* sessions_dir) {
     // Write back
     char* metadata_json = cJSON_PrintUnformatted(metadata_root);
     if (metadata_json) {
+        printf("Metadata JSON: %s\n", metadata_json);
         metadata_fp = fopen(metadata_file, "w");
         if (metadata_fp) {
-            fprintf(metadata_fp, "%s", metadata_json);
+            size_t written = fprintf(metadata_fp, "%s", metadata_json);
+            if (written != strlen(metadata_json)) {
+                printf("Error: Failed to write all metadata to file\n");
+            } else {
+                printf("Successfully wrote metadata to file\n");
+            }
             fclose(metadata_fp);
+        } else {
+            printf("Error: Failed to open metadata file for writing. Error code: %d\n", errno);
+            perror("fopen");
         }
         free(metadata_json);
+    } else {
+        printf("Error: Failed to convert metadata to JSON\n");
     }
     
     cJSON_Delete(metadata_root);
+    printf("Session saved successfully\n");
+    
+    // Free expanded directory path
+    if (expanded_dir) {
+        free(expanded_dir);
+    }
+    
     return true;
 }
 
