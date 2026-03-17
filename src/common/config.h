@@ -48,6 +48,11 @@ typedef struct {
     int threshold;            // 压缩阈值（token 数）
 } CompactionConfig;
 
+// Agent configuration
+typedef struct {
+    char *system_prompt;      // 系统提示词
+} AgentConfig;
+
 // Main configuration structure
 typedef struct {
     ModelConfig model;
@@ -56,6 +61,7 @@ typedef struct {
     SessionConfig session;
     LoggingConfig logging;
     CompactionConfig compaction;
+    AgentConfig agent;
     
     // Legacy fields for backward compatibility
     char *workspace_path;

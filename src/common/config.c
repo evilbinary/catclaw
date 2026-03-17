@@ -51,6 +51,10 @@ Config g_config = {
         .enabled = true,
         .threshold = 3000
     },
+    // Agent config defaults
+    .agent = {
+        .system_prompt = NULL
+    },
     // Legacy fields
     .workspace_path = NULL,
     .model_provider = NULL,
@@ -242,6 +246,17 @@ static void parse_compaction_config(cJSON *compaction) {
     }
 }
 
+// Parse agent configuration
+static void parse_agent_config(cJSON *agent) {
+    if (!agent) return;
+    
+    cJSON *system_prompt = cJSON_GetObjectItem(agent, "system_prompt");
+    if (system_prompt && cJSON_IsString(system_prompt)) {
+        free(g_config.agent.system_prompt);
+        g_config.agent.system_prompt = strdup(system_prompt->valuestring);
+    }
+}
+
 // Parse legacy configuration (for backward compatibility)
 static void parse_legacy_config(cJSON *root) {
     // Parse workspace path (support both workspace_path and workspace_dir)
@@ -405,6 +420,9 @@ bool config_load(void) {
             cJSON *compaction = cJSON_GetObjectItem(root, "compaction");
             if (compaction) parse_compaction_config(compaction);
             
+            cJSON *agent = cJSON_GetObjectItem(root, "agent");
+            if (agent) parse_agent_config(agent);
+            
             // Parse legacy configuration for backward compatibility
             parse_legacy_config(root);
 
@@ -494,6 +512,9 @@ void config_cleanup(void) {
     free(g_config.logging.level);
     free(g_config.logging.file);
     
+    // Cleanup agent config
+    free(g_config.agent.system_prompt);
+    
     // Cleanup legacy fields
     free(g_config.workspace_path);
     free(g_config.model_provider);
@@ -531,6 +552,8 @@ void config_print(void) {
     printf("  Compaction:\n");
     printf("    Enabled: %s\n", g_config.compaction.enabled ? "true" : "false");
     printf("    Threshold: %d\n", g_config.compaction.threshold);
+    printf("  Agent:\n");
+    printf("    System Prompt: %s\n", g_config.agent.system_prompt ? "(configured)" : "(default)");
 }
 
 bool config_set(const char *key, const char *value) {
