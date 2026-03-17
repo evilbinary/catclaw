@@ -192,12 +192,6 @@ void agent_node_stop_worker(AgentNode* node) {
     pthread_join(node->worker_thread, NULL);
 }
 
-// Parse tool calls from AI response
-static ToolCallList* parse_tool_calls(const char* content) {
-    // Simple JSON parsing for tool calls
-    // This is a placeholder implementation
-    return NULL;
-}
 
 // Parse tool calls from JSON array
 static ToolCallList* parse_tool_calls_from_json(cJSON* tool_calls_json) {
