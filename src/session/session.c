@@ -14,8 +14,9 @@
 #endif
 
 #include "session.h"
- #include "common/cJSON.h"
- #include "common/log.h"
+#include "common/cJSON.h"
+#include "common/log.h"
+#include "common/config.h"
 
 // Create a new session
 Session* session_create(const char* session_key) {
@@ -86,12 +87,7 @@ static bool create_directory_recursive(const char* path) {
     
     // Handle tilde expansion first
     if (dir[0] == '~') {
-        char* home = getenv("HOME");
-#ifdef _WIN32
-        if (!home) {
-            home = getenv("USERPROFILE");
-        }
-#endif
+        char* home = get_home_dir();
         if (home) {
             char* expanded = (char*)malloc(strlen(home) + strlen(dir) + 1);
             if (expanded) {
@@ -183,12 +179,7 @@ bool session_save(Session* session, const char* sessions_dir) {
     // Expand tilde in sessions_dir
     char* expanded_dir = NULL;
     if (sessions_dir[0] == '~') {
-        char* home = getenv("HOME");
-#ifdef _WIN32
-        if (!home) {
-            home = getenv("USERPROFILE");
-        }
-#endif
+        char* home = get_home_dir();
         if (home) {
             expanded_dir = (char*)malloc(strlen(home) + strlen(sessions_dir) + 1);
             if (expanded_dir) {
@@ -331,6 +322,7 @@ bool session_save(Session* session, const char* sessions_dir) {
 // Load session from files
 Session* session_load(const char* session_id, const char* sessions_dir) {
     if (!session_id || !sessions_dir) {
+        log_error("session_load: invalid parameters");
         return NULL;
     }
     
@@ -338,8 +330,47 @@ Session* session_load(const char* session_id, const char* sessions_dir) {
     char history_file[256];
     snprintf(history_file, sizeof(history_file), "%s/%s.jsonl", sessions_dir, session_id);
     
+    // Handle tilde expansion
+    char* expanded_path = strdup(history_file);
+    if (expanded_path) {
+        if (expanded_path[0] == '~') {
+            char* home = get_home_dir();
+            if (home) {
+                char* temp = (char*)malloc(strlen(home) + strlen(expanded_path) + 1);
+                if (temp) {
+                    strcpy(temp, home);
+                    strcat(temp, expanded_path + 1);
+                    free(expanded_path);
+                    expanded_path = temp;
+                    log_debug("session_load: expanded path: %s", expanded_path);
+                    printf("[DEBUG] session_load: expanded path: %s\n", expanded_path);
+                }
+            }
+        }
+        
+#ifdef _WIN32
+        // Convert slashes to backslashes for Windows
+        char* p = expanded_path;
+        while (*p) {
+            if (*p == '/') {
+                *p = '\\';
+            }
+            p++;
+        }
+#endif
+        
+        strncpy(history_file, expanded_path, sizeof(history_file) - 1);
+        history_file[sizeof(history_file) - 1] = '\0';
+        free(expanded_path);
+    }
+    
+    log_debug("session_load: trying to load from %s", history_file);
+    printf("[DEBUG] session_load: trying to load from %s\n", history_file);
+    
     FILE* fp = fopen(history_file, "r");
     if (!fp) {
+        log_debug("session_load: file not found: %s", history_file);
+        printf("[DEBUG] session_load: file not found: %s\n", history_file);
         return NULL;
     }
     
@@ -347,6 +378,9 @@ Session* session_load(const char* session_id, const char* sessions_dir) {
     fseek(fp, 0, SEEK_END);
     long length = ftell(fp);
     fseek(fp, 0, SEEK_SET);
+    
+    log_debug("session_load: file size: %ld bytes", length);
+    printf("[DEBUG] session_load: file size: %ld bytes\n", length);
     
     char* jsonl = (char*)malloc(length + 1);
     if (!jsonl) {
@@ -358,16 +392,58 @@ Session* session_load(const char* session_id, const char* sessions_dir) {
     jsonl[length] = '\0';
     fclose(fp);
     
+    log_debug("session_load: file content:\n%s", jsonl);
+    printf("[DEBUG] session_load: file content:\n%s\n", jsonl);
+    
     // Parse JSONL
     MessageList* history = message_list_from_jsonl(jsonl);
     free(jsonl);
     if (!history) {
+        log_error("session_load: failed to parse JSONL");
+        printf("[DEBUG] session_load: failed to parse JSONL\n");
         return NULL;
     }
+    
+    log_debug("session_load: loaded %d messages", history->count);
+    printf("[DEBUG] session_load: loaded %d messages\n", history->count);
     
     // Read session metadata
     char metadata_file[256];
     snprintf(metadata_file, sizeof(metadata_file), "%s/sessions.json", sessions_dir);
+    
+    // Handle tilde expansion for metadata file
+    char* expanded_metadata_path = strdup(metadata_file);
+    if (expanded_metadata_path) {
+        if (expanded_metadata_path[0] == '~') {
+            char* home = get_home_dir();
+            if (home) {
+                char* temp = (char*)malloc(strlen(home) + strlen(expanded_metadata_path) + 1);
+                if (temp) {
+                    strcpy(temp, home);
+                    strcat(temp, expanded_metadata_path + 1);
+                    free(expanded_metadata_path);
+                    expanded_metadata_path = temp;
+                    log_debug("session_load: expanded metadata path: %s", expanded_metadata_path);
+                    printf("[DEBUG] session_load: expanded metadata path: %s\n", expanded_metadata_path);
+                }
+            }
+        }
+        
+#ifdef _WIN32
+        // Convert slashes to backslashes for Windows
+        char* p = expanded_metadata_path;
+        while (*p) {
+            if (*p == '/') {
+                *p = '\\';
+            }
+            p++;
+        }
+#endif
+        
+        strncpy(metadata_file, expanded_metadata_path, sizeof(metadata_file) - 1);
+        metadata_file[sizeof(metadata_file) - 1] = '\0';
+        free(expanded_metadata_path);
+    }
     
     cJSON* metadata_root = NULL;
     FILE* metadata_fp = fopen(metadata_file, "r");
@@ -485,6 +561,22 @@ Session* session_manager_get_or_create(SessionManager* manager, const char* sess
     // Check if session already exists
     for (int i = 0; i < manager->session_count; i++) {
         if (strcmp(manager->sessions[i]->session_key, session_key) == 0) {
+            log_debug("session_manager_get_or_create: found existing session in memory: %s", session_key);
+            printf("[DEBUG] session_manager_get_or_create: found existing session in memory: %s\n", session_key);
+            // Try to reload from disk to get latest history
+            char* session_id = session_key_to_id(session_key);
+            if (session_id) {
+                Session* reloaded_session = session_load(session_id, manager->sessions_dir);
+                free(session_id);
+                if (reloaded_session) {
+                    log_info("session_manager_get_or_create: reloaded session from disk: %s with %d messages", session_key, reloaded_session->history->count);
+                    printf("[DEBUG] session_manager_get_or_create: reloaded session from disk: %s with %d messages\n", session_key, reloaded_session->history->count);
+                    // Replace existing session
+                    session_destroy(manager->sessions[i]);
+                    manager->sessions[i] = reloaded_session;
+                    return reloaded_session;
+                }
+            }
             return manager->sessions[i];
         }
     }
@@ -492,9 +584,13 @@ Session* session_manager_get_or_create(SessionManager* manager, const char* sess
     // Try to load from disk
     char* session_id = session_key_to_id(session_key);
     if (session_id) {
+        log_debug("session_manager_get_or_create: trying to load session from disk: %s", session_key);
+        printf("[DEBUG] session_manager_get_or_create: trying to load session from disk: %s\n", session_key);
         Session* session = session_load(session_id, manager->sessions_dir);
         free(session_id);
         if (session) {
+            log_info("session_manager_get_or_create: loaded session from disk: %s with %d messages", session_key, session->history->count);
+            printf("[DEBUG] session_manager_get_or_create: loaded session from disk: %s with %d messages\n", session_key, session->history->count);
             // Add to manager
             if (manager->session_count >= manager->max_sessions) {
                 // Remove oldest session
@@ -507,9 +603,13 @@ Session* session_manager_get_or_create(SessionManager* manager, const char* sess
             manager->sessions[manager->session_count++] = session;
             return session;
         }
+        log_debug("session_manager_get_or_create: failed to load session from disk: %s", session_key);
+        printf("[DEBUG] session_manager_get_or_create: failed to load session from disk: %s\n", session_key);
     }
     
     // Create new session
+    log_info("session_manager_get_or_create: creating new session: %s", session_key);
+    printf("[DEBUG] session_manager_get_or_create: creating new session: %s\n", session_key);
     Session* session = session_create(session_key);
     if (session) {
         // Add to manager

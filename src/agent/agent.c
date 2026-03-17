@@ -406,6 +406,8 @@ bool agent_init(void) {
     // Initialize session manager
     char sessions_dir[512];
     snprintf(sessions_dir, sizeof(sessions_dir), "%s/sessions", g_config.workspace_path);
+    log_info("Session manager sessions_dir: %s", sessions_dir);
+    printf("[DEBUG] Session manager sessions_dir: %s\n", sessions_dir);
     g_agent.session_manager = session_manager_init(sessions_dir, 100);
     if (!g_agent.session_manager) {
         log_error("Failed to initialize session manager\n");

@@ -28,5 +28,6 @@ void config_cleanup(void);
 void config_print(void);
 bool config_set(const char *key, const char *value);
 const char *config_get(const char *key);
+char *get_home_dir(void);
 
 #endif // CONFIG_H

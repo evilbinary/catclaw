@@ -21,7 +21,7 @@ Config g_config = {
     .debug = true
 };
 
-static char *get_home_dir(void) {
+char *get_home_dir(void) {
     char *home = getenv("HOME");
 #ifdef _WIN32
     if (!home) {

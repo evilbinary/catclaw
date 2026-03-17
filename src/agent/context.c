@@ -281,6 +281,9 @@ void* agent_node_worker_thread(void* arg) {
             continue;
         }
         
+        log_info("Session %s has %d messages in history", session->session_id, session->history->count);
+        printf("[DEBUG] Session %s has %d messages in history\n", session->session_id, session->history->count);
+        
         if (g_config.debug) {
             log_debug("Got or created session: %s\n", session->session_id);
         }
