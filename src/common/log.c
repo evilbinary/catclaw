@@ -46,6 +46,7 @@ void log_set_level(LogLevel level) {
 
 // Internal log function
 static void log_internal(LogLevel level, const char *format, va_list args) {
+    printf("log_internal: level=%d, g_log_level=%d\n", level, g_log_level);
     if (level < g_log_level) {
         return;
     }

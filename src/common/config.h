@@ -3,20 +3,72 @@
 
 #include <stdbool.h>
 
-// Configuration structure
+// Model configuration
 typedef struct {
-    char *workspace_path;      // 工作区路径
-    char *model_provider;      // 模型提供商 (openai)
-    char *model_name;          // 模型名称 (gpt-3.5-turbo)
-    char *api_key;             // API 密钥
-    char *api_base_url;        // API 基础 URL
-    int max_context_tokens;    // 最大上下文 token 数
-    int timeout_seconds;       // 超时时间（秒）
-    int enable_compaction;     // 是否启用压缩
-    int compaction_threshold;  // 压缩阈值（token 数）
-    int gateway_port;          // 网关端口
-    bool browser_enabled;      // 是否启用浏览器
-    bool debug;                // 是否启用调试日志
+    char *provider;           // 模型提供商 (llama/openai/anthropic/gemini)
+    char *name;               // 模型名称
+    char *base_url;           // API 基础 URL
+    char *api_key;            // API 密钥
+    int max_context_tokens;   // 最大上下文 token 数
+    int timeout_seconds;      // 超时时间（秒）
+    float temperature;        // 温度参数
+    int max_tokens;           // 最大生成 token 数
+} ModelConfig;
+
+// Gateway configuration
+typedef struct {
+    int port;                 // 网关端口
+    bool browser_enabled;     // 是否启用浏览器
+} GatewayConfig;
+
+// Workspace configuration
+typedef struct {
+    char *path;               // 工作区路径
+} WorkspaceConfig;
+
+// Session configuration
+typedef struct {
+    int max_sessions;         // 最大会话数量
+    bool auto_save;           // 是否自动保存会话
+    char *default_session_key; // 默认会话密钥
+    int max_history_per_session; // 每个会话的最大历史消息数
+} SessionConfig;
+
+// Logging configuration
+typedef struct {
+    char *level;              // 日志级别 (debug/info/warn/error/fatal)
+    char *file;               // 日志文件路径
+    bool console_output;      // 是否输出到控制台
+} LoggingConfig;
+
+// Compaction configuration
+typedef struct {
+    bool enabled;             // 是否启用压缩
+    int threshold;            // 压缩阈值（token 数）
+} CompactionConfig;
+
+// Main configuration structure
+typedef struct {
+    ModelConfig model;
+    GatewayConfig gateway;
+    WorkspaceConfig workspace;
+    SessionConfig session;
+    LoggingConfig logging;
+    CompactionConfig compaction;
+    
+    // Legacy fields for backward compatibility
+    char *workspace_path;
+    char *model_provider;
+    char *model_name;
+    char *api_key;
+    char *api_base_url;
+    int max_context_tokens;
+    int timeout_seconds;
+    int enable_compaction;
+    int compaction_threshold;
+    int gateway_port;
+    bool browser_enabled;
+    bool debug;
 } Config;
 
 // Global config instance

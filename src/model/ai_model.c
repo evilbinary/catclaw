@@ -121,6 +121,12 @@ bool ai_model_init(const AIModelConfig *config) {
     if (g_initialized) {
         return true;
     }
+    
+    // Validate config pointer
+    if (!config) {
+        fprintf(stderr, "ai_model_init: config is NULL\n");
+        return false;
+    }
 
 #ifndef NO_CURL
     // Initialize CURL
@@ -133,16 +139,38 @@ bool ai_model_init(const AIModelConfig *config) {
     printf("Mock curl initialized\n");
 #endif
 
-    // Copy configuration
+    // Copy configuration with validation
     g_model_config.type = config->type;
-    g_model_config.api_key = config->api_key ? strdup(config->api_key) : NULL;
-    g_model_config.model_name = config->model_name ? strdup(config->model_name) : NULL;
-    g_model_config.base_url = config->base_url ? strdup(config->base_url) : NULL;
+    
+    // Safely copy api_key
+    if (config->api_key && strlen(config->api_key) > 0) {
+        g_model_config.api_key = strdup(config->api_key);
+    } else {
+        g_model_config.api_key = NULL;
+    }
+    
+    // Safely copy model_name
+    if (config->model_name && strlen(config->model_name) > 0) {
+        g_model_config.model_name = strdup(config->model_name);
+    } else {
+        g_model_config.model_name = strdup("llama3.2");  // Default model
+    }
+    
+    // Safely copy base_url
+    if (config->base_url && strlen(config->base_url) > 0) {
+        g_model_config.base_url = strdup(config->base_url);
+    } else {
+        g_model_config.base_url = strdup("http://localhost:11434/api/generate");  // Default URL
+    }
+    
     g_model_config.temperature = config->temperature > 0 ? config->temperature : 0.7f;
     g_model_config.max_tokens = config->max_tokens > 0 ? config->max_tokens : 1024;
 
     g_initialized = true;
-    printf("AI model initialized: %s\n", g_model_config.model_name);
+    printf("AI model initialized: type=%d, model=%s, url=%s\n", 
+           g_model_config.type, 
+           g_model_config.model_name ? g_model_config.model_name : "(null)",
+           g_model_config.base_url ? g_model_config.base_url : "(null)");
     return true;
 }
 

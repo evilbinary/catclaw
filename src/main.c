@@ -75,15 +75,40 @@ int main(int argc, char *argv[]) {
     printf("🐦 CatClaw - C version\n");
     printf("Based on OpenClaw functionality\n\n");
 
-    // Initialize log system
-    log_init();
-    log_info("CatClaw starting up");
-
     // Load configuration
     if (!config_load()) {
-        log_fatal("Failed to load configuration");
+        fprintf(stderr, "Failed to load configuration\n");
         return 1;
     }
+
+    // Initialize log system
+    log_init();
+    // Set log level based on configuration
+    LogLevel log_level = LOG_LEVEL_INFO;
+    
+    // Try to get loglevel from new logging config
+    const char *loglevel_str = g_config.logging.level;
+    if (loglevel_str) {
+        printf("[DEBUG] Setting log level from config: %s\n", loglevel_str);
+        if (strcmp(loglevel_str, "debug") == 0) {
+            log_level = LOG_LEVEL_DEBUG;
+        } else if (strcmp(loglevel_str, "info") == 0) {
+            log_level = LOG_LEVEL_INFO;
+        } else if (strcmp(loglevel_str, "warn") == 0) {
+            log_level = LOG_LEVEL_WARN;
+        } else if (strcmp(loglevel_str, "error") == 0) {
+            log_level = LOG_LEVEL_ERROR;
+        } else if (strcmp(loglevel_str, "fatal") == 0) {
+            log_level = LOG_LEVEL_FATAL;
+        }
+    } else if (g_config.debug) {
+        // Fallback to debug flag
+        printf("[DEBUG] Setting log level from debug flag\n");
+        log_level = LOG_LEVEL_DEBUG;
+    }
+    
+    log_set_level(log_level);
+    log_info("CatClaw starting up");
 
     // Initialize gateway
     if (!gateway_init()) {

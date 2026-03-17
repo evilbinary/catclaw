@@ -377,7 +377,12 @@ bool agent_init(void) {
 
     // Initialize AI model
     AIModelConfig model_config;
-    const char* provider = g_config.model_provider ? g_config.model_provider : "anthropic";
+    
+    // Use new config structure with fallback to legacy fields
+    const char* provider = g_config.model.provider ? g_config.model.provider : 
+                          (g_config.model_provider ? g_config.model_provider : "llama");
+    printf("[DEBUG] ai_model_init: provider=%s\n", provider);
+    
     if (strcmp(provider, "anthropic") == 0) {
         model_config.type = AI_MODEL_ANTHROPIC;
     } else if (strcmp(provider, "openai") == 0) {
@@ -387,13 +392,24 @@ bool agent_init(void) {
     } else if (strcmp(provider, "gemini") == 0) {
         model_config.type = AI_MODEL_GEMINI;
     } else {
-        model_config.type = AI_MODEL_ANTHROPIC;
+        model_config.type = AI_MODEL_LLAMA;
     }
-    model_config.model_name = g_config.model_name;
-    model_config.api_key = g_config.api_key ? g_config.api_key : (getenv("ANTHROPIC_API_KEY") ? getenv("ANTHROPIC_API_KEY") : getenv("OPENAI_API_KEY"));
-    model_config.base_url = g_config.api_base_url;
-    model_config.temperature = 0.7f;
-    model_config.max_tokens = 1024;
+    
+    // Use new config structure with fallback to legacy fields
+    const char* ai_model_name = g_config.model.name ? g_config.model.name : 
+                               (g_config.model_name ? g_config.model_name : "llama3.2");
+    const char* base_url = g_config.model.base_url ? g_config.model.base_url : 
+                          (g_config.api_base_url ? g_config.api_base_url : "http://localhost:11434/api/generate");
+    const char* api_key = g_config.model.api_key ? g_config.model.api_key : 
+                         (g_config.api_key ? g_config.api_key : NULL);
+    
+    printf("[DEBUG] ai_model_init: model_name=%s, base_url=%s\n", ai_model_name, base_url);
+    
+    model_config.model_name = ai_model_name;
+    model_config.api_key = api_key ? api_key : (getenv("ANTHROPIC_API_KEY") ? getenv("ANTHROPIC_API_KEY") : getenv("OPENAI_API_KEY"));
+    model_config.base_url = base_url;
+    model_config.temperature = g_config.model.temperature > 0 ? g_config.model.temperature : 0.7f;
+    model_config.max_tokens = g_config.model.max_tokens > 0 ? g_config.model.max_tokens : 1024;
 
     if (!ai_model_init(&model_config)) {
         log_error("Failed to initialize AI model\n");
@@ -405,10 +421,19 @@ bool agent_init(void) {
 
     // Initialize session manager
     char sessions_dir[512];
-    snprintf(sessions_dir, sizeof(sessions_dir), "%s/sessions", g_config.workspace_path);
+    const char* workspace_path = g_config.workspace.path ? g_config.workspace.path : 
+                                 (g_config.workspace_path ? g_config.workspace_path : NULL);
+    if (!workspace_path) {
+        log_error("Workspace path is not configured\n");
+        free(g_agent.model);
+        g_agent.model = NULL;
+        ai_model_cleanup();
+        return false;
+    }
+    snprintf(sessions_dir, sizeof(sessions_dir), "%s/sessions", workspace_path);
     log_info("Session manager sessions_dir: %s", sessions_dir);
     printf("[DEBUG] Session manager sessions_dir: %s\n", sessions_dir);
-    g_agent.session_manager = session_manager_init(sessions_dir, 100);
+    g_agent.session_manager = session_manager_init(sessions_dir, g_config.session.max_sessions);
     if (!g_agent.session_manager) {
         log_error("Failed to initialize session manager\n");
         free(g_agent.model);
