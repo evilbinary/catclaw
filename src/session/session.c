@@ -233,10 +233,11 @@ bool session_save(Session* session, const char* sessions_dir) {
     
     printf("JSONL content: %s\n", jsonl);
     
-    FILE* fp = fopen(history_file, "w");
+    FILE* fp = fopen(history_file, "a");
     if (!fp) {
-        printf("Error: Failed to open history file for writing\n");
+        printf("Error: Failed to open history file for appending\n");
         free(jsonl);
+        if (expanded_dir) free(expanded_dir);
         return false;
     }
     
