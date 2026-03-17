@@ -15,6 +15,7 @@
 
 #include "session.h"
  #include "common/cJSON.h"
+ #include "common/log.h"
 
 // Create a new session
 Session* session_create(const char* session_key) {
@@ -177,7 +178,7 @@ bool session_save(Session* session, const char* sessions_dir) {
         return false;
     }
     
-    printf("Saving session %s to %s\n", session->session_id, sessions_dir);
+    log_debug("Saving session %s to %s\n", session->session_id, sessions_dir);
     
     // Expand tilde in sessions_dir
     char* expanded_dir = NULL;
@@ -223,19 +224,19 @@ bool session_save(Session* session, const char* sessions_dir) {
         p++;
     }
     
-    printf("Saving session history to: %s\n", history_file);
+    log_debug("Saving session history to: %s\n", history_file);
     
     char* jsonl = message_list_to_jsonl(session->history);
     if (!jsonl) {
-        printf("Error: Failed to convert message list to JSONL\n");
+        log_error("Error: Failed to convert message list to JSONL\n");
         return false;
     }
     
-    printf("JSONL content: %s\n", jsonl);
+    log_debug("JSONL content: %s\n", jsonl);
     
     FILE* fp = fopen(history_file, "a");
     if (!fp) {
-        printf("Error: Failed to open history file for appending\n");
+        log_error("Error: Failed to open history file for appending\n");
         free(jsonl);
         if (expanded_dir) free(expanded_dir);
         return false;
@@ -258,7 +259,7 @@ bool session_save(Session* session, const char* sessions_dir) {
         p++;
     }
     
-    printf("Saving session metadata to: %s\n", metadata_file);
+    log_debug("Saving session metadata to: %s\n", metadata_file);
     
     // Read existing metadata
     cJSON* metadata_root = NULL;
@@ -297,27 +298,27 @@ bool session_save(Session* session, const char* sessions_dir) {
     // Write back
     char* metadata_json = cJSON_PrintUnformatted(metadata_root);
     if (metadata_json) {
-        printf("Metadata JSON: %s\n", metadata_json);
+        log_debug("Metadata JSON: %s\n", metadata_json);
         metadata_fp = fopen(metadata_file, "w");
         if (metadata_fp) {
             size_t written = fprintf(metadata_fp, "%s", metadata_json);
             if (written != strlen(metadata_json)) {
-                printf("Error: Failed to write all metadata to file\n");
+                log_error("Error: Failed to write all metadata to file\n");
             } else {
                 printf("Successfully wrote metadata to file\n");
             }
             fclose(metadata_fp);
         } else {
-            printf("Error: Failed to open metadata file for writing. Error code: %d\n", errno);
+            log_error("Error: Failed to open metadata file for writing. Error code: %d\n", errno);
             perror("fopen");
         }
         free(metadata_json);
     } else {
-        printf("Error: Failed to convert metadata to JSON\n");
+        log_error("Error: Failed to convert metadata to JSON\n");
     }
     
     cJSON_Delete(metadata_root);
-    printf("Session saved successfully\n");
+    log_debug("Session saved successfully\n");
     
     // Free expanded directory path
     if (expanded_dir) {
