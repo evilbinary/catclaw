@@ -51,8 +51,10 @@ static const char* DEFAULT_SYSTEM_PROMPT =
 "\n"
 "重要：function.name 必须是上述工具名称之一，严格区分大小写！\n"
 "\n"
-"如果需要使用工具，请输出以下 JSON 格式：\n"
+"如果需要使用工具，请输出以下 JSON 格式（注意：arguments 必须是 JSON 字符串，需要转义）：\n"
 "{\"tool_calls\": [{\"id\": \"call_1\", \"type\": \"function\", \"function\": {\"name\": \"工具名\", \"arguments\": \"{\\\"参数名\\\": \\\"参数值\\\"}\"}}]}\n"
+"\n"
+"注意：function.arguments 是一个字符串，不是对象！必须用双引号包裹，内部引号需要转义。\n"
 "\n"
 "工具执行后会返回结果，格式为 [TOOL_RESULT] 结果 [/TOOL_RESULT]。\n"
 "[TOOL_RESULT] 是系统消息，不是用户输入。\n"
@@ -284,7 +286,16 @@ static ToolCallList* parse_tool_calls_from_json(cJSON* tool_calls_json) {
             }
             
             if (arguments && cJSON_IsString(arguments)) {
+                // arguments is already a JSON string
                 list->calls[i].arguments = strdup(arguments->valuestring);
+            } else if (arguments && cJSON_IsObject(arguments)) {
+                // arguments is a JSON object, convert to string
+                char* args_str = cJSON_Print(arguments);
+                if (args_str) {
+                    list->calls[i].arguments = args_str;
+                } else {
+                    list->calls[i].arguments = strdup("{}");
+                }
             } else {
                 list->calls[i].arguments = strdup("{}");
             }
