@@ -2,6 +2,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <dirent.h>
+#include <errno.h>
+#include <sys/stat.h>
 
 #include "tool.h"
  #include "common/cJSON.h"
@@ -434,6 +437,119 @@ int tool_get_weather(const char* args, char** result, int* result_len) {
         }
         *result_len = strlen(*result);
     }
+    
+    if (root) {
+        cJSON_Delete(root);
+    }
+    
+    return 0;
+}
+
+// List directory tool
+int tool_list_directory(const char* args, char** result, int* result_len) {
+    if (!args || strlen(args) == 0) {
+        *result = strdup("Error: No path provided");
+        *result_len = strlen(*result);
+        return -1;
+    }
+    
+    // Parse JSON parameters to get path
+    cJSON* root = cJSON_Parse(args);
+    const char* path = args;
+    
+    if (root) {
+        cJSON* path_obj = cJSON_GetObjectItem(root, "path");
+        if (path_obj && cJSON_IsString(path_obj)) {
+            path = path_obj->valuestring;
+        }
+    }
+    
+    // If path is "." or empty, use current directory
+    if (strcmp(path, "") == 0 || strcmp(path, "\"") == 0) {
+        path = ".";
+    }
+    
+    // Remove quotes if present
+    char clean_path[256];
+    strncpy(clean_path, path, sizeof(clean_path) - 1);
+    clean_path[sizeof(clean_path) - 1] = '\0';
+    size_t len = strlen(clean_path);
+    if (len > 1 && clean_path[0] == '"' && clean_path[len-1] == '"') {
+        clean_path[len-1] = '\0';
+        memmove(clean_path, clean_path + 1, len - 1);
+    }
+    
+    DIR* dir = opendir(clean_path);
+    if (!dir) {
+        *result = (char*)malloc(256);
+        if (*result) {
+            snprintf(*result, 256, "Error: Cannot open directory '%s': %s", clean_path, strerror(errno));
+            *result_len = strlen(*result);
+        }
+        if (root) cJSON_Delete(root);
+        return -1;
+    }
+    
+    // Allocate buffer for result
+    size_t buffer_size = 4096;
+    *result = (char*)malloc(buffer_size);
+    if (!*result) {
+        closedir(dir);
+        if (root) cJSON_Delete(root);
+        return -1;
+    }
+    
+    snprintf(*result, buffer_size, "Directory listing of '%s':\n", clean_path);
+    
+    struct dirent* entry;
+    int count = 0;
+    while ((entry = readdir(dir)) != NULL && count < 50) {
+        // Skip . and ..
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+            continue;
+        }
+        
+        // Check if we need to expand buffer
+        size_t current_len = strlen(*result);
+        size_t needed = current_len + strlen(entry->d_name) + 20;
+        if (needed > buffer_size) {
+            buffer_size *= 2;
+            char* new_result = (char*)realloc(*result, buffer_size);
+            if (!new_result) {
+                free(*result);
+                closedir(dir);
+                if (root) cJSON_Delete(root);
+                return -1;
+            }
+            *result = new_result;
+        }
+        
+        // Append entry type indicator using stat
+        char full_path[512];
+        snprintf(full_path, sizeof(full_path), "%s/%s", clean_path, entry->d_name);
+        
+        struct stat st;
+        if (stat(full_path, &st) == 0) {
+            if (S_ISDIR(st.st_mode)) {
+                strcat(*result, "[DIR]  ");
+            } else {
+                strcat(*result, "[FILE] ");
+            }
+        } else {
+            strcat(*result, "[?]    ");
+        }
+        strcat(*result, entry->d_name);
+        strcat(*result, "\n");
+        count++;
+    }
+    
+    closedir(dir);
+    
+    if (count >= 50) {
+        strcat(*result, "... (more items)\n");
+    }
+    
+    *result_len = strlen(*result);
     
     if (root) {
         cJSON_Delete(root);
