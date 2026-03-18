@@ -882,6 +882,36 @@ AIModelResponse *ai_model_send_messages(MessageList *messages, const char *syste
                             cJSON *response_obj = cJSON_GetObjectItem(root, "response");
                             if (response_obj && cJSON_IsString(response_obj)) {
                                 response = create_response(response_obj->valuestring, true, NULL);
+                                
+                                // Check for tool_calls in response content
+                                if (response && response->content) {
+                                    const char* tool_calls_start = strstr(response->content, "\"tool_calls\"");
+                                    if (tool_calls_start) {
+                                        // Find the start of JSON array
+                                        const char* array_start = strchr(tool_calls_start, '[');
+                                        if (array_start) {
+                                            // Find the matching end of array
+                                            int bracket_count = 1;
+                                            const char* ptr = array_start + 1;
+                                            while (*ptr && bracket_count > 0) {
+                                                if (*ptr == '[') bracket_count++;
+                                                else if (*ptr == ']') bracket_count--;
+                                                ptr++;
+                                            }
+                                            
+                                            if (bracket_count == 0) {
+                                                // Extract the JSON array
+                                                size_t json_len = ptr - array_start;
+                                                char* json_str = (char*)malloc(json_len + 1);
+                                                if (json_str) {
+                                                    strncpy(json_str, array_start, json_len);
+                                                    json_str[json_len] = '\0';
+                                                    response->tool_calls = json_str;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                             } else {
                                 response = create_response(NULL, false, "No response from Llama model");
                             }

@@ -501,6 +501,7 @@ bool agent_init(void) {
     agent_register_tool("web_search", "Simulate web search", NULL, tool_search_web);
     agent_register_tool("memory_save", "Save a key-value pair to memory", NULL, tool_save_memory);
     agent_register_tool("memory_load", "Load a value from memory by key", NULL, tool_read_memory);
+    agent_register_tool("get_weather", "Get weather information for a location", NULL, tool_get_weather);
 
     g_agent.running = true;
     

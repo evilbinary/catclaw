@@ -14,7 +14,43 @@
 #include <unistd.h>
 
 // Default system prompt for the agent
-static const char* DEFAULT_SYSTEM_PROMPT = "你是一个有用的助手，可以帮助用户完成各种任务。请保持对话的连贯性，基于上下文进行回复。";
+static const char* DEFAULT_SYSTEM_PROMPT = 
+"你是一个有用的助手，可以帮助用户完成各种任务。请保持对话的连贯性，基于上下文进行回复。\n"
+"\n"
+"可用工具：\n"
+"1. get_weather - 获取天气信息\n"
+"   参数: location (string) - 城市名称，如 \"北京\"、\"上海\"\n"
+"\n"
+"2. web_search - 搜索网络信息\n"
+"   参数: query (string) - 搜索关键词\n"
+"\n"
+"3. calculator - 计算数学表达式\n"
+"   参数: expression (string) - 数学表达式，如 \"1+2*3\"\n"
+"\n"
+"4. time - 获取当前时间\n"
+"   参数: 无\n"
+"\n"
+"5. read_file - 读取文件内容\n"
+"   参数: path (string) - 文件路径\n"
+"\n"
+"6. write_file - 写入文件内容\n"
+"   参数: path (string) - 文件路径, content (string) - 文件内容\n"
+"\n"
+"7. reverse_string - 反转字符串\n"
+"   参数: text (string) - 要反转的文本\n"
+"\n"
+"8. memory_save - 保存信息到内存\n"
+"   参数: key (string) - 键名, value (string) - 值\n"
+"\n"
+"9. memory_load - 从内存读取信息\n"
+"   参数: key (string) - 键名\n"
+"\n"
+"如果需要使用工具，请输出以下 JSON 格式：\n"
+"{\"tool_calls\": [{\"id\": \"call_1\", \"type\": \"function\", \"function\": {\"name\": \"工具名\", \"arguments\": \"{\\\"参数名\\\": \\\"参数值\\\"}\"}}]}\n"
+"\n"
+"示例：\n"
+"用户：北京天气怎么样？\n"
+"助手：{\"tool_calls\": [{\"id\": \"call_1\", \"type\": \"function\", \"function\": {\"name\": \"get_weather\", \"arguments\": \"{\\\"location\\\": \\\"北京\\\"}\"}}]}";
 #include "common/log.h"
 
 // ToolCall structure for tool execution
@@ -355,8 +391,11 @@ void* agent_node_worker_thread(void* arg) {
                     
                     ToolCallList* tool_call_list = NULL;
                     
-                    // First, try to use tool_calls from AI model response
+                    // Parse tool_calls from AI model response
                     if (response->tool_calls && strlen(response->tool_calls) > 0) {
+                        if (g_config.debug) {
+                            log_debug("Found tool_calls in response: %s\n", response->tool_calls);
+                        }
                         cJSON *tool_calls_json = cJSON_Parse(response->tool_calls);
                         if (tool_calls_json) {
                             tool_call_list = parse_tool_calls_from_json(tool_calls_json);

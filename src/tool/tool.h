@@ -35,5 +35,6 @@ int tool_write_file(const char* args, char** result, int* result_len);
 int tool_search_web(const char* args, char** result, int* result_len);
 int tool_save_memory(const char* args, char** result, int* result_len);
 int tool_read_memory(const char* args, char** result, int* result_len);
+int tool_get_weather(const char* args, char** result, int* result_len);
 
 #endif // TOOL_H

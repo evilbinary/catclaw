@@ -392,3 +392,52 @@ int tool_read_memory(const char* args, char** result, int* result_len) {
     
     return 0;
 }
+
+// Weather tool
+int tool_get_weather(const char* args, char** result, int* result_len) {
+    if (!args || strlen(args) == 0) {
+        *result = strdup("Error: No location provided");
+        *result_len = strlen(*result);
+        return -1;
+    }
+    
+    // Parse JSON parameters to get location
+    cJSON* root = cJSON_Parse(args);
+    const char* location = args;
+    
+    if (root) {
+        cJSON* location_obj = cJSON_GetObjectItem(root, "location");
+        if (location_obj && cJSON_IsString(location_obj)) {
+            location = location_obj->valuestring;
+        }
+    }
+    
+    *result = (char*)malloc(256);
+    if (*result) {
+        // Simple mock weather data
+        if (strstr(location, "beijing") || strstr(location, "北京")) {
+            snprintf(*result, 256, "北京天气：22°C，晴朗，湿度：45%%");
+        } else if (strstr(location, "shanghai") || strstr(location, "上海")) {
+            snprintf(*result, 256, "上海天气：25°C，多云，湿度：60%%");
+        } else if (strstr(location, "guangzhou") || strstr(location, "广州")) {
+            snprintf(*result, 256, "广州天气：28°C，雷阵雨，湿度：75%%");
+        } else if (strstr(location, "shenzhen") || strstr(location, "深圳")) {
+            snprintf(*result, 256, "深圳天气：27°C，多云，湿度：70%%");
+        } else if (strstr(location, "new york") || strstr(location, "纽约")) {
+            snprintf(*result, 256, "纽约天气：18°C，小雨，湿度：75%%");
+        } else if (strstr(location, "london") || strstr(location, "伦敦")) {
+            snprintf(*result, 256, "伦敦天气：15°C，雾，湿度：80%%");
+        } else if (strstr(location, "tokyo") || strstr(location, "东京")) {
+            snprintf(*result, 256, "东京天气：20°C，晴间多云，湿度：55%%");
+        } else {
+            snprintf(*result, 256, "%s天气：20°C，局部多云，湿度：50%%", location);
+        }
+        *result_len = strlen(*result);
+    }
+    
+    if (root) {
+        cJSON_Delete(root);
+    }
+    
+    return 0;
+}
