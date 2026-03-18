@@ -60,13 +60,20 @@ static const char* DEFAULT_SYSTEM_PROMPT =
 "[TOOL_RESULT] 是系统消息，不是用户输入。\n"
 "当你看到 [TOOL_RESULT] 时，说明工具已经执行完成，你必须直接生成最终回复，不要再输出 tool_calls！\n"
 "\n"
-"示例：\n"
+"示例1 - 调用工具：\n"
+"用户：北京天气怎么样？\n"
+"助手：{\"tool_calls\": [{\"id\": \"call_1\", \"type\": \"function\", \"function\": {\"name\": \"get_weather\", \"arguments\": \"{\\\"location\\\": \\\"北京\\\"}\"}}]}\n"
+"\n"
+"示例2 - 回复用户（看到 [TOOL_RESULT] 后）：\n"
 "用户：北京天气怎么样？\n"
 "助手：{\"tool_calls\": [{\"id\": \"call_1\", \"type\": \"function\", \"function\": {\"name\": \"get_weather\", \"arguments\": \"{\\\"location\\\": \\\"北京\\\"}\"}}]}\n"
 "[TOOL_RESULT] 北京天气：22°C，晴朗，湿度：45% [/TOOL_RESULT]\n"
 "助手：北京今天天气晴朗，温度22°C，湿度45%，很适合外出活动！\n"
 "\n"
-"注意：在 [TOOL_RESULT] 之后，直接回复用户，不要再调用工具！";
+"重要提醒：\n"
+"1. 只有需要工具时才输出 tool_calls\n"
+"2. 看到 [TOOL_RESULT] 后，直接回复用户，绝对不要再输出 tool_calls！\n"
+"3. 不要自己编造 [TOOL_RESULT]，必须等待系统返回！";
 #include "common/log.h"
 
 // ToolCall structure for tool execution
@@ -353,6 +360,24 @@ void* agent_node_worker_thread(void* arg) {
             log_debug("Added user message to session\n");
         }
         
+        // Check if session history is too large and trim if necessary
+        int max_history = g_config.session.max_history_per_session > 0 ? 
+                         g_config.session.max_history_per_session : 100;
+        if (session->history->count > max_history) {
+            log_info("Session history too large (%d messages), trimming to %d\n", 
+                    session->history->count, max_history);
+            // Remove oldest messages
+            int remove_count = session->history->count - max_history;
+            for (int i = 0; i < remove_count; i++) {
+                message_destroy(session->history->messages[0]);
+                // Shift remaining messages
+                for (int j = 1; j < session->history->count; j++) {
+                    session->history->messages[j-1] = session->history->messages[j];
+                }
+                session->history->count--;
+            }
+        }
+        
         // 4. Build context
         MessageList* context = message_list_create();
         if (context) {
@@ -459,6 +484,10 @@ void* agent_node_worker_thread(void* arg) {
                             }
                             
                             // Add tool result to session
+                            if (g_config.debug) {
+                                log_debug("Tool result: %s\n", result ? result : "(null)");
+                                printf("[DEBUG] Tool result: %s\n", result ? result : "(null)");
+                            }
                             Message* tool_msg = message_create_tool(call->id, call->name, result ? result : "Error executing tool");
                             session_add_message(session, tool_msg);
                             

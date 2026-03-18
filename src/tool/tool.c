@@ -453,31 +453,58 @@ int tool_list_directory(const char* args, char** result, int* result_len) {
         return -1;
     }
     
+    // Debug: print raw args
+    fprintf(stderr, "[DEBUG] list_directory args: %s\n", args);
+    
     // Parse JSON parameters to get path
     cJSON* root = cJSON_Parse(args);
-    const char* path = args;
+    char clean_path[512];
     
     if (root) {
+        // Successfully parsed as JSON
         cJSON* path_obj = cJSON_GetObjectItem(root, "path");
         if (path_obj && cJSON_IsString(path_obj)) {
-            path = path_obj->valuestring;
+            strncpy(clean_path, path_obj->valuestring, sizeof(clean_path) - 1);
+            clean_path[sizeof(clean_path) - 1] = '\0';
+            fprintf(stderr, "[DEBUG] Extracted path from JSON: %s\n", clean_path);
+        } else {
+            // JSON parsed but no path field
+            snprintf(clean_path, sizeof(clean_path), "Error: No 'path' field in JSON: %s", args);
+            *result = strdup(clean_path);
+            *result_len = strlen(*result);
+            cJSON_Delete(root);
+            return -1;
         }
+        cJSON_Delete(root);
+    } else {
+        // Not valid JSON, treat as plain path
+        strncpy(clean_path, args, sizeof(clean_path) - 1);
+        clean_path[sizeof(clean_path) - 1] = '\0';
+        fprintf(stderr, "[DEBUG] Using args as plain path: %s\n", clean_path);
     }
     
     // If path is "." or empty, use current directory
-    if (strcmp(path, "") == 0 || strcmp(path, "\"") == 0) {
-        path = ".";
+    if (strcmp(clean_path, "") == 0 || strcmp(clean_path, "\"") == 0) {
+        strcpy(clean_path, ".");
     }
     
     // Remove quotes if present
-    char clean_path[256];
-    strncpy(clean_path, path, sizeof(clean_path) - 1);
-    clean_path[sizeof(clean_path) - 1] = '\0';
     size_t len = strlen(clean_path);
     if (len > 1 && clean_path[0] == '"' && clean_path[len-1] == '"') {
         clean_path[len-1] = '\0';
         memmove(clean_path, clean_path + 1, len - 1);
     }
+    
+    // Trim whitespace
+    char* start = clean_path;
+    while (*start == ' ' || *start == '\t') start++;
+    char* end = clean_path + strlen(clean_path) - 1;
+    while (end > start && (*end == ' ' || *end == '\t')) *end-- = '\0';
+    if (start != clean_path) {
+        memmove(clean_path, start, strlen(start) + 1);
+    }
+    
+    fprintf(stderr, "[DEBUG] Final path: %s\n", clean_path);
     
     DIR* dir = opendir(clean_path);
     if (!dir) {
