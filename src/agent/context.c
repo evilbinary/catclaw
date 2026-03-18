@@ -17,9 +17,10 @@
 static const char* DEFAULT_SYSTEM_PROMPT = 
 "你是一个有用的助手，可以帮助用户完成各种任务。请保持对话的连贯性，基于上下文进行回复。\n"
 "\n"
-"可用工具：\n"
+"可用工具（必须严格使用以下名称）：\n"
 "1. get_weather - 获取天气信息\n"
 "   参数: location (string) - 城市名称，如 \"北京\"、\"上海\"\n"
+"   注意：工具名称必须是 get_weather，不能简写为 weather\n"
 "\n"
 "2. web_search - 搜索网络信息\n"
 "   参数: query (string) - 搜索关键词\n"
@@ -44,6 +45,8 @@ static const char* DEFAULT_SYSTEM_PROMPT =
 "\n"
 "9. memory_load - 从内存读取信息\n"
 "   参数: key (string) - 键名\n"
+"\n"
+"重要：function.name 必须是上述工具名称之一，严格区分大小写！\n"
 "\n"
 "如果需要使用工具，请输出以下 JSON 格式：\n"
 "{\"tool_calls\": [{\"id\": \"call_1\", \"type\": \"function\", \"function\": {\"name\": \"工具名\", \"arguments\": \"{\\\"参数名\\\": \\\"参数值\\\"}\"}}]}\n"
@@ -420,15 +423,24 @@ void* agent_node_worker_thread(void* arg) {
                             int result_len = 0;
                             
                             if (g_config.debug) {
-                                log_debug("Executing tool: %s with args: %s\n", call->name, call->arguments);
+                                log_debug("Executing tool: '%s' with args: %s\n", call->name, call->arguments);
+                                printf("[DEBUG] Looking for tool: '%s'\n", call->name);
                             }
                             
                             // Execute tool
                             Tool* tool = tool_registry_get(agent->tool_registry, call->name);
                             int status = -1;
                             if (tool) {
+                                if (g_config.debug) {
+                                    log_debug("Tool found: %s\n", tool->name);
+                                    printf("[DEBUG] Tool found: %s\n", tool->name);
+                                }
                                 status = tool->execute(call->arguments, &result, &result_len);
                             } else {
+                                if (g_config.debug) {
+                                    log_debug("Tool not found: '%s'\n", call->name);
+                                    printf("[DEBUG] Tool not found: '%s'\n", call->name);
+                                }
                                 result = strdup("Error: Tool not found");
                                 result_len = strlen(result);
                             }
