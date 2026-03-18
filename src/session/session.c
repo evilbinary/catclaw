@@ -343,7 +343,6 @@ Session* session_load(const char* session_id, const char* sessions_dir) {
                     free(expanded_path);
                     expanded_path = temp;
                     log_debug("session_load: expanded path: %s", expanded_path);
-                    printf("[DEBUG] session_load: expanded path: %s\n", expanded_path);
                 }
             }
         }
@@ -365,12 +364,10 @@ Session* session_load(const char* session_id, const char* sessions_dir) {
     }
     
     log_debug("session_load: trying to load from %s", history_file);
-    printf("[DEBUG] session_load: trying to load from %s\n", history_file);
     
     FILE* fp = fopen(history_file, "r");
     if (!fp) {
         log_debug("session_load: file not found: %s", history_file);
-        printf("[DEBUG] session_load: file not found: %s\n", history_file);
         return NULL;
     }
     
@@ -380,7 +377,6 @@ Session* session_load(const char* session_id, const char* sessions_dir) {
     fseek(fp, 0, SEEK_SET);
     
     log_debug("session_load: file size: %ld bytes", length);
-    printf("[DEBUG] session_load: file size: %ld bytes\n", length);
     
     char* jsonl = (char*)malloc(length + 1);
     if (!jsonl) {

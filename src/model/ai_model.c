@@ -757,15 +757,12 @@ AIModelResponse *ai_model_send_messages(MessageList *messages, const char *syste
                 }
                 
                 log_debug("Building prompt with %d messages in history", messages ? messages->count : 0);
-                printf("[DEBUG] Building prompt with %d messages in history\n", messages ? messages->count : 0);
                 
                 if (messages) {
                     for (int i = 0; i < messages->count; i++) {
                         if (messages->messages[i]) {
                             log_debug("Message %d: role=%d, content=%s", i, messages->messages[i]->role, 
                                      messages->messages[i]->content ? messages->messages[i]->content : "(null)");
-                            printf("[DEBUG] Message %d: role=%d, content=%s\n", i, messages->messages[i]->role,
-                                   messages->messages[i]->content ? messages->messages[i]->content : "(null)");
                             if (messages->messages[i]->role == ROLE_USER) {
                                 strncat(prompt, "[INST] ", sizeof(prompt) - strlen(prompt) - 1);
                                 strncat(prompt, messages->messages[i]->content, sizeof(prompt) - strlen(prompt) - 1);
@@ -784,7 +781,6 @@ AIModelResponse *ai_model_send_messages(MessageList *messages, const char *syste
                 }
                 
                 log_debug("Final prompt: %s", prompt);
-                printf("[DEBUG] Final prompt:\n%s\n", prompt);
                 
                 cJSON_AddStringToObject(root, "prompt", prompt);
                 cJSON_AddNumberToObject(root, "max_tokens", g_model_config.max_tokens);

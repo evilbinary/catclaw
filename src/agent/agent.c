@@ -509,10 +509,8 @@ bool agent_init(void) {
     Session* default_session = session_manager_get_or_create(g_agent.session_manager, "default");
     if (default_session) {
         log_info("Default session loaded with %d messages in history", default_session->history->count);
-        printf("Default session loaded with %d messages in history\n", default_session->history->count);
     } else {
         log_info("No existing default session found, creating new session");
-        printf("No existing default session found, creating new session\n");
     }
     
     // Start worker thread

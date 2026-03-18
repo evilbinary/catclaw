@@ -52,13 +52,16 @@ static const char* DEFAULT_SYSTEM_PROMPT =
 "{\"tool_calls\": [{\"id\": \"call_1\", \"type\": \"function\", \"function\": {\"name\": \"工具名\", \"arguments\": \"{\\\"参数名\\\": \\\"参数值\\\"}\"}}]}\n"
 "\n"
 "工具执行后会返回结果，格式为 [TOOL_RESULT] 结果 [/TOOL_RESULT]。\n"
-"请基于工具结果给用户最终回复。\n"
+"[TOOL_RESULT] 是系统消息，不是用户输入。\n"
+"当你看到 [TOOL_RESULT] 时，说明工具已经执行完成，你必须直接生成最终回复，不要再输出 tool_calls！\n"
 "\n"
 "示例：\n"
 "用户：北京天气怎么样？\n"
 "助手：{\"tool_calls\": [{\"id\": \"call_1\", \"type\": \"function\", \"function\": {\"name\": \"get_weather\", \"arguments\": \"{\\\"location\\\": \\\"北京\\\"}\"}}]}\n"
 "[TOOL_RESULT] 北京天气：22°C，晴朗，湿度：45% [/TOOL_RESULT]\n"
-"助手：北京今天天气晴朗，温度22°C，湿度45%，很适合外出活动！";
+"助手：北京今天天气晴朗，温度22°C，湿度45%，很适合外出活动！\n"
+"\n"
+"注意：在 [TOOL_RESULT] 之后，直接回复用户，不要再调用工具！";
 #include "common/log.h"
 
 // ToolCall structure for tool execution
@@ -320,7 +323,6 @@ void* agent_node_worker_thread(void* arg) {
         }
         
         log_info("Session %s has %d messages in history", session->session_id, session->history->count);
-        printf("[DEBUG] Session %s has %d messages in history\n", session->session_id, session->history->count);
         
         if (g_config.debug) {
             log_debug("Got or created session: %s\n", session->session_id);
@@ -424,7 +426,6 @@ void* agent_node_worker_thread(void* arg) {
                             
                             if (g_config.debug) {
                                 log_debug("Executing tool: '%s' with args: %s\n", call->name, call->arguments);
-                                printf("[DEBUG] Looking for tool: '%s'\n", call->name);
                             }
                             
                             // Execute tool
@@ -433,13 +434,11 @@ void* agent_node_worker_thread(void* arg) {
                             if (tool) {
                                 if (g_config.debug) {
                                     log_debug("Tool found: %s\n", tool->name);
-                                    printf("[DEBUG] Tool found: %s\n", tool->name);
                                 }
                                 status = tool->execute(call->arguments, &result, &result_len);
                             } else {
                                 if (g_config.debug) {
                                     log_debug("Tool not found: '%s'\n", call->name);
-                                    printf("[DEBUG] Tool not found: '%s'\n", call->name);
                                 }
                                 result = strdup("Error: Tool not found");
                                 result_len = strlen(result);
