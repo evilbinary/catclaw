@@ -48,9 +48,14 @@ static const char* DEFAULT_SYSTEM_PROMPT =
 "如果需要使用工具，请输出以下 JSON 格式：\n"
 "{\"tool_calls\": [{\"id\": \"call_1\", \"type\": \"function\", \"function\": {\"name\": \"工具名\", \"arguments\": \"{\\\"参数名\\\": \\\"参数值\\\"}\"}}]}\n"
 "\n"
+"工具执行后会返回结果，格式为 [TOOL_RESULT] 结果 [/TOOL_RESULT]。\n"
+"请基于工具结果给用户最终回复。\n"
+"\n"
 "示例：\n"
 "用户：北京天气怎么样？\n"
-"助手：{\"tool_calls\": [{\"id\": \"call_1\", \"type\": \"function\", \"function\": {\"name\": \"get_weather\", \"arguments\": \"{\\\"location\\\": \\\"北京\\\"}\"}}]}";
+"助手：{\"tool_calls\": [{\"id\": \"call_1\", \"type\": \"function\", \"function\": {\"name\": \"get_weather\", \"arguments\": \"{\\\"location\\\": \\\"北京\\\"}\"}}]}\n"
+"[TOOL_RESULT] 北京天气：22°C，晴朗，湿度：45% [/TOOL_RESULT]\n"
+"助手：北京今天天气晴朗，温度22°C，湿度45%，很适合外出活动！";
 #include "common/log.h"
 
 // ToolCall structure for tool execution

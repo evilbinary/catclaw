@@ -773,6 +773,11 @@ AIModelResponse *ai_model_send_messages(MessageList *messages, const char *syste
                             } else if (messages->messages[i]->role == ROLE_ASSISTANT) {
                                 strncat(prompt, messages->messages[i]->content, sizeof(prompt) - strlen(prompt) - 1);
                                 strncat(prompt, "\n\n", sizeof(prompt) - strlen(prompt) - 1);
+                            } else if (messages->messages[i]->role == ROLE_TOOL) {
+                                // Add tool result to prompt
+                                strncat(prompt, "[TOOL_RESULT] ", sizeof(prompt) - strlen(prompt) - 1);
+                                strncat(prompt, messages->messages[i]->content, sizeof(prompt) - strlen(prompt) - 1);
+                                strncat(prompt, " [/TOOL_RESULT]\n", sizeof(prompt) - strlen(prompt) - 1);
                             }
                         }
                     }
