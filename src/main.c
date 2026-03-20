@@ -88,7 +88,7 @@ int main(int argc, char *argv[]) {
     
     // Try to get loglevel from new logging config
     const char *loglevel_str = g_config.logging.level;
-    if (loglevel_str) {
+    if (loglevel_str && loglevel_str[0] != '\0') {
         printf("[DEBUG] Setting log level from config: %s\n", loglevel_str);
         if (strcmp(loglevel_str, "debug") == 0) {
             log_level = LOG_LEVEL_DEBUG;

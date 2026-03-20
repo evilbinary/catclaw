@@ -355,13 +355,16 @@ static void parse_logging_config(cJSON *logging) {
     if (!logging) return;
     
     cJSON *level = cJSON_GetObjectItem(logging, "level");
-    if (level && cJSON_IsString(level)) {
+    if (level && cJSON_IsString(level) && level->valuestring) {
         free(g_config.logging.level);
         g_config.logging.level = strdup(level->valuestring);
+        if (!g_config.logging.level) {
+            fprintf(stderr, "Warning: Failed to allocate memory for log level\n");
+        }
     }
     
     cJSON *file = cJSON_GetObjectItem(logging, "file");
-    if (file && cJSON_IsString(file)) {
+    if (file && cJSON_IsString(file) && file->valuestring) {
         free(g_config.logging.file);
         g_config.logging.file = strdup(file->valuestring);
     }
@@ -521,9 +524,12 @@ static void parse_legacy_config(cJSON *root) {
     
     // Parse loglevel
     cJSON *loglevel = cJSON_GetObjectItem(root, "loglevel");
-    if (loglevel && cJSON_IsString(loglevel)) {
+    if (loglevel && cJSON_IsString(loglevel) && loglevel->valuestring) {
         free(g_config.logging.level);
         g_config.logging.level = strdup(loglevel->valuestring);
+        if (!g_config.logging.level) {
+            fprintf(stderr, "Warning: Failed to allocate memory for log level\n");
+        }
     }
 }
 
@@ -585,10 +591,19 @@ bool config_load(void) {
 
     // Set default workspace path if not provided
     if (!g_config.workspace.path && !g_config.workspace_path) {
-        char default_workspace[256];
+        char default_workspace[512];
+#ifdef _WIN32
         snprintf(default_workspace, sizeof(default_workspace), "%s/.catclaw/workspace", home);
+        // Replace forward slashes with backslashes on Windows
+        for (char *p = default_workspace; *p; p++) {
+            if (*p == '/') *p = '\\';
+        }
+#else
+        snprintf(default_workspace, sizeof(default_workspace), "%s/.catclaw/workspace", home);
+#endif
         g_config.workspace.path = strdup(default_workspace);
         g_config.workspace_path = strdup(default_workspace);
+        fprintf(stderr, "Using default workspace: %s\n", default_workspace);
     }
     
     // Set default session key if not provided
@@ -598,7 +613,13 @@ bool config_load(void) {
     
     // Set default logging level if not provided
     if (!g_config.logging.level) {
-        g_config.logging.level = strdup(g_config.debug ? "debug" : "info");
+        const char *default_level = g_config.debug ? "debug" : "info";
+        g_config.logging.level = strdup(default_level);
+        if (!g_config.logging.level) {
+            fprintf(stderr, "Warning: Failed to allocate memory for default log level\n");
+            // Use a static string as fallback
+            g_config.logging.level = (char*)default_level;
+        }
     }
 
     // Sync legacy fields with new fields

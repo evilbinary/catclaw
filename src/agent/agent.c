@@ -405,8 +405,18 @@ char *agent_parse_command(const char *command) {
 
 bool agent_init(void) {
     // Initialize workspace
-    if (!workspace_init(g_config.workspace_path)) {
-        log_error("Failed to initialize workspace\n");
+    log_debug("Initializing workspace with path: %s\n", 
+              g_config.workspace_path ? g_config.workspace_path : "(null)");
+    
+    // Use workspace.path if workspace_path is not set
+    const char* workspace_path = g_config.workspace_path ? g_config.workspace_path : g_config.workspace.path;
+    if (!workspace_path) {
+        log_error("Workspace path is not set\n");
+        return false;
+    }
+    
+    if (!workspace_init(workspace_path)) {
+        log_error("Failed to initialize workspace at: %s\n", workspace_path);
         return false;
     }
 
@@ -468,8 +478,7 @@ bool agent_init(void) {
 
     // Initialize session manager
     char sessions_dir[512];
-    const char* workspace_path = g_config.workspace.path ? g_config.workspace.path : 
-                                 (g_config.workspace_path ? g_config.workspace_path : NULL);
+    // Reuse workspace_path from earlier in the function
     if (!workspace_path) {
         log_error("Workspace path is not configured\n");
         free(g_agent.model);
