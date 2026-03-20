@@ -578,13 +578,7 @@ bool agent_init(void) {
         log_info("No existing default session found, creating new session");
     }
     
-    // Start worker thread
-    if (!agent_start_worker_thread()) {
-        log_error("Failed to start worker thread\n");
-        // Cleanup resources
-        agent_cleanup();
-        return false;
-    }
+    // Note: Worker thread will be started by main.c after agent initialization
     
     printf("Agent initialized with model: %s\n", g_agent.model);
     agent_list_tools();
