@@ -544,7 +544,7 @@ void* agent_node_worker_thread(void* arg) {
         
         // 7. Save session
         if (g_config.debug) {
-            log_debug("Saving session: %s\n", session->session_id);
+            log_debug("Saving session: %s", session->session_id);
         }
         
         // Build sessions directory path
@@ -556,12 +556,12 @@ void* agent_node_worker_thread(void* arg) {
         queue_item_destroy(item);
         
         if (g_config.debug) {
-            log_debug("Cleaned up queue item\n");
+            log_debug("Cleaned up queue item");
         }
     }
     
     if (g_config.debug) {
-        log_debug("Agent node worker thread exiting\n");
+        log_debug("Agent node worker thread exiting");
     }
     
     return NULL;

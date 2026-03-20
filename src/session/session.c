@@ -260,7 +260,7 @@ bool session_save(Session* session, const char* sessions_dir) {
     snprintf(metadata_file, sizeof(metadata_file), "%s/sessions.json", actual_dir);
 #endif
     
-    log_debug("Saving session metadata to: %s\n", metadata_file);
+    log_debug("Saving session metadata to: %s", metadata_file);
     
     // Read existing metadata
     cJSON* metadata_root = NULL;
@@ -304,9 +304,9 @@ bool session_save(Session* session, const char* sessions_dir) {
         if (metadata_fp) {
             size_t written = fprintf(metadata_fp, "%s", metadata_json);
             if (written != strlen(metadata_json)) {
-                log_error("Error: Failed to write all metadata to file\n");
+                log_error("Error: Failed to write all metadata to file");
             } else {
-                log_debug("Successfully wrote metadata to file\n");
+                log_debug("Successfully wrote metadata to file");
             }
             fclose(metadata_fp);
         } else {
@@ -319,7 +319,7 @@ bool session_save(Session* session, const char* sessions_dir) {
     }
     
     cJSON_Delete(metadata_root);
-    log_debug("Session saved successfully\n");
+    log_debug("Session saved successfully");
     
     // Free expanded directory path
     if (expanded_dir) {
