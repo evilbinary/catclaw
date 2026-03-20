@@ -22,6 +22,8 @@ typedef struct {
     int count;                // 模型数量
     int capacity;             // 数组容量
     int current_index;        // 当前使用的模型索引
+    int default_index;        // 默认模型索引
+    char *default_model;      // 默认模型名称（优先使用）
 } ModelsConfig;
 
 // Gateway configuration

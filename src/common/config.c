@@ -17,7 +17,9 @@ Config g_config = {
         .models = NULL,
         .count = 0,
         .capacity = 0,
-        .current_index = 0
+        .current_index = 0,
+        .default_index = 0,
+        .default_model = NULL
     },
     // Model config defaults (current selected model)
     .model = {
@@ -194,8 +196,26 @@ static void parse_single_model(cJSON *model_json, int index) {
 static void parse_models_config(cJSON *models) {
     if (!models) return;
     
-    if (cJSON_IsArray(models)) {
-        // Parse array of models
+    // Check if this is an object with "list" and "default" fields
+    cJSON *list = cJSON_GetObjectItem(models, "list");
+    cJSON *default_model = cJSON_GetObjectItem(models, "default");
+    
+    if (list && cJSON_IsArray(list)) {
+        // Parse array of models from "list" field
+        int size = cJSON_GetArraySize(list);
+        for (int i = 0; i < size; i++) {
+            cJSON *model = cJSON_GetArrayItem(list, i);
+            if (model) {
+                parse_single_model(model, i);
+            }
+        }
+        
+        // Parse default model
+        if (default_model && cJSON_IsString(default_model)) {
+            g_config.models.default_model = strdup(default_model->valuestring);
+        }
+    } else if (cJSON_IsArray(models)) {
+        // Direct array (backward compatibility)
         int size = cJSON_GetArraySize(models);
         for (int i = 0; i < size; i++) {
             cJSON *model = cJSON_GetArrayItem(models, i);
@@ -209,16 +229,43 @@ static void parse_models_config(cJSON *models) {
     }
 }
 
+// Find model index by name
+static int find_model_index(const char *name) {
+    if (!name || !g_config.models.models) return -1;
+    
+    for (int i = 0; i < g_config.models.count; i++) {
+        if (g_config.models.models[i].name && 
+            strcmp(g_config.models.models[i].name, name) == 0) {
+            return i;
+        }
+    }
+    return -1;
+}
+
 // Copy model config to g_config.model (for backward compatibility)
 static void sync_current_model(void) {
     if (g_config.models.count == 0) return;
     
-    // Ensure current_index is valid
-    if (g_config.models.current_index >= g_config.models.count) {
-        g_config.models.current_index = 0;
+    // Determine which model to use
+    int target_index = g_config.models.current_index;
+    
+    // If current_index is not set or invalid, try to use default model
+    if (target_index >= g_config.models.count || target_index < 0) {
+        target_index = 0;
+        
+        // Try to find default model by name
+        if (g_config.models.default_model) {
+            int idx = find_model_index(g_config.models.default_model);
+            if (idx >= 0) {
+                target_index = idx;
+                g_config.models.default_index = idx;
+            }
+        }
+        
+        g_config.models.current_index = target_index;
     }
     
-    ModelConfig *src = &g_config.models.models[g_config.models.current_index];
+    ModelConfig *src = &g_config.models.models[target_index];
     ModelConfig *dst = &g_config.model;
     
     // Free old values
@@ -630,8 +677,14 @@ void config_list_models(void) {
     printf("Available models (%d total):\n", g_config.models.count);
     for (int i = 0; i < g_config.models.count; i++) {
         ModelConfig *model = &g_config.models.models[i];
-        const char *indicator = (i == g_config.models.current_index) ? " *" : "";
-        printf("  %d. %s%s\n", i, model->name ? model->name : "(unnamed)", indicator);
+        const char *current_indicator = (i == g_config.models.current_index) ? " [current]" : "";
+        const char *default_indicator = (g_config.models.default_model && 
+                                         model->name && 
+                                         strcmp(model->name, g_config.models.default_model) == 0) ? " [default]" : "";
+        printf("  %d. %s%s%s\n", i, 
+               model->name ? model->name : "(unnamed)", 
+               current_indicator, 
+               default_indicator);
         printf("     Provider: %s, Model: %s\n", 
                model->provider ? model->provider : "(default)",
                model->model_name ? model->model_name : "(default)");
@@ -657,6 +710,9 @@ void config_cleanup(void) {
         }
         free(g_config.models.models);
     }
+    
+    // Cleanup default model name
+    free(g_config.models.default_model);
     
     // Cleanup current model config
     free(g_config.model.name);
