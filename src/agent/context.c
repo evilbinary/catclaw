@@ -15,67 +15,32 @@
 #include <errno.h>
 
 // Default system prompt for the agent
-static const char* DEFAULT_SYSTEM_PROMPT = 
+static const char* DEFAULT_SYSTEM_PROMPT =
 "你是一个有用的助手，可以帮助用户完成各种任务。请保持对话的连贯性，基于上下文进行回复。\n"
 "\n"
-"可用工具（必须严格使用以下名称）：\n"
-"1. get_weather - 获取天气信息\n"
-"   参数: location (string) - 城市名称，如 \"北京\"、\"上海\"\n"
-"   注意：工具名称必须是 get_weather，不能简写为 weather\n"
+"可用工具：\n"
+"1. (get_weather location) - 获取天气信息，location 为城市名称如 \"北京\"\n"
+"2. (web_search query) - 搜索网络信息\n"
+"3. (calculator expression) - 计算数学表达式，如 \"1+2*3\"\n"
+"4. (time) - 获取当前时间\n"
+"5. (read_file path) - 读取文件内容\n"
+"6. (write_file path content) - 写入文件内容\n"
+"7. (reverse_string text) - 反转字符串\n"
+"8. (memory_save key value) - 保存信息到内存\n"
+"9. (memory_load key) - 从内存读取信息\n"
+"10. (list_directory path) - 列出目录内容，支持 ~ 展开如 \"~/.catclaw\"\n"
 "\n"
-"2. web_search - 搜索网络信息\n"
-"   参数: query (string) - 搜索关键词\n"
+"如果需要使用工具，请使用 S表达式格式输出：\n"
+"(tool-calls\n"
+"  (工具名 参数1 参数2 ...)\n"
+")\n"
 "\n"
-"3. calculator - 计算数学表达式\n"
-"   参数: expression (string) - 数学表达式，如 \"1+2*3\"\n"
-"\n"
-"4. time - 获取当前时间\n"
-"   参数: 无\n"
-"\n"
-"5. read_file - 读取文件内容\n"
-"   参数: path (string) - 文件路径\n"
-"\n"
-"6. write_file - 写入文件内容\n"
-"   参数: path (string) - 文件路径, content (string) - 文件内容\n"
-"\n"
-"7. reverse_string - 反转字符串\n"
-"   参数: text (string) - 要反转的文本\n"
-"\n"
-"8. memory_save - 保存信息到内存\n"
-"   参数: key (string) - 键名, value (string) - 值\n"
-"\n"
-"9. memory_load - 从内存读取信息\n"
-"   参数: key (string) - 键名\n"
-"\n"
-"10. list_directory - 查看目录文件列表\n"
-"   参数: path (string) - 目录路径，支持波浪号展开，如 \".\"、\"~\"、\"~/.catclaw\"、\"/home/user\"\n"
-"   注意：~ 会被自动展开为用户主目录\n"
-"\n"
-"重要：function.name 必须是上述工具名称之一，严格区分大小写！\n"
-"\n"
-"如果需要使用工具，请输出以下 JSON 格式（注意：arguments 必须是 JSON 字符串，需要转义）：\n"
-"{\"tool_calls\": [{\"id\": \"call_1\", \"type\": \"function\", \"function\": {\"name\": \"工具名\", \"arguments\": \"{\\\"参数名\\\": \\\"参数值\\\"}\"}}]}\n"
-"\n"
-"注意：function.arguments 是一个字符串，不是对象！必须用双引号包裹，内部引号需要转义。\n"
-"\n"
-"工具执行后会返回结果，格式为 [TOOL_RESULT] 结果 [/TOOL_RESULT]。\n"
-"[TOOL_RESULT] 是系统消息，不是用户输入。\n"
-"当你看到 [TOOL_RESULT] 时，说明工具已经执行完成，你必须直接生成最终回复，不要再输出 tool_calls！\n"
-"\n"
-"示例1 - 调用工具：\n"
+"示例：\n"
 "用户：北京天气怎么样？\n"
-"助手：{\"tool_calls\": [{\"id\": \"call_1\", \"type\": \"function\", \"function\": {\"name\": \"get_weather\", \"arguments\": \"{\\\"location\\\": \\\"北京\\\"}\"}}]}\n"
+"助手：(tool-calls (get_weather \"北京\"))\n"
 "\n"
-"示例2 - 回复用户（看到 [TOOL_RESULT] 后）：\n"
-"用户：北京天气怎么样？\n"
-"助手：{\"tool_calls\": [{\"id\": \"call_1\", \"type\": \"function\", \"function\": {\"name\": \"get_weather\", \"arguments\": \"{\\\"location\\\": \\\"北京\\\"}\"}}]}\n"
-"[TOOL_RESULT] 北京天气：22°C，晴朗，湿度：45% [/TOOL_RESULT]\n"
-"助手：北京今天天气晴朗，温度22°C，湿度45%，很适合外出活动！\n"
-"\n"
-"重要提醒：\n"
-"1. 只有需要工具时才输出 tool_calls\n"
-"2. 看到 [TOOL_RESULT] 后，直接回复用户，绝对不要再输出 tool_calls！\n"
-"3. 不要自己编造 [TOOL_RESULT]，必须等待系统返回！";
+"工具执行后返回格式：[TOOL_RESULT] 结果 [/TOOL_RESULT]\n"
+"看到 [TOOL_RESULT] 后直接回复用户，不要再调用工具！\n";
 #include "common/log.h"
 
 // ToolCall structure for tool execution
@@ -227,7 +192,17 @@ void agent_node_system_cleanup(void) {
 // ==================== Worker Thread Management ====================
 
 bool agent_node_start_worker(AgentNode* node) {
-    if (!node || node->worker_running) return false;
+    if (!node) {
+        log_error("agent_node_start_worker: node is NULL\n");
+        return false;
+    }
+    
+    if (node->worker_running) {
+        log_warn("agent_node_start_worker: worker already running for node %s\n", node->id);
+        return false;
+    }
+    
+    log_info("Starting worker thread for agent node: %s", node->id);
     
     node->worker_running = true;
     int ret = pthread_create(&node->worker_thread, NULL, agent_node_worker_thread, node);
@@ -243,6 +218,7 @@ bool agent_node_start_worker(AgentNode* node) {
         return false;
     }
     
+    log_info("Worker thread started successfully for node: %s", node->id);
     return true;
 }
 
@@ -279,7 +255,6 @@ static ToolCallList* parse_tool_calls_from_json(cJSON* tool_calls_json) {
         }
         
         cJSON* id = cJSON_GetObjectItem(tool_call, "id");
-        cJSON* type = cJSON_GetObjectItem(tool_call, "type");
         cJSON* function = cJSON_GetObjectItem(tool_call, "function");
         
         if (id && cJSON_IsString(id) && function && cJSON_IsObject(function)) {
@@ -318,10 +293,169 @@ static ToolCallList* parse_tool_calls_from_json(cJSON* tool_calls_json) {
     return list;
 }
 
+// Parse S-expression tool calls
+// Format: (tool-calls (tool_name arg1 arg2 ...) ...)
+static ToolCallList* parse_tool_calls_from_sexp(const char* content) {
+    if (!content) return NULL;
+    
+    // Find (tool-calls ...)
+    const char* tc_start = strstr(content, "(tool-calls");
+    if (!tc_start) return NULL;
+    
+    // Find the opening parenthesis after tool-calls
+    const char* ptr = tc_start + 11; // skip "(tool-calls"
+    while (*ptr && (*ptr == ' ' || *ptr == '\t' || *ptr == '\n')) ptr++;
+    
+    if (*ptr != '(') return NULL;
+    
+    // Count tool calls
+    int count = 0;
+    const char* scan = ptr;
+    while (*scan) {
+        if (*scan == '(') {
+            scan++;
+            // Skip whitespace
+            while (*scan && (*scan == ' ' || *scan == '\t' || *scan == '\n')) scan++;
+            // Check if this is a tool call (not just empty parens)
+            if (*scan && *scan != ')') count++;
+        }
+        scan++;
+    }
+    
+    if (count == 0) return NULL;
+    
+    ToolCallList* list = (ToolCallList*)malloc(sizeof(ToolCallList));
+    if (!list) return NULL;
+    
+    list->count = count;
+    list->calls = (ToolCall*)calloc(count, sizeof(ToolCall));
+    if (!list->calls) {
+        free(list);
+        return NULL;
+    }
+    
+    // Parse each tool call
+    int call_idx = 0;
+    ptr = tc_start + 11;
+    while (*ptr && call_idx < count) {
+        while (*ptr && (*ptr == ' ' || *ptr == '\t' || *ptr == '\n')) ptr++;
+        
+        if (*ptr != '(') {
+            ptr++;
+            continue;
+        }
+        
+        ptr++; // skip '('
+        while (*ptr && (*ptr == ' ' || *ptr == '\t' || *ptr == '\n')) ptr++;
+        
+        if (*ptr == ')') {
+            ptr++;
+            continue;
+        }
+        
+        // Extract tool name
+        const char* name_start = ptr;
+        while (*ptr && *ptr != ' ' && *ptr != '\t' && *ptr != '\n' && *ptr != ')') ptr++;
+        
+        size_t name_len = ptr - name_start;
+        list->calls[call_idx].name = (char*)malloc(name_len + 1);
+        strncpy(list->calls[call_idx].name, name_start, name_len);
+        list->calls[call_idx].name[name_len] = '\0';
+        
+        // Generate a call ID
+        list->calls[call_idx].id = (char*)malloc(20);
+        snprintf(list->calls[call_idx].id, 20, "call_%d", call_idx + 1);
+        
+        // Parse arguments
+        cJSON* args_obj = cJSON_CreateObject();
+        
+        while (*ptr && *ptr != ')') {
+            // Skip whitespace
+            while (*ptr && (*ptr == ' ' || *ptr == '\t' || *ptr == '\n')) ptr++;
+            
+            if (*ptr == ')') break;
+            
+            // Parse argument
+            if (*ptr == '"') {
+                // String argument
+                ptr++; // skip opening quote
+                const char* arg_start = ptr;
+                while (*ptr && *ptr != '"') ptr++;
+                size_t arg_len = ptr - arg_start;
+                char* arg_value = (char*)malloc(arg_len + 1);
+                strncpy(arg_value, arg_start, arg_len);
+                arg_value[arg_len] = '\0';
+                if (*ptr == '"') ptr++; // skip closing quote
+                
+                // For single string argument, use "arg" as key
+                cJSON_AddStringToObject(args_obj, "arg", arg_value);
+                free(arg_value);
+            } else {
+                // Non-string argument (keyword or value)
+                const char* arg_start = ptr;
+                while (*ptr && *ptr != ' ' && *ptr != '\t' && *ptr != '\n' && *ptr != ')') ptr++;
+                size_t arg_len = ptr - arg_start;
+                char* arg_value = (char*)malloc(arg_len + 1);
+                strncpy(arg_value, arg_start, arg_len);
+                arg_value[arg_len] = '\0';
+                
+                // If next non-space is another value, this is a keyword
+                const char* next = ptr;
+                while (*next && (*next == ' ' || *next == '\t' || *next == '\n')) next++;
+                
+                if (*next && *next != ')' && *next != '(') {
+                    // This is a keyword, next is the value
+                    ptr = next;
+                    if (*ptr == '"') {
+                        ptr++;
+                        const char* val_start = ptr;
+                        while (*ptr && *ptr != '"') ptr++;
+                        size_t val_len = ptr - val_start;
+                        char* val_str = (char*)malloc(val_len + 1);
+                        strncpy(val_str, val_start, val_len);
+                        val_str[val_len] = '\0';
+                        if (*ptr == '"') ptr++;
+                        
+                        cJSON_AddStringToObject(args_obj, arg_value, val_str);
+                        free(val_str);
+                    } else {
+                        const char* val_start = ptr;
+                        while (*ptr && *ptr != ' ' && *ptr != '\t' && *ptr != '\n' && *ptr != ')') ptr++;
+                        size_t val_len = ptr - val_start;
+                        char* val_str = (char*)malloc(val_len + 1);
+                        strncpy(val_str, val_start, val_len);
+                        val_str[val_len] = '\0';
+                        
+                        cJSON_AddStringToObject(args_obj, arg_value, val_str);
+                        free(val_str);
+                    }
+                } else {
+                    // Single value argument
+                    cJSON_AddStringToObject(args_obj, "arg", arg_value);
+                }
+                
+                free(arg_value);
+            }
+        }
+        
+        if (*ptr == ')') ptr++;
+        
+        // Convert args_obj to JSON string
+        list->calls[call_idx].arguments = cJSON_Print(args_obj);
+        cJSON_Delete(args_obj);
+        
+        call_idx++;
+    }
+    
+    return list;
+}
+
 // Worker thread function
 void* agent_node_worker_thread(void* arg) {
     AgentNode* node = (AgentNode*)arg;
     Agent* agent = &node->agent;
+    
+    log_info("Agent node worker thread started (node_id: %s)", node->id);
     
     if (g_config.debug) {
         log_debug("Agent node worker thread started\n");
@@ -436,13 +570,84 @@ void* agent_node_worker_thread(void* arg) {
                     log_debug("response->content: '%s'", response->content ? response->content : "(null)");
                     log_debug("response->tool_calls: '%s'", response->tool_calls ? response->tool_calls : "(null)");
                     if (response->content && strlen(response->content) > 0) {
+                        // Try to parse content as JSON
                         cJSON *content_root = cJSON_Parse(response->content);
+                        
+                        // If parsing fails, try to fix common JSON issues
+                        if (!content_root && response->content) {
+                            log_debug("Initial JSON parse failed, attempting to fix...");
+                            const char* error_ptr = cJSON_GetErrorPtr();
+                            if (error_ptr) {
+                                log_debug("cJSON error at: '%s'", error_ptr);
+                            }
+                            
+                            // Try to remove trailing extra braces
+                            char* fixed_content = strdup(response->content);
+                            if (fixed_content) {
+                                // Count braces to find unmatched ones
+                                int brace_count = 0;
+                                int bracket_count = 0;
+                                for (char* p = fixed_content; *p; p++) {
+                                    if (*p == '{') brace_count++;
+                                    else if (*p == '}') brace_count--;
+                                    else if (*p == '[') bracket_count++;
+                                    else if (*p == ']') bracket_count--;
+                                }
+                                
+                                log_debug("Brace count: %d, Bracket count: %d", brace_count, bracket_count);
+                                
+                                // Remove extra trailing braces/brackets
+                                if (brace_count < 0 || bracket_count < 0) {
+                                    int len = strlen(fixed_content);
+                                    while (len > 0 && (brace_count < 0 || bracket_count < 0)) {
+                                        if (fixed_content[len-1] == '}') {
+                                            brace_count++;
+                                            fixed_content[--len] = '\0';
+                                        } else if (fixed_content[len-1] == ']') {
+                                            bracket_count++;
+                                            fixed_content[--len] = '\0';
+                                        } else {
+                                            break;
+                                        }
+                                    }
+                                    log_debug("Fixed JSON: '%s'", fixed_content);
+                                    content_root = cJSON_Parse(fixed_content);
+                                    if (!content_root) {
+                                        error_ptr = cJSON_GetErrorPtr();
+                                        if (error_ptr) {
+                                            log_debug("cJSON still failing at: '%s'", error_ptr);
+                                        }
+                                        
+                                        // Try more aggressive fixing: remove all trailing non-alphanumeric chars except }
+                                        len = strlen(fixed_content);
+                                        while (len > 1) {
+                                            char c = fixed_content[len-1];
+                                            if (c == '}' || c == ']' || c == '"' || c == '\'' ||
+                                                (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                                                (c >= '0' && c <= '9')) {
+                                                break;
+                                            }
+                                            fixed_content[--len] = '\0';
+                                        }
+                                        log_debug("Aggressively fixed JSON: '%s'", fixed_content);
+                                        content_root = cJSON_Parse(fixed_content);
+                                    }
+                                }
+                                free(fixed_content);
+                            }
+                        }
+                        
+                        log_debug("cJSON_Parse result: %p", (void*)content_root);
                         if (content_root) {
                             cJSON *tc = cJSON_GetObjectItem(content_root, "tool_calls");
+                            log_debug("tool_calls object: %p, is_array: %d", (void*)tc, tc ? cJSON_IsArray(tc) : 0);
                             if (tc && cJSON_IsArray(tc)) {
                                 has_tool_calls_in_content = true;
+                                log_debug("Detected tool_calls in content");
                             }
                             cJSON_Delete(content_root);
+                        } else {
+                            log_debug("Failed to parse content as JSON after fix attempts");
                         }
                     }
                     
@@ -475,20 +680,17 @@ void* agent_node_worker_thread(void* arg) {
                         }
                     }
                     
-                    // 2. Check response->content for text-based tool_calls JSON: {"tool_calls": [...]}
+                    // 2. Check for S-expression tool calls: (tool-calls ...)
                     if (!tool_call_list && response->content && strlen(response->content) > 0) {
-                        cJSON *content_root = cJSON_Parse(response->content);
-                        if (content_root) {
-                            cJSON *tool_calls_arr = cJSON_GetObjectItem(content_root, "tool_calls");
-                            if (tool_calls_arr && cJSON_IsArray(tool_calls_arr)) {
-                                if (g_config.debug) {
-                                    log_debug("Found tool_calls in response.content: %s\n", response->content);
-                                }
-                                tool_call_list = parse_tool_calls_from_json(tool_calls_arr);
+                        if (strstr(response->content, "(tool-calls")) {
+                            if (g_config.debug) {
+                                log_debug("Found S-expression tool_calls in response.content\n");
                             }
-                            cJSON_Delete(content_root);
+                            tool_call_list = parse_tool_calls_from_sexp(response->content);
                         }
                     }
+                    
+                    // Note: JSON tool_calls in content is disabled, use S-expression format instead
                     
                     if (tool_call_list && tool_call_list->count > 0) {
                         // Execute tool calls
@@ -579,7 +781,7 @@ void* agent_node_worker_thread(void* arg) {
         
         // 7. Save session
         if (g_config.debug) {
-            log_debug("Saving session: %s", session->session_id);
+            //log_debug("Saving session: %s", session->session_id);
         }
         
         // Build sessions directory path
