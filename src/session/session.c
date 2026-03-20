@@ -100,6 +100,7 @@ static bool create_directory_recursive(const char* path) {
         }
     }
     
+#ifdef _WIN32
     // Convert slashes to backslashes for Windows
     char* p = dir;
     while (*p) {
@@ -108,29 +109,44 @@ static bool create_directory_recursive(const char* path) {
         }
         p++;
     }
-    
     printf("Converted path: %s\n", dir);
+#endif
     
     // Create directories recursively
     char temp_path[512];
     strcpy(temp_path, dir);
-    
+    char* p;
+
+#ifdef _WIN32
     p = temp_path;
     // Skip the drive letter and colon (e.g., "E:\")
     if (strlen(temp_path) > 2 && temp_path[1] == ':') {
         p += 2;
     }
-    
+
     // Skip any leading backslashes
     while (*p == '\\') {
         p++;
     }
-    
+
     while ((p = strchr(p, '\\')) != NULL) {
+#else
+    p = temp_path;
+    // Skip any leading slashes
+    while (*p == '/') {
+        p++;
+    }
+
+    while ((p = strchr(p, '/')) != NULL) {
+#endif
         *p = '\0';
-        
+
+#ifdef _WIN32
         // Only create if it's not just the drive letter
         if (strlen(temp_path) > 2 || (strlen(temp_path) == 2 && temp_path[1] != ':')) {
+#else
+        if (strlen(temp_path) > 0) {
+#endif
             printf("Creating directory: %s\n", temp_path);
             if (stat(temp_path, &(struct stat){}) != 0) {
                 if (MKDIR(temp_path) != 0) {
@@ -145,7 +161,11 @@ static bool create_directory_recursive(const char* path) {
                 printf("Directory already exists: %s\n", temp_path);
             }
         }
+#ifdef _WIN32
         *p = '\\';
+#else
+        *p = '/';
+#endif
         p++;
     }
     
@@ -204,16 +224,11 @@ bool session_save(Session* session, const char* sessions_dir) {
     
     // Save session history as JSONL
     char history_file[256];
+#ifdef _WIN32
     snprintf(history_file, sizeof(history_file), "%s\\%s.jsonl", actual_dir, session->session_id);
-    
-    // Convert slashes to backslashes for Windows
-    char* p = history_file;
-    while (*p) {
-        if (*p == '/') {
-            *p = '\\';
-        }
-        p++;
-    }
+#else
+    snprintf(history_file, sizeof(history_file), "%s/%s.jsonl", actual_dir, session->session_id);
+#endif
     
     log_debug("Saving session history to: %s\n", history_file);
     
@@ -239,16 +254,11 @@ bool session_save(Session* session, const char* sessions_dir) {
     
     // Save session metadata
     char metadata_file[256];
+#ifdef _WIN32
     snprintf(metadata_file, sizeof(metadata_file), "%s\\sessions.json", actual_dir);
-    
-    // Convert slashes to backslashes for Windows
-    p = metadata_file;
-    while (*p) {
-        if (*p == '/') {
-            *p = '\\';
-        }
-        p++;
-    }
+#else
+    snprintf(metadata_file, sizeof(metadata_file), "%s/sessions.json", actual_dir);
+#endif
     
     log_debug("Saving session metadata to: %s\n", metadata_file);
     

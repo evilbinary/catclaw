@@ -593,13 +593,9 @@ bool config_load(void) {
     if (!g_config.workspace.path && !g_config.workspace_path) {
         char default_workspace[512];
 #ifdef _WIN32
-        snprintf(default_workspace, sizeof(default_workspace), "%s/.catclaw/workspace", home);
-        // Replace forward slashes with backslashes on Windows
-        for (char *p = default_workspace; *p; p++) {
-            if (*p == '/') *p = '\\';
-        }
+        snprintf(default_workspace, sizeof(default_workspace), ".\\workspace");
 #else
-        snprintf(default_workspace, sizeof(default_workspace), "%s/.catclaw/workspace", home);
+        snprintf(default_workspace, sizeof(default_workspace), "./workspace");
 #endif
         g_config.workspace.path = strdup(default_workspace);
         g_config.workspace_path = strdup(default_workspace);

@@ -202,11 +202,11 @@ int main(int argc, char *argv[]) {
 #endif
         
         // Debug: print raw input
-        log_debug("Raw input length: %zu, content: ", strlen(command));
-        for (size_t i = 0; i < strlen(command); i++) {
-            log_debug("%02x ", (unsigned char)command[i]);
-        }
-        log_debug("\n");
+        // log_debug("Raw input length: %zu, content: ", strlen(command));
+        // for (size_t i = 0; i < strlen(command); i++) {
+        //     log_debug("%02x ", (unsigned char)command[i]);
+        // }
+        // log_debug("\n");
 
         if (strlen(command) > 0) {
             if (command[0] == '/') {
