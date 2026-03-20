@@ -260,7 +260,10 @@ static AIModelResponse *create_response(const char *content, bool success, const
 }
 
 AIModelResponse *ai_model_send_message(const char *message) {
+    log_debug("[send_message] Called with message=%s", message ? message : "(null)");
+    
     if (!g_initialized) {
+        log_error("[send_message] AI model not initialized! Call ai_model_init() first");
         return create_response(NULL, false, "AI model not initialized");
     }
 
@@ -631,16 +634,20 @@ AIModelResponse *ai_model_send_message(const char *message) {
 }
 
 AIModelResponse *ai_model_send_messages(MessageList *messages, const char *system_prompt) {
+    log_debug("[send_messages] Called with messages=%p, count=%d, system_prompt=%p",
+              (void*)messages, messages ? messages->count : 0, (void*)system_prompt);
+    
     if (!g_initialized) {
+        log_error("[send_messages] AI model not initialized! Call ai_model_init() first");
         return create_response(NULL, false, "AI model not initialized");
     }
     
     // Debug logging
-    printf("[DEBUG] ai_model_send_messages: type=%d, model=%s, url=%s\n",
+    log_debug("ai_model_send_messages: type=%d, model=%s, url=%s\n",
            g_model_config.type,
            g_model_config.model_name ? g_model_config.model_name : "(null)",
            g_model_config.base_url ? g_model_config.base_url : "(null)");
-    printf("[DEBUG] ai_model_send_messages: messages=%p, count=%d, system_prompt=%p\n",
+    log_debug("ai_model_send_messages: messages=%p, count=%d, system_prompt=%p\n",
            (void*)messages, messages ? messages->count : 0, (void*)system_prompt);
 
 #ifdef NO_CURL

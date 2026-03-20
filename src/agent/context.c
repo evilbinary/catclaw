@@ -416,7 +416,7 @@ void* agent_node_worker_thread(void* arg) {
                 // For now, always use default system prompt
                 (void)g_config.agent.system_prompt;  // Suppress unused warning
                 const char* system_prompt = DEFAULT_SYSTEM_PROMPT;
-                printf("[DEBUG] Using DEFAULT_SYSTEM_PROMPT: %p\n", (void*)system_prompt);
+                log_debug("Using DEFAULT_SYSTEM_PROMPT: %p", (void*)system_prompt);
                 AIModelResponse* response = ai_model_send_messages(context, system_prompt);
                 if (!response) {
                     if (g_config.debug) {
