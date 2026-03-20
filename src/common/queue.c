@@ -3,6 +3,7 @@
 #include <string.h>
 #include <time.h>
 #include <errno.h>
+#include <stdbool.h>
 
 #include "queue.h"
 

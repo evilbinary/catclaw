@@ -139,6 +139,14 @@ bool ai_model_init(const AIModelConfig *config) {
     printf("Mock curl initialized\n");
 #endif
 
+    // Initialize all fields to safe defaults first
+    g_model_config.type = AI_MODEL_LLAMA;
+    g_model_config.api_key = NULL;
+    g_model_config.model_name = NULL;
+    g_model_config.base_url = NULL;
+    g_model_config.temperature = 0.7f;
+    g_model_config.max_tokens = 1024;
+
     // Copy configuration with validation
     g_model_config.type = config->type;
     
@@ -202,6 +210,11 @@ void ai_model_cleanup(void) {
 }
 
 bool ai_model_set_config(const AIModelConfig *config) {
+    if (!config) {
+        fprintf(stderr, "ai_model_set_config: config is NULL\n");
+        return false;
+    }
+    
     if (!g_initialized) {
         return ai_model_init(config);
     }
@@ -222,8 +235,13 @@ bool ai_model_set_config(const AIModelConfig *config) {
     g_model_config.api_key = config->api_key ? strdup(config->api_key) : NULL;
     g_model_config.model_name = config->model_name ? strdup(config->model_name) : NULL;
     g_model_config.base_url = config->base_url ? strdup(config->base_url) : NULL;
+    g_model_config.temperature = config->temperature > 0 ? config->temperature : 0.7f;
+    g_model_config.max_tokens = config->max_tokens > 0 ? config->max_tokens : 1024;
 
-    printf("AI model configuration updated: %s\n", g_model_config.model_name);
+    printf("AI model configuration updated: type=%d, model=%s, url=%s\n", 
+           g_model_config.type,
+           g_model_config.model_name ? g_model_config.model_name : "(null)",
+           g_model_config.base_url ? g_model_config.base_url : "(null)");
     return true;
 }
 
@@ -268,13 +286,18 @@ AIModelResponse *ai_model_send_message(const char *message) {
     char *url = NULL;
     char *payload = NULL;
 
+    printf("[DEBUG] Entering switch, model_type=%d\n", g_model_config.type);
+    
     switch (g_model_config.type) {
         case AI_MODEL_OPENAI:
+            printf("[DEBUG] AI_MODEL_OPENAI branch\n");
             url = g_model_config.base_url ? g_model_config.base_url : "https://api.openai.com/v1/chat/completions";
             headers = curl_slist_append(headers, "Content-Type: application/json");
             {
                 char auth_header[256];
-                snprintf(auth_header, sizeof(auth_header), "Authorization: Bearer %s", g_model_config.api_key);
+                const char* api_key = g_model_config.api_key ? g_model_config.api_key : "";
+                printf("[DEBUG] api_key=%p, value=%s\n", (void*)api_key, api_key);
+                snprintf(auth_header, sizeof(auth_header), "Authorization: Bearer %s", api_key);
                 headers = curl_slist_append(headers, auth_header);
             }
             {
@@ -292,11 +315,14 @@ AIModelResponse *ai_model_send_message(const char *message) {
             break;
 
         case AI_MODEL_ANTHROPIC:
+            printf("[DEBUG] AI_MODEL_ANTHROPIC branch\n");
             url = g_model_config.base_url ? g_model_config.base_url : "https://api.anthropic.com/v1/messages";
             headers = curl_slist_append(headers, "Content-Type: application/json");
             {
                 char auth_header[256];
-                snprintf(auth_header, sizeof(auth_header), "x-api-key: %s", g_model_config.api_key);
+                const char* api_key = g_model_config.api_key ? g_model_config.api_key : "";
+                printf("[DEBUG] api_key=%p\n", (void*)api_key);
+                snprintf(auth_header, sizeof(auth_header), "x-api-key: %s", api_key);
                 headers = curl_slist_append(headers, auth_header);
             }
             headers = curl_slist_append(headers, "anthropic-version: 2023-06-01");
@@ -315,11 +341,14 @@ AIModelResponse *ai_model_send_message(const char *message) {
             break;
 
         case AI_MODEL_GEMINI:
+            printf("[DEBUG] AI_MODEL_GEMINI branch\n");
             url = g_model_config.base_url ? g_model_config.base_url : "https://generativelanguage.googleapis.com/v1/models/gemini-1.5-pro:generateContent";
             headers = curl_slist_append(headers, "Content-Type: application/json");
             {
                 char auth_header[256];
-                snprintf(auth_header, sizeof(auth_header), "Authorization: Bearer %s", g_model_config.api_key);
+                const char* api_key = g_model_config.api_key ? g_model_config.api_key : "";
+                printf("[DEBUG] api_key=%p\n", (void*)api_key);
+                snprintf(auth_header, sizeof(auth_header), "Authorization: Bearer %s", api_key);
                 headers = curl_slist_append(headers, auth_header);
             }
             {
@@ -340,6 +369,7 @@ AIModelResponse *ai_model_send_message(const char *message) {
             break;
 
         case AI_MODEL_LLAMA:
+            printf("[DEBUG] AI_MODEL_LLAMA branch\n");
             url = g_model_config.base_url ? g_model_config.base_url : "http://localhost:11434/api/generate";
             headers = curl_slist_append(headers, "Content-Type: application/json; charset=utf-8");
             headers = curl_slist_append(headers, "Accept: application/json; charset=utf-8");
@@ -572,6 +602,14 @@ AIModelResponse *ai_model_send_messages(MessageList *messages, const char *syste
     if (!g_initialized) {
         return create_response(NULL, false, "AI model not initialized");
     }
+    
+    // Debug logging
+    printf("[DEBUG] ai_model_send_messages: type=%d, model=%s, url=%s\n",
+           g_model_config.type,
+           g_model_config.model_name ? g_model_config.model_name : "(null)",
+           g_model_config.base_url ? g_model_config.base_url : "(null)");
+    printf("[DEBUG] ai_model_send_messages: messages=%p, count=%d, system_prompt=%p\n",
+           (void*)messages, messages ? messages->count : 0, (void*)system_prompt);
 
 #ifdef NO_CURL
     // Mock response when curl is not available
@@ -620,7 +658,7 @@ AIModelResponse *ai_model_send_messages(MessageList *messages, const char *syste
                 // Add conversation history
                 if (messages) {
                     for (int i = 0; i < messages->count; i++) {
-                        if (messages->messages[i]) {
+                        if (messages->messages[i] && messages->messages[i]->content) {
                             cJSON *msg_obj = cJSON_CreateObject();
                             const char *role_str = "user";
                             if (messages->messages[i]->role == ROLE_ASSISTANT) {
@@ -650,7 +688,8 @@ AIModelResponse *ai_model_send_messages(MessageList *messages, const char *syste
             headers = curl_slist_append(headers, "Content-Type: application/json");
             {
                 char auth_header[256];
-                snprintf(auth_header, sizeof(auth_header), "x-api-key: %s", g_model_config.api_key);
+                const char* api_key = g_model_config.api_key ? g_model_config.api_key : "";
+                snprintf(auth_header, sizeof(auth_header), "x-api-key: %s", api_key);
                 headers = curl_slist_append(headers, auth_header);
             }
             headers = curl_slist_append(headers, "anthropic-version: 2023-06-01");
@@ -667,7 +706,7 @@ AIModelResponse *ai_model_send_messages(MessageList *messages, const char *syste
                 // Add conversation history
                 if (messages) {
                     for (int i = 0; i < messages->count; i++) {
-                        if (messages->messages[i]) {
+                        if (messages->messages[i] && messages->messages[i]->content) {
                             cJSON *msg_obj = cJSON_CreateObject();
                             const char *role_str = "user";
                             if (messages->messages[i]->role == ROLE_ASSISTANT) {
@@ -679,7 +718,7 @@ AIModelResponse *ai_model_send_messages(MessageList *messages, const char *syste
                         }
                     }
                 }
-                
+
                 cJSON_AddItemToObject(root, "messages", messages_json);
                 cJSON_AddNumberToObject(root, "max_tokens", g_model_config.max_tokens);
                 payload = cJSON_Print(root);
@@ -692,7 +731,8 @@ AIModelResponse *ai_model_send_messages(MessageList *messages, const char *syste
             headers = curl_slist_append(headers, "Content-Type: application/json");
             {
                 char auth_header[256];
-                snprintf(auth_header, sizeof(auth_header), "Authorization: Bearer %s", g_model_config.api_key);
+                const char* api_key = g_model_config.api_key ? g_model_config.api_key : "";
+                snprintf(auth_header, sizeof(auth_header), "Authorization: Bearer %s", api_key);
                 headers = curl_slist_append(headers, auth_header);
             }
             {
@@ -714,7 +754,7 @@ AIModelResponse *ai_model_send_messages(MessageList *messages, const char *syste
                 // Add conversation history
                 if (messages) {
                     for (int i = 0; i < messages->count; i++) {
-                        if (messages->messages[i]) {
+                        if (messages->messages[i] && messages->messages[i]->content) {
                             cJSON *content_obj = cJSON_CreateObject();
                             cJSON *parts = cJSON_CreateArray();
                             cJSON *part = cJSON_CreateObject();
@@ -738,12 +778,14 @@ AIModelResponse *ai_model_send_messages(MessageList *messages, const char *syste
             break;
 
         case AI_MODEL_LLAMA:
+            printf("[DEBUG] AI_MODEL_LLAMA branch (send_messages)\n");
             url = g_model_config.base_url ? g_model_config.base_url : "http://localhost:11434/api/generate";
             headers = curl_slist_append(headers, "Content-Type: application/json; charset=utf-8");
             headers = curl_slist_append(headers, "Accept: application/json; charset=utf-8");
             {
                 cJSON *root = cJSON_CreateObject();
                 const char* model_name = g_model_config.model_name ? g_model_config.model_name : "llama3";
+                printf("[DEBUG] model_name=%s\n", model_name);
                 const char* slash_pos = strrchr(model_name, '/');
                 if (slash_pos) {
                     model_name = slash_pos + 1;
@@ -752,6 +794,7 @@ AIModelResponse *ai_model_send_messages(MessageList *messages, const char *syste
                 
                 // Build full conversation history for Llama
                 char prompt[4096] = "";
+                printf("[DEBUG] system_prompt=%p\n", (void*)system_prompt);
                 if (system_prompt && strlen(system_prompt) > 0) {
                     snprintf(prompt, sizeof(prompt), "[INST] %s [/INST]\n\n", system_prompt);
                 }
@@ -760,9 +803,9 @@ AIModelResponse *ai_model_send_messages(MessageList *messages, const char *syste
                 
                 if (messages) {
                     for (int i = 0; i < messages->count; i++) {
-                        if (messages->messages[i]) {
+                        if (messages->messages[i] && messages->messages[i]->content) {
                             log_debug("Message %d: role=%d, content=%s", i, messages->messages[i]->role, 
-                                     messages->messages[i]->content ? messages->messages[i]->content : "(null)");
+                                     messages->messages[i]->content);
                             if (messages->messages[i]->role == ROLE_USER) {
                                 strncat(prompt, "[INST] ", sizeof(prompt) - strlen(prompt) - 1);
                                 strncat(prompt, messages->messages[i]->content, sizeof(prompt) - strlen(prompt) - 1);

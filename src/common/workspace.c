@@ -1,5 +1,6 @@
 #include "workspace.h"
 #include <stdio.h>
+#include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -11,6 +12,7 @@
 #else
 #include <unistd.h>
 #define MKDIR(path) mkdir(path, 0755)
+#define ACCESS(path, mode) access(path, mode)
 #endif
 
 static char* g_workspace_path = NULL;

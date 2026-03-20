@@ -12,6 +12,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <errno.h>
 
 // Default system prompt for the agent
 static const char* DEFAULT_SYSTEM_PROMPT = 
@@ -411,9 +412,11 @@ void* agent_node_worker_thread(void* arg) {
                 }
                 
                 // Use configured system prompt or default
-                const char* system_prompt = g_config.agent.system_prompt ? 
-                                           g_config.agent.system_prompt : 
-                                           DEFAULT_SYSTEM_PROMPT;
+                // TODO: Fix g_config.agent.system_prompt corruption issue
+                // For now, always use default system prompt
+                (void)g_config.agent.system_prompt;  // Suppress unused warning
+                const char* system_prompt = DEFAULT_SYSTEM_PROMPT;
+                printf("[DEBUG] Using DEFAULT_SYSTEM_PROMPT: %p\n", (void*)system_prompt);
                 AIModelResponse* response = ai_model_send_messages(context, system_prompt);
                 if (!response) {
                     if (g_config.debug) {

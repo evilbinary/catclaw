@@ -1,6 +1,8 @@
 #ifndef MESSAGE_H
 #define MESSAGE_H
 
+#include <stdbool.h>
+
 // Message role enumeration
 typedef enum {
     ROLE_USER,

@@ -1,3 +1,6 @@
 obj
 *.exe
 *.log
+catclaw.log
+catclaw
+catclaw.exe

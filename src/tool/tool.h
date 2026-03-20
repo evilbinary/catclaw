@@ -1,6 +1,8 @@
 #ifndef TOOL_H
 #define TOOL_H
 
+#include <stdbool.h>
+
 // Tool structure
 typedef struct {
     char* name;

@@ -2,6 +2,7 @@
 #define MEMORY_H
 
 #include <pthread.h>
+#include <stdbool.h>
 
 // Memory entry structure
 typedef struct {
