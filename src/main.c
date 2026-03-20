@@ -218,6 +218,10 @@ int main(int argc, char *argv[]) {
                     printf("  /help              - Show this help\n");
                     printf("  /status            - Show status\n");
                     printf("  /message <text>    - Send a message to AI\n");
+                    printf("  /model             - List all available models\n");
+                    printf("  /model <name>      - Switch to model by name\n");
+                    printf("  /model <index>     - Switch to model by index\n");
+                    printf("  /model list        - List all available models\n");
                     printf("  /gateway start     - Start gateway server\n");
                     printf("  /gateway stop      - Stop gateway server\n");
                     printf("  /gateway status    - Show gateway status\n");
