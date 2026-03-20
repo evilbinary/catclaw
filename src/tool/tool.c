@@ -478,9 +478,52 @@ int tool_list_directory(const char* args, char** result, int* result_len) {
         cJSON_Delete(root);
     } else {
         // Not valid JSON, treat as plain path
-        strncpy(clean_path, args, sizeof(clean_path) - 1);
-        clean_path[sizeof(clean_path) - 1] = '\0';
-        fprintf(stderr, "[DEBUG] Using args as plain path: %s\n", clean_path);
+        // Check if it looks like a JSON object string {"key": "value"}
+        if (args[0] == '{' && args[strlen(args)-1] == '}') {
+            // Try to manually extract path from {"path": "..."}
+            const char* path_key = "\"path\"";
+            const char* path_start = strstr(args, path_key);
+            if (path_start) {
+                // Find the colon
+                const char* colon = strchr(path_start, ':');
+                if (colon) {
+                    // Find the opening quote
+                    const char* quote = strchr(colon, '"');
+                    if (quote) {
+                        // Find the closing quote
+                        const char* end_quote = strchr(quote + 1, '"');
+                        if (end_quote) {
+                            size_t path_len = end_quote - quote - 1;
+                            if (path_len < sizeof(clean_path)) {
+                                strncpy(clean_path, quote + 1, path_len);
+                                clean_path[path_len] = '\0';
+                                fprintf(stderr, "[DEBUG] Manually extracted path: %s\n", clean_path);
+                            } else {
+                                strncpy(clean_path, quote + 1, sizeof(clean_path) - 1);
+                                clean_path[sizeof(clean_path) - 1] = '\0';
+                            }
+                        } else {
+                            strncpy(clean_path, args, sizeof(clean_path) - 1);
+                            clean_path[sizeof(clean_path) - 1] = '\0';
+                        }
+                    } else {
+                        strncpy(clean_path, args, sizeof(clean_path) - 1);
+                        clean_path[sizeof(clean_path) - 1] = '\0';
+                    }
+                } else {
+                    strncpy(clean_path, args, sizeof(clean_path) - 1);
+                    clean_path[sizeof(clean_path) - 1] = '\0';
+                }
+            } else {
+                strncpy(clean_path, args, sizeof(clean_path) - 1);
+                clean_path[sizeof(clean_path) - 1] = '\0';
+            }
+        } else {
+            strncpy(clean_path, args, sizeof(clean_path) - 1);
+            clean_path[sizeof(clean_path) - 1] = '\0';
+        }
+        fprintf(stderr, "[DEBUG] JSON parse failed, using args as plain path: %s\n", clean_path);
+        fprintf(stderr, "[DEBUG] cJSON error: %s\n", cJSON_GetErrorPtr() ? cJSON_GetErrorPtr() : "unknown");
     }
     
     // If path is "." or empty, use current directory

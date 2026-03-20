@@ -473,6 +473,7 @@ void* agent_node_worker_thread(void* arg) {
                             if (tool) {
                                 if (g_config.debug) {
                                     log_debug("Tool found: %s\n", tool->name);
+                                    log_debug("Tool arguments: %s\n", call->arguments);
                                 }
                                 status = tool->execute(call->arguments, &result, &result_len);
                             } else {
@@ -486,7 +487,6 @@ void* agent_node_worker_thread(void* arg) {
                             // Add tool result to session
                             if (g_config.debug) {
                                 log_debug("Tool result: %s\n", result ? result : "(null)");
-                                printf("[DEBUG] Tool result: %s\n", result ? result : "(null)");
                             }
                             Message* tool_msg = message_create_tool(call->id, call->name, result ? result : "Error executing tool");
                             session_add_message(session, tool_msg);
