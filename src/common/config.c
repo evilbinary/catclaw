@@ -135,6 +135,7 @@ static void parse_single_model(cJSON *model_json, int index) {
     model->timeout_seconds = 30;
     model->temperature = 0.7f;
     model->max_tokens = 1024;
+    model->stream = true;  // 默认开启流式响应
     
     cJSON *name = cJSON_GetObjectItem(model_json, "name");
     if (name && cJSON_IsString(name)) {
@@ -187,6 +188,11 @@ static void parse_single_model(cJSON *model_json, int index) {
     cJSON *max_tokens = cJSON_GetObjectItem(model_json, "max_tokens");
     if (max_tokens && cJSON_IsNumber(max_tokens)) {
         model->max_tokens = (int)max_tokens->valuedouble;
+    }
+    
+    cJSON *stream = cJSON_GetObjectItem(model_json, "stream");
+    if (stream && (cJSON_IsTrue(stream) || cJSON_IsFalse(stream))) {
+        model->stream = cJSON_IsTrue(stream);
     }
     
     g_config.models.count++;
@@ -285,6 +291,7 @@ static void sync_current_model(void) {
     dst->timeout_seconds = src->timeout_seconds;
     dst->temperature = src->temperature;
     dst->max_tokens = src->max_tokens;
+    dst->stream = src->stream;
 }
 
 // Legacy function for backward compatibility

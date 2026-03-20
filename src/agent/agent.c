@@ -156,6 +156,9 @@ char *agent_parse_command(const char *command) {
                 model_config.model_name = g_config.model.model_name;
                 model_config.api_key = g_config.model.api_key;
                 model_config.base_url = g_config.model.base_url;
+                model_config.temperature = g_config.model.temperature > 0 ? g_config.model.temperature : 0.7f;
+                model_config.max_tokens = g_config.model.max_tokens > 0 ? g_config.model.max_tokens : 1024;
+                model_config.stream = g_config.model.stream;
                 
                 if (ai_model_set_config(&model_config)) {
                     // Update agent's model name for display
@@ -191,6 +194,9 @@ char *agent_parse_command(const char *command) {
                         model_config.model_name = g_config.model.model_name;
                         model_config.api_key = g_config.model.api_key;
                         model_config.base_url = g_config.model.base_url;
+                        model_config.temperature = g_config.model.temperature > 0 ? g_config.model.temperature : 0.7f;
+                        model_config.max_tokens = g_config.model.max_tokens > 0 ? g_config.model.max_tokens : 1024;
+                        model_config.stream = g_config.model.stream;
                         
                         if (ai_model_set_config(&model_config)) {
                             if (g_agent.model) {
@@ -467,6 +473,7 @@ bool agent_init(void) {
     model_config.base_url = base_url;
     model_config.temperature = g_config.model.temperature > 0 ? g_config.model.temperature : 0.7f;
     model_config.max_tokens = g_config.model.max_tokens > 0 ? g_config.model.max_tokens : 1024;
+    model_config.stream = g_config.model.stream;
 
     if (!ai_model_init(&model_config)) {
         log_error("Failed to initialize AI model\n");

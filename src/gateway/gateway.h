@@ -20,5 +20,6 @@ bool gateway_start(void);
 void gateway_stop(void);
 void gateway_cleanup(void);
 void gateway_status(void);
+bool gateway_broadcast_to_webchat(const char *message);
 
 #endif // GATEWAY_H

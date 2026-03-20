@@ -21,6 +21,7 @@ typedef struct {
     char *base_url;
     float temperature;
     int max_tokens;
+    bool stream;              // 是否启用流式响应（打字机效果）
 } AIModelConfig;
 
 // AI model response

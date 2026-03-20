@@ -14,6 +14,7 @@ typedef struct {
     int timeout_seconds;      // 超时时间（秒）
     float temperature;        // 温度参数
     int max_tokens;           // 最大生成 token 数
+    bool stream;              // 是否启用流式响应（打字机效果）
 } ModelConfig;
 
 // Models array configuration

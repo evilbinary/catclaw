@@ -69,3 +69,21 @@ void gateway_status(void) {
     printf("  Port: %d\n", g_gateway.port);
     printf("  Bind: 127.0.0.1\n");
 }
+
+// Broadcast a message to all connected WebSocket clients
+bool gateway_broadcast_to_webchat(const char *message) {
+    if (!message || strlen(message) == 0) return true;
+
+    WebSocketServer *server = &g_gateway.ws_server;
+    if (!server->connections) return false;
+
+    bool all_success = true;
+    for (int i = 0; i < server->max_connections; i++) {
+        if (server->connections[i].socket != 0 && server->connections[i].handshake_completed) {
+            if (!websocket_send(&server->connections[i], message)) {
+                all_success = false;
+            }
+        }
+    }
+    return all_success;
+}
