@@ -13,16 +13,29 @@ extern bool gateway_broadcast_to_webchat(const char *message);
 #include <curl/curl.h>
 
 // Streaming callback context
+#define MAX_STREAMING_TOOL_CALLS 8
+
 typedef struct {
     char **buffer;
     bool streaming;
     char sse_line[4096];  // Buffer for incomplete SSE lines
     int sse_line_len;
+    // Tool calls accumulation for streaming
+    char *tool_call_ids[MAX_STREAMING_TOOL_CALLS];       // tool call IDs
+    char *tool_call_names[MAX_STREAMING_TOOL_CALLS];     // function names
+    char *tool_call_arguments[MAX_STREAMING_TOOL_CALLS]; // accumulated arguments (JSON string)
+    int tool_call_count;
 } StreamContext;
+
+// Global stream context for tool_calls accumulation (used by SSE processing)
+static StreamContext *g_stream_ctx = NULL;
 
 // Forward declarations
 static void process_sse_line(const char *line);
 static void process_openai_sse_chunk(const char *data);
+static void reset_tool_calls(StreamContext *ctx);
+static void accumulate_tool_calls(StreamContext *ctx, cJSON *delta);
+static char *build_tool_calls_json(StreamContext *ctx);
 
 // Write callback function for curl with streaming support
 static size_t write_callback(void *contents, size_t size, size_t nmemb, void *userp) {
@@ -89,6 +102,11 @@ static void process_openai_sse_chunk(const char *data) {
         cJSON *choice = cJSON_GetArrayItem(choices, 0);
         cJSON *delta = cJSON_GetObjectItem(choice, "delta");
         if (delta) {
+            // Accumulate tool_calls from streaming chunks
+            if (g_stream_ctx) {
+                accumulate_tool_calls(g_stream_ctx, delta);
+            }
+
             cJSON *content = cJSON_GetObjectItem(delta, "content");
             if (content && cJSON_IsString(content) && strlen(content->valuestring) > 0) {
                 // Print to console for local viewing
@@ -107,6 +125,107 @@ static void process_openai_sse_chunk(const char *data) {
 
     cJSON_Delete(root);
 }
+
+// Reset tool_calls accumulation state
+static void reset_tool_calls(StreamContext *ctx) {
+    for (int i = 0; i < ctx->tool_call_count; i++) {
+        free(ctx->tool_call_ids[i]);
+        free(ctx->tool_call_names[i]);
+        free(ctx->tool_call_arguments[i]);
+        ctx->tool_call_ids[i] = NULL;
+        ctx->tool_call_names[i] = NULL;
+        ctx->tool_call_arguments[i] = NULL;
+    }
+    ctx->tool_call_count = 0;
+}
+
+// Accumulate tool_calls from a streaming delta chunk
+static void accumulate_tool_calls(StreamContext *ctx, cJSON *delta) {
+    cJSON *tool_calls = cJSON_GetObjectItem(delta, "tool_calls");
+    if (!tool_calls || !cJSON_IsArray(tool_calls)) return;
+
+    int arr_size = cJSON_GetArraySize(tool_calls);
+    for (int i = 0; i < arr_size; i++) {
+        cJSON *tc = cJSON_GetArrayItem(tool_calls, i);
+        if (!tc) continue;
+
+        // Get the index field to know which tool_call this chunk belongs to
+        cJSON *index_obj = cJSON_GetObjectItem(tc, "index");
+        int idx = index_obj ? index_obj->valueint : 0;
+
+        if (idx < 0 || idx >= MAX_STREAMING_TOOL_CALLS) continue;
+
+        // Ensure we have enough slots
+        if (idx >= ctx->tool_call_count) {
+            ctx->tool_call_count = idx + 1;
+        }
+
+        // Extract id (usually in first chunk only)
+        cJSON *id_obj = cJSON_GetObjectItem(tc, "id");
+        if (id_obj && cJSON_IsString(id_obj) && strlen(id_obj->valuestring) > 0) {
+            free(ctx->tool_call_ids[idx]);
+            ctx->tool_call_ids[idx] = strdup(id_obj->valuestring);
+        }
+
+        // Extract type
+        // cJSON *type_obj = cJSON_GetObjectItem(tc, "type");
+
+        // Extract function name and arguments
+        cJSON *func = cJSON_GetObjectItem(tc, "function");
+        if (func) {
+            cJSON *name_obj = cJSON_GetObjectItem(func, "name");
+            if (name_obj && cJSON_IsString(name_obj) && strlen(name_obj->valuestring) > 0) {
+                free(ctx->tool_call_names[idx]);
+                ctx->tool_call_names[idx] = strdup(name_obj->valuestring);
+            }
+
+            cJSON *args_obj = cJSON_GetObjectItem(func, "arguments");
+            if (args_obj && cJSON_IsString(args_obj) && strlen(args_obj->valuestring) > 0) {
+                // Append arguments
+                size_t old_len = ctx->tool_call_arguments[idx] ? strlen(ctx->tool_call_arguments[idx]) : 0;
+                size_t add_len = strlen(args_obj->valuestring);
+                char *new_args = (char *)realloc(ctx->tool_call_arguments[idx], old_len + add_len + 1);
+                if (new_args) {
+                    memcpy(new_args + old_len, args_obj->valuestring, add_len + 1);
+                    ctx->tool_call_arguments[idx] = new_args;
+                }
+            }
+        }
+    }
+}
+
+// Build final tool_calls JSON from accumulated state
+// Returns a cJSON array string like: [{"id":"...","type":"function","function":{"name":"...","arguments":"..."}}]
+static char *build_tool_calls_json(StreamContext *ctx) {
+    if (ctx->tool_call_count == 0) return NULL;
+
+    cJSON *arr = cJSON_CreateArray();
+    for (int i = 0; i < ctx->tool_call_count; i++) {
+        if (!ctx->tool_call_ids[i] && !ctx->tool_call_names[i]) continue;
+
+        cJSON *tc = cJSON_CreateObject();
+        if (ctx->tool_call_ids[i]) {
+            cJSON_AddStringToObject(tc, "id", ctx->tool_call_ids[i]);
+        }
+        cJSON_AddStringToObject(tc, "type", "function");
+
+        cJSON *func = cJSON_CreateObject();
+        if (ctx->tool_call_names[i]) {
+            cJSON_AddStringToObject(func, "name", ctx->tool_call_names[i]);
+        }
+        // arguments may be empty for tool_calls with no parameters
+        cJSON_AddStringToObject(func, "arguments",
+            ctx->tool_call_arguments[i] ? ctx->tool_call_arguments[i] : "");
+        cJSON_AddItemToObject(tc, "function", func);
+
+        cJSON_AddItemToArray(arr, tc);
+    }
+
+    char *result = cJSON_Print(arr);
+    cJSON_Delete(arr);
+    return result;
+}
+
 #else
 // Mock curl functions for testing
 #define CURLE_OK 0
@@ -473,10 +592,10 @@ AIModelResponse *ai_model_send_message(const char *message) {
 
     // Set up streaming context
     StreamContext stream_ctx;
+    memset(&stream_ctx, 0, sizeof(stream_ctx));
     stream_ctx.buffer = &response_buffer;
     stream_ctx.streaming = (g_model_config.type == AI_MODEL_OPENAI && g_model_config.stream);
-    stream_ctx.sse_line_len = 0;
-    memset(stream_ctx.sse_line, 0, sizeof(stream_ctx.sse_line));
+    g_stream_ctx = &stream_ctx;
 
     // Set CURL options
     curl_easy_setopt(curl, CURLOPT_URL, url);
@@ -485,12 +604,13 @@ AIModelResponse *ai_model_send_message(const char *message) {
     curl_easy_setopt(curl, CURLOPT_POSTFIELDS, payload);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &stream_ctx);
-    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L); // Disable SSL verification for testing
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
 
     // Perform request
     log_debug("Sending request to %s...", url);
     CURLcode res = curl_easy_perform(curl);
     log_debug("Request completed with CURLcode: %d (%s)", res, curl_easy_strerror(res));
+    g_stream_ctx = NULL;  // Clear global reference after request
 
     // Parse response
     AIModelResponse *response = NULL;
@@ -498,58 +618,68 @@ AIModelResponse *ai_model_send_message(const char *message) {
         // Log the full response for debugging
         log_debug("Full response from AI model: %s", response_buffer);
         log_debug("Response length: %zu bytes", strlen(response_buffer));
-        cJSON *root = cJSON_Parse(response_buffer);
-        if (root) {
-            switch (g_model_config.type) {
-                case AI_MODEL_OPENAI:
-                    if (g_model_config.stream) {
-                        log_debug("Parsing OpenAI streaming response...");
-                        {
-                            char *full_text = (char *)calloc(1, 1);
-                            char *buf_copy = strdup(response_buffer);
-                            char *line = buf_copy;
-                            while (line) {
-                                char *line_end = strchr(line, '\n');
-                                if (line_end) *line_end = '\0';
 
-                                if (strncmp(line, "data: ", 6) == 0 && strcmp(line + 6, "[DONE]") != 0) {
-                                    cJSON *chunk = cJSON_Parse(line + 6);
-                                    if (chunk) {
-                                        cJSON *choices = cJSON_GetObjectItem(chunk, "choices");
-                                        if (choices && cJSON_IsArray(choices) && cJSON_GetArraySize(choices) > 0) {
-                                            cJSON *choice = cJSON_GetArrayItem(choices, 0);
-                                            cJSON *delta = cJSON_GetObjectItem(choice, "delta");
-                                            if (delta) {
-                                                cJSON *content = cJSON_GetObjectItem(delta, "content");
-                                                if (content && cJSON_IsString(content)) {
-                                                    size_t old_len = strlen(full_text);
-                                                    size_t add_len = strlen(content->valuestring);
-                                                    char *tmp = (char *)realloc(full_text, old_len + add_len + 1);
-                                                    if (tmp) {
-                                                        full_text = tmp;
-                                                        memcpy(full_text + old_len, content->valuestring, add_len + 1);
-                                                    }
-                                                }
-                                            }
-                                        }
-                                        cJSON_Delete(chunk);
+        // For OpenAI streaming, response_buffer contains SSE data, not JSON.
+        // Parse it separately before attempting cJSON_Parse.
+        if (g_model_config.type == AI_MODEL_OPENAI && g_model_config.stream) {
+            log_debug("Parsing OpenAI streaming response...");
+            char *full_text = (char *)calloc(1, 1);
+            char *buf_copy = strdup(response_buffer);
+            char *line = buf_copy;
+            while (line) {
+                char *line_end = strchr(line, '\n');
+                if (line_end) *line_end = '\0';
+
+                if (strncmp(line, "data: ", 6) == 0 && strcmp(line + 6, "[DONE]") != 0) {
+                    cJSON *chunk = cJSON_Parse(line + 6);
+                    if (chunk) {
+                        cJSON *choices = cJSON_GetObjectItem(chunk, "choices");
+                        if (choices && cJSON_IsArray(choices) && cJSON_GetArraySize(choices) > 0) {
+                            cJSON *choice = cJSON_GetArrayItem(choices, 0);
+                            cJSON *delta = cJSON_GetObjectItem(choice, "delta");
+                            if (delta) {
+                                cJSON *content = cJSON_GetObjectItem(delta, "content");
+                                if (content && cJSON_IsString(content)) {
+                                    size_t old_len = strlen(full_text);
+                                    size_t add_len = strlen(content->valuestring);
+                                    char *tmp = (char *)realloc(full_text, old_len + add_len + 1);
+                                    if (tmp) {
+                                        full_text = tmp;
+                                        memcpy(full_text + old_len, content->valuestring, add_len + 1);
                                     }
                                 }
-
-                                if (line_end) { *line_end = '\n'; line = line_end + 1; }
-                                else break;
                             }
-                            free(buf_copy);
-
-                            if (strlen(full_text) > 0) {
-                                log_debug("OpenAI streamed content length: %zu", strlen(full_text));
-                                response = create_response(full_text, true, NULL);
-                            } else {
-                                response = create_response(NULL, false, "No content in streaming response");
-                            }
-                            free(full_text);
                         }
-                    } else {
+                        cJSON_Delete(chunk);
+                    }
+                }
+
+                if (line_end) { *line_end = '\n'; line = line_end + 1; }
+                else break;
+            }
+            free(buf_copy);
+
+            if (strlen(full_text) > 0) {
+                log_debug("OpenAI streamed content length: %zu", strlen(full_text));
+                response = create_response(full_text, true, NULL);
+            } else {
+                response = create_response("", true, NULL);
+            }
+
+            // Attach accumulated tool_calls from streaming
+            if (response) {
+                char *tool_calls_json = build_tool_calls_json(&stream_ctx);
+                if (tool_calls_json) {
+                    response->tool_calls = tool_calls_json;
+                    log_debug("[send_message] Streaming tool_calls: %s", tool_calls_json);
+                }
+            }
+            free(full_text);
+        } else {
+            cJSON *root = cJSON_Parse(response_buffer);
+            if (root) {
+                switch (g_model_config.type) {
+                    case AI_MODEL_OPENAI:
                         log_debug("Parsing OpenAI response...");
                         {
                             cJSON *choices = cJSON_GetObjectItem(root, "choices");
@@ -576,8 +706,7 @@ AIModelResponse *ai_model_send_message(const char *message) {
                                 }
                             }
                         }
-                    }
-                    break;
+                        break;
 
                 case AI_MODEL_ANTHROPIC:
                     log_debug("Parsing Anthropic response...");
@@ -723,6 +852,7 @@ AIModelResponse *ai_model_send_message(const char *message) {
         } else {
             response = create_response(NULL, false, "Failed to parse API response");
         }
+        }
     } else {
         char error_msg[256];
         snprintf(error_msg, sizeof(error_msg), "CURL error: %s", curl_easy_strerror(res));
@@ -730,6 +860,7 @@ AIModelResponse *ai_model_send_message(const char *message) {
     }
 
     // Cleanup
+    reset_tool_calls(&stream_ctx);
     curl_easy_cleanup(curl);
     curl_slist_free_all(headers);
     free(response_buffer);
@@ -1007,10 +1138,10 @@ AIModelResponse *ai_model_send_messages(MessageList *messages, const char *syste
 
     // Set up streaming context
     StreamContext stream_ctx;
+    memset(&stream_ctx, 0, sizeof(stream_ctx));
     stream_ctx.buffer = &response_buffer;
     stream_ctx.streaming = (g_model_config.type == AI_MODEL_OPENAI && g_model_config.stream);
-    stream_ctx.sse_line_len = 0;
-    memset(stream_ctx.sse_line, 0, sizeof(stream_ctx.sse_line));
+    g_stream_ctx = &stream_ctx;
 
     // Set CURL options
     curl_easy_setopt(curl, CURLOPT_URL, url);
@@ -1025,70 +1156,75 @@ AIModelResponse *ai_model_send_messages(MessageList *messages, const char *syste
     log_debug("Sending request to %s...", url);
     CURLcode res = curl_easy_perform(curl);
     log_debug("Request completed with CURLcode: %d (%s)", res, curl_easy_strerror(res));
+    g_stream_ctx = NULL;  // Clear global reference after request
 
     // Parse response
     AIModelResponse *response = NULL;
     if (res == CURLE_OK) {
         log_debug("[send_messages] Full response from AI model: %s", response_buffer);
         log_debug("[send_messages] Response length: %zu bytes", strlen(response_buffer));
-        cJSON *root = cJSON_Parse(response_buffer);
-        if (root) {
-            switch (g_model_config.type) {
-                case AI_MODEL_OPENAI:
-                    if (g_model_config.stream) {
-                        log_debug("[send_messages] Parsing OpenAI streaming response...");
-                        {
-                            // When streaming, response_buffer contains SSE data lines.
-                            // The content was already sent via process_openai_sse_chunk.
-                            // Now we need to extract the full text from the SSE buffer.
-                            char *full_text = (char *)calloc(1, 1);
-                            char *buf_copy = strdup(response_buffer);
-                            char *line = buf_copy;
-                            while (line) {
-                                char *line_end = strchr(line, '\n');
-                                if (line_end) *line_end = '\0';
 
-                                if (strncmp(line, "data: ", 6) == 0 && strcmp(line + 6, "[DONE]") != 0) {
-                                    cJSON *chunk = cJSON_Parse(line + 6);
-                                    if (chunk) {
-                                        cJSON *choices = cJSON_GetObjectItem(chunk, "choices");
-                                        if (choices && cJSON_IsArray(choices) && cJSON_GetArraySize(choices) > 0) {
-                                            cJSON *choice = cJSON_GetArrayItem(choices, 0);
-                                            cJSON *delta = cJSON_GetObjectItem(choice, "delta");
-                                            if (delta) {
-                                                cJSON *content = cJSON_GetObjectItem(delta, "content");
-                                                if (content && cJSON_IsString(content)) {
-                                                    size_t old_len = strlen(full_text);
-                                                    size_t add_len = strlen(content->valuestring);
-                                                    char *tmp = (char *)realloc(full_text, old_len + add_len + 1);
-                                                    if (tmp) {
-                                                        full_text = tmp;
-                                                        memcpy(full_text + old_len, content->valuestring, add_len + 1);
-                                                    }
-                                                }
-                                            }
-                                            // Extract tool_calls from delta
-                                            cJSON *tool_calls = cJSON_GetObjectItem(delta, "tool_calls");
-                                            // TODO: accumulate tool_calls from streaming chunks
-                                        }
-                                        cJSON_Delete(chunk);
+        // For OpenAI streaming, response_buffer contains SSE data, not JSON.
+        // Parse it separately before attempting cJSON_Parse.
+        if (g_model_config.type == AI_MODEL_OPENAI && g_model_config.stream) {
+            log_debug("[send_messages] Parsing OpenAI streaming response...");
+            char *full_text = (char *)calloc(1, 1);
+            char *buf_copy = strdup(response_buffer);
+            char *line = buf_copy;
+            while (line) {
+                char *line_end = strchr(line, '\n');
+                if (line_end) *line_end = '\0';
+
+                if (strncmp(line, "data: ", 6) == 0 && strcmp(line + 6, "[DONE]") != 0) {
+                    cJSON *chunk = cJSON_Parse(line + 6);
+                    if (chunk) {
+                        cJSON *choices = cJSON_GetObjectItem(chunk, "choices");
+                        if (choices && cJSON_IsArray(choices) && cJSON_GetArraySize(choices) > 0) {
+                            cJSON *choice = cJSON_GetArrayItem(choices, 0);
+                            cJSON *delta = cJSON_GetObjectItem(choice, "delta");
+                            if (delta) {
+                                cJSON *content = cJSON_GetObjectItem(delta, "content");
+                                if (content && cJSON_IsString(content)) {
+                                    size_t old_len = strlen(full_text);
+                                    size_t add_len = strlen(content->valuestring);
+                                    char *tmp = (char *)realloc(full_text, old_len + add_len + 1);
+                                    if (tmp) {
+                                        full_text = tmp;
+                                        memcpy(full_text + old_len, content->valuestring, add_len + 1);
                                     }
                                 }
-
-                                if (line_end) { *line_end = '\n'; line = line_end + 1; }
-                                else break;
                             }
-                            free(buf_copy);
-
-                            if (strlen(full_text) > 0) {
-                                log_debug("[send_messages] OpenAI streamed content length: %zu", strlen(full_text));
-                                response = create_response(full_text, true, NULL);
-                            } else {
-                                response = create_response(NULL, false, "No content in streaming response");
-                            }
-                            free(full_text);
                         }
-                    } else {
+                        cJSON_Delete(chunk);
+                    }
+                }
+
+                if (line_end) { *line_end = '\n'; line = line_end + 1; }
+                else break;
+            }
+            free(buf_copy);
+
+            if (strlen(full_text) > 0) {
+                log_debug("[send_messages] OpenAI streamed content length: %zu", strlen(full_text));
+                response = create_response(full_text, true, NULL);
+            } else {
+                response = create_response("", true, NULL);
+            }
+
+            // Attach accumulated tool_calls from streaming
+            if (response) {
+                char *tool_calls_json = build_tool_calls_json(&stream_ctx);
+                if (tool_calls_json) {
+                    response->tool_calls = tool_calls_json;
+                    log_debug("[send_messages] Streaming tool_calls: %s", tool_calls_json);
+                }
+            }
+            free(full_text);
+        } else {
+            cJSON *root = cJSON_Parse(response_buffer);
+            if (root) {
+                switch (g_model_config.type) {
+                    case AI_MODEL_OPENAI:
                         log_debug("[send_messages] Parsing OpenAI non-streaming response...");
                         {
                             cJSON *choices = cJSON_GetObjectItem(root, "choices");
@@ -1110,8 +1246,7 @@ AIModelResponse *ai_model_send_messages(MessageList *messages, const char *syste
                                 response = create_response(NULL, false, "No choices in OpenAI response");
                             }
                         }
-                    }
-                    break;
+                        break;
 
                 case AI_MODEL_ANTHROPIC:
                     log_debug("Parsing Anthropic response...");
@@ -1224,6 +1359,7 @@ AIModelResponse *ai_model_send_messages(MessageList *messages, const char *syste
         } else {
             response = create_response(NULL, false, "Failed to parse API response");
         }
+        }
     } else {
         char error_msg[256];
         snprintf(error_msg, sizeof(error_msg), "CURL error: %s", curl_easy_strerror(res));
@@ -1231,6 +1367,7 @@ AIModelResponse *ai_model_send_messages(MessageList *messages, const char *syste
     }
 
     // Cleanup
+    reset_tool_calls(&stream_ctx);
     curl_easy_cleanup(curl);
     curl_slist_free_all(headers);
     free(response_buffer);
