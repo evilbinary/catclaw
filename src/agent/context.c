@@ -18,26 +18,29 @@
 static const char* DEFAULT_SYSTEM_PROMPT =
 "你是一个有用的助手，可以帮助用户完成各种任务。请保持对话的连贯性，基于上下文进行回复。\n"
 "\n"
-"可用工具：\n"
-"1. (get_weather location) - 获取天气信息，location 为城市名称如 \"北京\"\n"
-"2. (web_search query) - 搜索网络信息\n"
-"3. (calculator expression) - 计算数学表达式，如 \"1+2*3\"\n"
+"可用工具（使用关键字参数格式）：\n"
+"1. (get_weather location \"城市名\") - 获取天气信息\n"
+"2. (web_search query \"搜索词\") - 搜索网络信息\n"
+"3. (calculator expression \"表达式\") - 计算数学表达式\n"
 "4. (time) - 获取当前时间\n"
-"5. (read_file path) - 读取文件内容\n"
-"6. (write_file path content) - 写入文件内容\n"
-"7. (reverse_string text) - 反转字符串\n"
-"8. (memory_save key value) - 保存信息到内存\n"
-"9. (memory_load key) - 从内存读取信息\n"
-"10. (list_directory path) - 列出目录内容，支持 ~ 展开如 \"~/.catclaw\"\n"
+"5. (read_file path \"文件路径\") - 读取文件内容\n"
+"6. (write_file path \"路径\" content \"内容\") - 写入文件内容\n"
+"7. (reverse_string text \"文本\") - 反转字符串\n"
+"8. (memory_save key \"键名\" value \"值\") - 保存信息到内存\n"
+"9. (memory_load key \"键名\") - 从内存读取信息\n"
+"10. (list_directory path \"目录路径\") - 列出目录内容，支持 ~ 展开\n"
 "\n"
 "如果需要使用工具，请使用 S表达式格式输出：\n"
 "(tool-calls\n"
-"  (工具名 参数1 参数2 ...)\n"
+"  (工具名 参数名 \"参数值\" ...)\n"
 ")\n"
 "\n"
 "示例：\n"
 "用户：北京天气怎么样？\n"
-"助手：(tool-calls (get_weather \"北京\"))\n"
+"助手：(tool-calls (get_weather location \"北京\"))\n"
+"\n"
+"用户：列出 ~/.catclaw 目录\n"
+"助手：(tool-calls (list_directory path \"~/.catclaw\"))\n"
 "\n"
 "工具执行后返回格式：[TOOL_RESULT] 结果 [/TOOL_RESULT]\n"
 "看到 [TOOL_RESULT] 后直接回复用户，不要再调用工具！\n";
@@ -450,6 +453,74 @@ static ToolCallList* parse_tool_calls_from_sexp(const char* content) {
     return list;
 }
 
+// Parse AI response and extract tool calls
+// Returns ToolCallList if tool calls found, NULL otherwise
+static ToolCallList* parse_response_tool_calls(AIModelResponse* response) {
+    if (!response || !response->success) return NULL;
+    
+    ToolCallList* tool_call_list = NULL;
+    
+    // 1. Check response->tool_calls (OpenAI native tool_calls format)
+    if (response->tool_calls && strlen(response->tool_calls) > 0) {
+        log_debug("Found tool_calls in response.tool_calls: %s", response->tool_calls);
+        cJSON* tool_calls_json = cJSON_Parse(response->tool_calls);
+        if (tool_calls_json) {
+            tool_call_list = parse_tool_calls_from_json(tool_calls_json);
+            cJSON_Delete(tool_calls_json);
+        }
+    }
+    
+    // 2. Check for S-expression tool calls: (tool-calls ...)
+    if (!tool_call_list && response->content && strlen(response->content) > 0) {
+        if (strstr(response->content, "(tool-calls")) {
+            log_debug("Found S-expression tool_calls in response.content");
+            tool_call_list = parse_tool_calls_from_sexp(response->content);
+        }
+    }
+    
+    return tool_call_list;
+}
+
+// Check if response content contains JSON tool_calls (legacy format detection)
+static bool response_has_json_tool_calls(const char* content) {
+    if (!content || strlen(content) == 0) return false;
+    
+    cJSON* content_root = cJSON_Parse(content);
+    if (!content_root) {
+        // Try to fix common JSON issues
+        char* fixed_content = strdup(content);
+        if (fixed_content) {
+            int brace_count = 0, bracket_count = 0;
+            for (char* p = fixed_content; *p; p++) {
+                if (*p == '{') brace_count++;
+                else if (*p == '}') brace_count--;
+                else if (*p == '[') bracket_count++;
+                else if (*p == ']') bracket_count--;
+            }
+            
+            if (brace_count < 0 || bracket_count < 0) {
+                int len = strlen(fixed_content);
+                while (len > 0 && (brace_count < 0 || bracket_count < 0)) {
+                    if (fixed_content[len-1] == '}') { brace_count++; fixed_content[--len] = '\0'; }
+                    else if (fixed_content[len-1] == ']') { bracket_count++; fixed_content[--len] = '\0'; }
+                    else break;
+                }
+                content_root = cJSON_Parse(fixed_content);
+            }
+            free(fixed_content);
+        }
+    }
+    
+    bool has_tool_calls = false;
+    if (content_root) {
+        cJSON* tc = cJSON_GetObjectItem(content_root, "tool_calls");
+        has_tool_calls = (tc && cJSON_IsArray(tc));
+        cJSON_Delete(content_root);
+    }
+    
+    return has_tool_calls;
+}
+
 // Worker thread function
 void* agent_node_worker_thread(void* arg) {
     AgentNode* node = (AgentNode*)arg;
@@ -486,8 +557,6 @@ void* agent_node_worker_thread(void* arg) {
         }
         
         // 3. Add user message to session
-        // Save content pointer before setting message to NULL
-        const char* message_content = item->message->content;
         session_add_message(session, item->message);
         // Set message to NULL so it won't be destroyed by queue_item_destroy
         item->message = NULL;
@@ -565,132 +634,24 @@ void* agent_node_worker_thread(void* arg) {
                         log_debug("AI model returned success\n");
                     }
                     
-                    // 6.2 Pre-check: Detect if content is a tool_calls JSON
-                    bool has_tool_calls_in_content = false;
-                    log_debug("response->content: '%s'", response->content ? response->content : "(null)");
-                    log_debug("response->tool_calls: '%s'", response->tool_calls ? response->tool_calls : "(null)");
-                    if (response->content && strlen(response->content) > 0) {
-                        // Try to parse content as JSON
-                        cJSON *content_root = cJSON_Parse(response->content);
-                        
-                        // If parsing fails, try to fix common JSON issues
-                        if (!content_root && response->content) {
-                            log_debug("Initial JSON parse failed, attempting to fix...");
-                            const char* error_ptr = cJSON_GetErrorPtr();
-                            if (error_ptr) {
-                                log_debug("cJSON error at: '%s'", error_ptr);
-                            }
-                            
-                            // Try to remove trailing extra braces
-                            char* fixed_content = strdup(response->content);
-                            if (fixed_content) {
-                                // Count braces to find unmatched ones
-                                int brace_count = 0;
-                                int bracket_count = 0;
-                                for (char* p = fixed_content; *p; p++) {
-                                    if (*p == '{') brace_count++;
-                                    else if (*p == '}') brace_count--;
-                                    else if (*p == '[') bracket_count++;
-                                    else if (*p == ']') bracket_count--;
-                                }
-                                
-                                log_debug("Brace count: %d, Bracket count: %d", brace_count, bracket_count);
-                                
-                                // Remove extra trailing braces/brackets
-                                if (brace_count < 0 || bracket_count < 0) {
-                                    int len = strlen(fixed_content);
-                                    while (len > 0 && (brace_count < 0 || bracket_count < 0)) {
-                                        if (fixed_content[len-1] == '}') {
-                                            brace_count++;
-                                            fixed_content[--len] = '\0';
-                                        } else if (fixed_content[len-1] == ']') {
-                                            bracket_count++;
-                                            fixed_content[--len] = '\0';
-                                        } else {
-                                            break;
-                                        }
-                                    }
-                                    log_debug("Fixed JSON: '%s'", fixed_content);
-                                    content_root = cJSON_Parse(fixed_content);
-                                    if (!content_root) {
-                                        error_ptr = cJSON_GetErrorPtr();
-                                        if (error_ptr) {
-                                            log_debug("cJSON still failing at: '%s'", error_ptr);
-                                        }
-                                        
-                                        // Try more aggressive fixing: remove all trailing non-alphanumeric chars except }
-                                        len = strlen(fixed_content);
-                                        while (len > 1) {
-                                            char c = fixed_content[len-1];
-                                            if (c == '}' || c == ']' || c == '"' || c == '\'' ||
-                                                (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
-                                                (c >= '0' && c <= '9')) {
-                                                break;
-                                            }
-                                            fixed_content[--len] = '\0';
-                                        }
-                                        log_debug("Aggressively fixed JSON: '%s'", fixed_content);
-                                        content_root = cJSON_Parse(fixed_content);
-                                    }
-                                }
-                                free(fixed_content);
-                            }
-                        }
-                        
-                        log_debug("cJSON_Parse result: %p", (void*)content_root);
-                        if (content_root) {
-                            cJSON *tc = cJSON_GetObjectItem(content_root, "tool_calls");
-                            log_debug("tool_calls object: %p, is_array: %d", (void*)tc, tc ? cJSON_IsArray(tc) : 0);
-                            if (tc && cJSON_IsArray(tc)) {
-                                has_tool_calls_in_content = true;
-                                log_debug("Detected tool_calls in content");
-                            }
-                            cJSON_Delete(content_root);
-                        } else {
-                            log_debug("Failed to parse content as JSON after fix attempts");
-                        }
-                    }
+                    // 6.2 Check if content contains JSON tool_calls (for display control)
+                    bool has_tool_calls_in_content = response_has_json_tool_calls(response->content);
                     
                     // 6.3 Act: Add assistant message to session
                     Message* assistant_msg = message_create(ROLE_ASSISTANT, response->content);
                     session_add_message(session, assistant_msg);
                     
                     // Only print response if it's not a tool_calls JSON
-                    if (!has_tool_calls_in_content) {
-                        printf("\n[AI Response]: %s\n\n", response->content);
+                    if (!has_tool_calls_in_content && !strstr(response->content ? response->content : "", "(tool-calls")) {
+                        printf("\n[AI Response]: %s\n\n", response->content ? response->content : "");
                     }
                     
-                    // 6.4 Observe: Check for tool calls
+                    // 6.4 Observe: Parse tool calls from response
                     if (g_config.debug) {
-                        log_debug("Checking for tool calls\n");
+                        log_debug("Parsing tool calls from response\n");
                     }
                     
-                    ToolCallList* tool_call_list = NULL;
-                    
-                    // Parse tool_calls from AI model response
-                    // 1. Check response->tool_calls (OpenAI native tool_calls format)
-                    if (response->tool_calls && strlen(response->tool_calls) > 0) {
-                        if (g_config.debug) {
-                            log_debug("Found tool_calls in response.tool_calls: %s\n", response->tool_calls);
-                        }
-                        cJSON *tool_calls_json = cJSON_Parse(response->tool_calls);
-                        if (tool_calls_json) {
-                            tool_call_list = parse_tool_calls_from_json(tool_calls_json);
-                            cJSON_Delete(tool_calls_json);
-                        }
-                    }
-                    
-                    // 2. Check for S-expression tool calls: (tool-calls ...)
-                    if (!tool_call_list && response->content && strlen(response->content) > 0) {
-                        if (strstr(response->content, "(tool-calls")) {
-                            if (g_config.debug) {
-                                log_debug("Found S-expression tool_calls in response.content\n");
-                            }
-                            tool_call_list = parse_tool_calls_from_sexp(response->content);
-                        }
-                    }
-                    
-                    // Note: JSON tool_calls in content is disabled, use S-expression format instead
+                    ToolCallList* tool_call_list = parse_response_tool_calls(response);
                     
                     if (tool_call_list && tool_call_list->count > 0) {
                         // Execute tool calls
@@ -709,13 +670,12 @@ void* agent_node_worker_thread(void* arg) {
                             
                             // Execute tool
                             Tool* tool = tool_registry_get(agent->tool_registry, call->name);
-                            int status = -1;
                             if (tool) {
                                 if (g_config.debug) {
                                     log_debug("Tool found: %s\n", tool->name);
                                     log_debug("Tool arguments: %s\n", call->arguments);
                                 }
-                                status = tool->execute(call->arguments, &result, &result_len);
+                                tool->execute(call->arguments, &result, &result_len);
                             } else {
                                 if (g_config.debug) {
                                     log_debug("Tool not found: '%s'\n", call->name);

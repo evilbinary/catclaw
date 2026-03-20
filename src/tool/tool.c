@@ -465,7 +465,11 @@ int tool_list_directory(const char* args, char** result, int* result_len) {
     
     if (root) {
         // Successfully parsed as JSON
+        // Support both "path" (formal) and "arg" (S-expression positional) fields
         cJSON* path_obj = cJSON_GetObjectItem(root, "path");
+        if (!path_obj) {
+            path_obj = cJSON_GetObjectItem(root, "arg");  // Fallback for S-expression
+        }
         if (path_obj && cJSON_IsString(path_obj)) {
             strncpy(clean_path, path_obj->valuestring, sizeof(clean_path) - 1);
             clean_path[sizeof(clean_path) - 1] = '\0';
