@@ -287,11 +287,17 @@ AIModelResponse *ai_model_send_message(const char *message) {
     char *payload = NULL;
 
     printf("[DEBUG] Entering switch, model_type=%d\n", g_model_config.type);
+
+    // Log request details
+    log_debug("Sending single message to AI model");
+    log_debug("Message: %s", message ? message : "(null)");
+    log_debug("Model type: %d", g_model_config.type);
     
     switch (g_model_config.type) {
         case AI_MODEL_OPENAI:
             printf("[DEBUG] AI_MODEL_OPENAI branch\n");
             url = g_model_config.base_url ? g_model_config.base_url : "https://api.openai.com/v1/chat/completions";
+            log_debug("OpenAI URL: %s", url);
             headers = curl_slist_append(headers, "Content-Type: application/json");
             {
                 char auth_header[256];
@@ -310,6 +316,7 @@ AIModelResponse *ai_model_send_message(const char *message) {
                 cJSON_AddItemToArray(messages, message_obj);
                 cJSON_AddItemToObject(root, "messages", messages);
                 payload = cJSON_Print(root);
+                log_debug("OpenAI Request Payload: %s", payload);
                 cJSON_Delete(root);
             }
             break;
@@ -317,6 +324,7 @@ AIModelResponse *ai_model_send_message(const char *message) {
         case AI_MODEL_ANTHROPIC:
             printf("[DEBUG] AI_MODEL_ANTHROPIC branch\n");
             url = g_model_config.base_url ? g_model_config.base_url : "https://api.anthropic.com/v1/messages";
+            log_debug("Anthropic URL: %s", url);
             headers = curl_slist_append(headers, "Content-Type: application/json");
             {
                 char auth_header[256];
@@ -387,6 +395,7 @@ AIModelResponse *ai_model_send_message(const char *message) {
                 cJSON_AddNumberToObject(root, "max_tokens", 1024);
                 cJSON_AddBoolToObject(root, "stream", true);
                 payload = cJSON_Print(root);
+                log_debug("Llama Request Payload: %s", payload);
                 cJSON_Delete(root);
             }
             break;
@@ -407,17 +416,21 @@ AIModelResponse *ai_model_send_message(const char *message) {
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L); // Disable SSL verification for testing
 
     // Perform request
+    log_debug("Sending request to %s...", url);
     CURLcode res = curl_easy_perform(curl);
+    log_debug("Request completed with CURLcode: %d (%s)", res, curl_easy_strerror(res));
 
     // Parse response
     AIModelResponse *response = NULL;
     if (res == CURLE_OK) {
         // Log the full response for debugging
         log_debug("Full response from AI model: %s", response_buffer);
+        log_debug("Response length: %zu bytes", strlen(response_buffer));
         cJSON *root = cJSON_Parse(response_buffer);
         if (root) {
             switch (g_model_config.type) {
                 case AI_MODEL_OPENAI:
+                    log_debug("Parsing OpenAI response...");
                     {
                         cJSON *choices = cJSON_GetObjectItem(root, "choices");
                         if (choices && cJSON_IsArray(choices)) {
@@ -427,6 +440,7 @@ AIModelResponse *ai_model_send_message(const char *message) {
                                 if (message) {
                                     cJSON *content = cJSON_GetObjectItem(message, "content");
                                     if (content && cJSON_IsString(content)) {
+                                        log_debug("OpenAI response content: %s", content->valuestring);
                                         response = create_response(content->valuestring, true, NULL);
                                     }
                                     
@@ -445,6 +459,7 @@ AIModelResponse *ai_model_send_message(const char *message) {
                     break;
 
                 case AI_MODEL_ANTHROPIC:
+                    log_debug("Parsing Anthropic response...");
                     {
                         cJSON *content = cJSON_GetObjectItem(root, "content");
                         if (content && cJSON_IsArray(content)) {
@@ -452,6 +467,7 @@ AIModelResponse *ai_model_send_message(const char *message) {
                             if (item) {
                                 cJSON *text = cJSON_GetObjectItem(item, "text");
                                 if (text && cJSON_IsString(text)) {
+                                    log_debug("Anthropic response text: %s", text->valuestring);
                                     response = create_response(text->valuestring, true, NULL);
                                 }
                             }
@@ -460,6 +476,7 @@ AIModelResponse *ai_model_send_message(const char *message) {
                     break;
 
                 case AI_MODEL_GEMINI:
+                    log_debug("Parsing Gemini response...");
                     {
                         cJSON *candidates = cJSON_GetObjectItem(root, "candidates");
                         if (candidates && cJSON_IsArray(candidates)) {
@@ -470,10 +487,11 @@ AIModelResponse *ai_model_send_message(const char *message) {
                                     cJSON *parts = cJSON_GetObjectItem(content, "parts");
                                     if (parts && cJSON_IsArray(parts)) {
                                         cJSON *part = cJSON_GetArrayItem(parts, 0);
-                                        if (part) {
-                                            cJSON *text = cJSON_GetObjectItem(part, "text");
-                                            if (text && cJSON_IsString(text)) {
-                                                response = create_response(text->valuestring, true, NULL);
+                                    if (part) {
+                                        cJSON *text = cJSON_GetObjectItem(part, "text");
+                                        if (text && cJSON_IsString(text)) {
+                                            log_debug("Gemini response text: %s", text->valuestring);
+                                            response = create_response(text->valuestring, true, NULL);
                                             }
                                         }
                                     }
@@ -484,6 +502,7 @@ AIModelResponse *ai_model_send_message(const char *message) {
                     break;
 
                 case AI_MODEL_LLAMA:
+                    log_debug("Parsing Llama response...");
                     {
                         // Check for error first
                         cJSON *error_obj = cJSON_GetObjectItem(root, "error");
@@ -492,6 +511,7 @@ AIModelResponse *ai_model_send_message(const char *message) {
                         } else {
                             // Handle streaming response (each line is a JSON object)
                             char *buffer_copy = strdup(response_buffer);
+                            log_debug("Parsing streaming Llama response...");
                             if (buffer_copy) {
                                 char *line = buffer_copy;
                                 char *full_response = NULL;
@@ -540,6 +560,7 @@ AIModelResponse *ai_model_send_message(const char *message) {
                                 }
 
                                 if (!response && full_response) {
+                                    log_debug("Full Llama streaming response: %s", full_response);
                                     response = create_response(full_response, true, NULL);
                                     free(full_response);
                                 }
@@ -551,6 +572,7 @@ AIModelResponse *ai_model_send_message(const char *message) {
                             // Fallback to non-streaming format
                             cJSON *response_obj = cJSON_GetObjectItem(root, "response");
                             if (response_obj && cJSON_IsString(response_obj)) {
+                                log_debug("Llama non-streaming response: %s", response_obj->valuestring);
                                 response = create_response(response_obj->valuestring, true, NULL);
                             } else {
                                 response = create_response(NULL, false, "No response from Llama model");
@@ -592,6 +614,16 @@ AIModelResponse *ai_model_send_message(const char *message) {
     free(response_buffer);
     if (payload) {
         free(payload);
+    }
+
+    // Log final response status
+    if (response) {
+        log_debug("Final response: success=%s, content=%s, error=%s",
+                  response->success ? "true" : "false",
+                  response->content ? response->content : "(null)",
+                  response->error ? response->error : "(null)");
+    } else {
+        log_debug("Final response: NULL");
     }
 
     return response;
@@ -636,6 +668,7 @@ AIModelResponse *ai_model_send_messages(MessageList *messages, const char *syste
     switch (g_model_config.type) {
         case AI_MODEL_OPENAI:
             url = g_model_config.base_url ? g_model_config.base_url : "https://api.openai.com/v1/chat/completions";
+            log_debug("[send_messages] OpenAI URL: %s", url);
             headers = curl_slist_append(headers, "Content-Type: application/json");
             {
                 char auth_header[256];
@@ -679,12 +712,14 @@ AIModelResponse *ai_model_send_messages(MessageList *messages, const char *syste
                 cJSON_AddNumberToObject(root, "temperature", g_model_config.temperature);
                 cJSON_AddNumberToObject(root, "max_tokens", g_model_config.max_tokens);
                 payload = cJSON_Print(root);
+                log_debug("[send_messages] OpenAI Request Payload: %s", payload);
                 cJSON_Delete(root);
             }
             break;
 
         case AI_MODEL_ANTHROPIC:
             url = g_model_config.base_url ? g_model_config.base_url : "https://api.anthropic.com/v1/messages";
+            log_debug("[send_messages] Anthropic URL: %s", url);
             headers = curl_slist_append(headers, "Content-Type: application/json");
             {
                 char auth_header[256];
@@ -722,12 +757,14 @@ AIModelResponse *ai_model_send_messages(MessageList *messages, const char *syste
                 cJSON_AddItemToObject(root, "messages", messages_json);
                 cJSON_AddNumberToObject(root, "max_tokens", g_model_config.max_tokens);
                 payload = cJSON_Print(root);
+                log_debug("[send_messages] Anthropic Request Payload: %s", payload);
                 cJSON_Delete(root);
             }
             break;
 
         case AI_MODEL_GEMINI:
             url = g_model_config.base_url ? g_model_config.base_url : "https://generativelanguage.googleapis.com/v1/models/gemini-1.5-pro:generateContent";
+            log_debug("[send_messages] Gemini URL: %s", url);
             headers = curl_slist_append(headers, "Content-Type: application/json");
             {
                 char auth_header[256];
@@ -773,6 +810,7 @@ AIModelResponse *ai_model_send_messages(MessageList *messages, const char *syste
                 
                 cJSON_AddItemToObject(root, "contents", contents_json);
                 payload = cJSON_Print(root);
+                log_debug("[send_messages] Gemini Request Payload: %s", payload);
                 cJSON_Delete(root);
             }
             break;
@@ -780,6 +818,7 @@ AIModelResponse *ai_model_send_messages(MessageList *messages, const char *syste
         case AI_MODEL_LLAMA:
             printf("[DEBUG] AI_MODEL_LLAMA branch (send_messages)\n");
             url = g_model_config.base_url ? g_model_config.base_url : "http://localhost:11434/api/generate";
+            log_debug("[send_messages] Llama URL: %s", url);
             headers = curl_slist_append(headers, "Content-Type: application/json; charset=utf-8");
             headers = curl_slist_append(headers, "Accept: application/json; charset=utf-8");
             {
@@ -829,6 +868,7 @@ AIModelResponse *ai_model_send_messages(MessageList *messages, const char *syste
                 cJSON_AddNumberToObject(root, "max_tokens", g_model_config.max_tokens);
                 cJSON_AddBoolToObject(root, "stream", false);
                 payload = cJSON_Print(root);
+                log_debug("[send_messages] Llama Request Payload: %s", payload);
                 cJSON_Delete(root);
             }
             break;
@@ -849,16 +889,20 @@ AIModelResponse *ai_model_send_messages(MessageList *messages, const char *syste
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
 
     // Perform request
+    log_debug("Sending request to %s...", url);
     CURLcode res = curl_easy_perform(curl);
+    log_debug("Request completed with CURLcode: %d (%s)", res, curl_easy_strerror(res));
 
     // Parse response
     AIModelResponse *response = NULL;
     if (res == CURLE_OK) {
-        log_debug("Full response from AI model: %s", response_buffer);
+        log_debug("[send_messages] Full response from AI model: %s", response_buffer);
+        log_debug("[send_messages] Response length: %zu bytes", strlen(response_buffer));
         cJSON *root = cJSON_Parse(response_buffer);
         if (root) {
             switch (g_model_config.type) {
                 case AI_MODEL_OPENAI:
+                    log_debug("Parsing OpenAI response...");
                     {
                         cJSON *choices = cJSON_GetObjectItem(root, "choices");
                         if (choices && cJSON_IsArray(choices)) {
@@ -868,6 +912,7 @@ AIModelResponse *ai_model_send_messages(MessageList *messages, const char *syste
                                 if (message) {
                                     cJSON *content = cJSON_GetObjectItem(message, "content");
                                     if (content && cJSON_IsString(content)) {
+                                        log_debug("OpenAI response content: %s", content->valuestring);
                                         response = create_response(content->valuestring, true, NULL);
                                     }
                                 }
@@ -877,6 +922,7 @@ AIModelResponse *ai_model_send_messages(MessageList *messages, const char *syste
                     break;
 
                 case AI_MODEL_ANTHROPIC:
+                    log_debug("Parsing Anthropic response...");
                     {
                         cJSON *content = cJSON_GetObjectItem(root, "content");
                         if (content && cJSON_IsArray(content)) {
@@ -884,6 +930,7 @@ AIModelResponse *ai_model_send_messages(MessageList *messages, const char *syste
                             if (item) {
                                 cJSON *text = cJSON_GetObjectItem(item, "text");
                                 if (text && cJSON_IsString(text)) {
+                                    log_debug("Anthropic response text: %s", text->valuestring);
                                     response = create_response(text->valuestring, true, NULL);
                                 }
                             }
@@ -892,6 +939,7 @@ AIModelResponse *ai_model_send_messages(MessageList *messages, const char *syste
                     break;
 
                 case AI_MODEL_GEMINI:
+                    log_debug("Parsing Gemini response...");
                     {
                         cJSON *candidates = cJSON_GetObjectItem(root, "candidates");
                         if (candidates && cJSON_IsArray(candidates)) {
@@ -902,10 +950,11 @@ AIModelResponse *ai_model_send_messages(MessageList *messages, const char *syste
                                     cJSON *parts = cJSON_GetObjectItem(content, "parts");
                                     if (parts && cJSON_IsArray(parts)) {
                                         cJSON *part = cJSON_GetArrayItem(parts, 0);
-                                        if (part) {
-                                            cJSON *text = cJSON_GetObjectItem(part, "text");
-                                            if (text && cJSON_IsString(text)) {
-                                                response = create_response(text->valuestring, true, NULL);
+                                    if (part) {
+                                        cJSON *text = cJSON_GetObjectItem(part, "text");
+                                        if (text && cJSON_IsString(text)) {
+                                            log_debug("Gemini response text: %s", text->valuestring);
+                                            response = create_response(text->valuestring, true, NULL);
                                             }
                                         }
                                     }
@@ -916,6 +965,7 @@ AIModelResponse *ai_model_send_messages(MessageList *messages, const char *syste
                     break;
 
                 case AI_MODEL_LLAMA:
+                    log_debug("Parsing Llama response...");
                     {
                         // Check for error first
                         cJSON *error_obj = cJSON_GetObjectItem(root, "error");
@@ -994,6 +1044,16 @@ AIModelResponse *ai_model_send_messages(MessageList *messages, const char *syste
     free(response_buffer);
     if (payload) {
         free(payload);
+    }
+
+    // Log final response status
+    if (response) {
+        log_debug("Final response: success=%s, content=%s, error=%s",
+                  response->success ? "true" : "false",
+                  response->content ? response->content : "(null)",
+                  response->error ? response->error : "(null)");
+    } else {
+        log_debug("Final response: NULL");
     }
 
     return response;
