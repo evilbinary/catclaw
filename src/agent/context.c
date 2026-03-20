@@ -50,7 +50,7 @@ static const char* DEFAULT_SYSTEM_PROMPT =
 typedef struct {
     char* id;
     char* name;
-    char* arguments;
+    ToolArgs* args;  // Parsed arguments
 } ToolCall;
 
 // ToolCallList structure
@@ -272,24 +272,48 @@ static ToolCallList* parse_tool_calls_from_json(cJSON* tool_calls_json) {
                 list->calls[i].name = strdup("unknown");
             }
             
-            if (arguments && cJSON_IsString(arguments)) {
-                // arguments is already a JSON string
-                list->calls[i].arguments = strdup(arguments->valuestring);
-            } else if (arguments && cJSON_IsObject(arguments)) {
-                // arguments is a JSON object, convert to string
-                char* args_str = cJSON_Print(arguments);
-                if (args_str) {
-                    list->calls[i].arguments = args_str;
-                } else {
-                    list->calls[i].arguments = strdup("{}");
+            // Parse arguments into ToolArgs
+            list->calls[i].args = (ToolArgs*)malloc(sizeof(ToolArgs));
+            if (list->calls[i].args) {
+                cJSON* args_obj = NULL;
+                if (arguments && cJSON_IsString(arguments)) {
+                    args_obj = cJSON_Parse(arguments->valuestring);
+                } else if (arguments && cJSON_IsObject(arguments)) {
+                    args_obj = arguments;
                 }
-            } else {
-                list->calls[i].arguments = strdup("{}");
+                
+                if (args_obj && cJSON_IsObject(args_obj)) {
+                    int arg_count = cJSON_GetArraySize(args_obj);
+                    list->calls[i].args->count = arg_count;
+                    list->calls[i].args->args = (ToolArg*)calloc(arg_count, sizeof(ToolArg));
+                    
+                    int idx = 0;
+                    cJSON* item = NULL;
+                    cJSON_ArrayForEach(item, args_obj) {
+                        if (idx < arg_count) {
+                            list->calls[i].args->args[idx].key = strdup(item->string);
+                            if (cJSON_IsString(item)) {
+                                list->calls[i].args->args[idx].value = strdup(item->valuestring);
+                            } else {
+                                char* val_str = cJSON_Print(item);
+                                list->calls[i].args->args[idx].value = val_str ? val_str : strdup("");
+                            }
+                            idx++;
+                        }
+                    }
+                } else {
+                    list->calls[i].args->count = 0;
+                    list->calls[i].args->args = NULL;
+                }
+                
+                if (args_obj && args_obj != arguments) {
+                    cJSON_Delete(args_obj);
+                }
             }
         } else {
             list->calls[i].id = strdup("");
             list->calls[i].name = strdup("unknown");
-            list->calls[i].arguments = strdup("{}");
+            list->calls[i].args = NULL;
         }
     }
     
@@ -317,9 +341,7 @@ static ToolCallList* parse_tool_calls_from_sexp(const char* content) {
     while (*scan) {
         if (*scan == '(') {
             scan++;
-            // Skip whitespace
             while (*scan && (*scan == ' ' || *scan == '\t' || *scan == '\n')) scan++;
-            // Check if this is a tool call (not just empty parens)
             if (*scan && *scan != ')') count++;
         }
         scan++;
@@ -369,32 +391,55 @@ static ToolCallList* parse_tool_calls_from_sexp(const char* content) {
         list->calls[call_idx].id = (char*)malloc(20);
         snprintf(list->calls[call_idx].id, 20, "call_%d", call_idx + 1);
         
-        // Parse arguments
-        cJSON* args_obj = cJSON_CreateObject();
+        // Count arguments first
+        int arg_count = 0;
+        const char* arg_scan = ptr;
+        while (*arg_scan && *arg_scan != ')') {
+            while (*arg_scan && (*arg_scan == ' ' || *arg_scan == '\t' || *arg_scan == '\n')) arg_scan++;
+            if (*arg_scan && *arg_scan != ')') {
+                arg_count++;
+                // Skip the argument
+                if (*arg_scan == '"') {
+                    arg_scan++;
+                    while (*arg_scan && *arg_scan != '"') arg_scan++;
+                    if (*arg_scan == '"') arg_scan++;
+                } else {
+                    while (*arg_scan && *arg_scan != ' ' && *arg_scan != '\t' && *arg_scan != '\n' && *arg_scan != ')') arg_scan++;
+                }
+            }
+        }
         
-        while (*ptr && *ptr != ')') {
-            // Skip whitespace
+        // Allocate ToolArgs
+        list->calls[call_idx].args = (ToolArgs*)malloc(sizeof(ToolArgs));
+        if (list->calls[call_idx].args && arg_count > 0) {
+            list->calls[call_idx].args->count = 0;
+            list->calls[call_idx].args->args = (ToolArg*)calloc(arg_count, sizeof(ToolArg));
+        } else if (list->calls[call_idx].args) {
+            list->calls[call_idx].args->count = 0;
+            list->calls[call_idx].args->args = NULL;
+        }
+        
+        // Parse arguments into ToolArgs
+        while (*ptr && *ptr != ')' && list->calls[call_idx].args) {
             while (*ptr && (*ptr == ' ' || *ptr == '\t' || *ptr == '\n')) ptr++;
-            
             if (*ptr == ')') break;
             
-            // Parse argument
+            ToolArg* current_arg = &list->calls[call_idx].args->args[list->calls[call_idx].args->count];
+            
             if (*ptr == '"') {
-                // String argument
-                ptr++; // skip opening quote
+                // String argument (positional) - use "arg" as key
+                ptr++;
                 const char* arg_start = ptr;
                 while (*ptr && *ptr != '"') ptr++;
                 size_t arg_len = ptr - arg_start;
-                char* arg_value = (char*)malloc(arg_len + 1);
-                strncpy(arg_value, arg_start, arg_len);
-                arg_value[arg_len] = '\0';
-                if (*ptr == '"') ptr++; // skip closing quote
-                
-                // For single string argument, use "arg" as key
-                cJSON_AddStringToObject(args_obj, "arg", arg_value);
-                free(arg_value);
+                current_arg->key = strdup("arg");
+                current_arg->value = (char*)malloc(arg_len + 1);
+                strncpy(current_arg->value, arg_start, arg_len);
+                current_arg->value[arg_len] = '\0';
+                if (*ptr == '"') ptr++;
+                list->calls[call_idx].args->count++;
             } else {
-                // Non-string argument (keyword or value)
+                // Non-string argument (could be keyword or value)
                 const char* arg_start = ptr;
                 while (*ptr && *ptr != ' ' && *ptr != '\t' && *ptr != '\n' && *ptr != ')') ptr++;
                 size_t arg_len = ptr - arg_start;
@@ -402,51 +447,43 @@ static ToolCallList* parse_tool_calls_from_sexp(const char* content) {
                 strncpy(arg_value, arg_start, arg_len);
                 arg_value[arg_len] = '\0';
                 
-                // If next non-space is another value, this is a keyword
+                // Check if next non-space is a value
                 const char* next = ptr;
                 while (*next && (*next == ' ' || *next == '\t' || *next == '\n')) next++;
                 
                 if (*next && *next != ')' && *next != '(') {
                     // This is a keyword, next is the value
-                    ptr = next;
+                    ptr = (char*)next;
+                    current_arg->key = arg_value;
+                    
                     if (*ptr == '"') {
                         ptr++;
                         const char* val_start = ptr;
                         while (*ptr && *ptr != '"') ptr++;
                         size_t val_len = ptr - val_start;
-                        char* val_str = (char*)malloc(val_len + 1);
-                        strncpy(val_str, val_start, val_len);
-                        val_str[val_len] = '\0';
+                        current_arg->value = (char*)malloc(val_len + 1);
+                        strncpy(current_arg->value, val_start, val_len);
+                        current_arg->value[val_len] = '\0';
                         if (*ptr == '"') ptr++;
-                        
-                        cJSON_AddStringToObject(args_obj, arg_value, val_str);
-                        free(val_str);
                     } else {
                         const char* val_start = ptr;
                         while (*ptr && *ptr != ' ' && *ptr != '\t' && *ptr != '\n' && *ptr != ')') ptr++;
                         size_t val_len = ptr - val_start;
-                        char* val_str = (char*)malloc(val_len + 1);
-                        strncpy(val_str, val_start, val_len);
-                        val_str[val_len] = '\0';
-                        
-                        cJSON_AddStringToObject(args_obj, arg_value, val_str);
-                        free(val_str);
+                        current_arg->value = (char*)malloc(val_len + 1);
+                        strncpy(current_arg->value, val_start, val_len);
+                        current_arg->value[val_len] = '\0';
                     }
+                    list->calls[call_idx].args->count++;
                 } else {
                     // Single value argument
-                    cJSON_AddStringToObject(args_obj, "arg", arg_value);
+                    current_arg->key = strdup("arg");
+                    current_arg->value = arg_value;
+                    list->calls[call_idx].args->count++;
                 }
-                
-                free(arg_value);
             }
         }
         
         if (*ptr == ')') ptr++;
-        
-        // Convert args_obj to JSON string
-        list->calls[call_idx].arguments = cJSON_Print(args_obj);
-        cJSON_Delete(args_obj);
-        
         call_idx++;
     }
     
@@ -665,7 +702,7 @@ void* agent_node_worker_thread(void* arg) {
                             int result_len = 0;
                             
                             if (g_config.debug) {
-                                log_debug("Executing tool: '%s' with args: %s\n", call->name, call->arguments);
+                                log_debug("Executing tool: '%s'\n", call->name);
                             }
                             
                             // Execute tool
@@ -673,9 +710,8 @@ void* agent_node_worker_thread(void* arg) {
                             if (tool) {
                                 if (g_config.debug) {
                                     log_debug("Tool found: %s\n", tool->name);
-                                    log_debug("Tool arguments: %s\n", call->arguments);
                                 }
-                                tool->execute(call->arguments, &result, &result_len);
+                                tool->execute(call->args, &result, &result_len);
                             } else {
                                 if (g_config.debug) {
                                     log_debug("Tool not found: '%s'\n", call->name);
@@ -700,7 +736,14 @@ void* agent_node_worker_thread(void* arg) {
                         for (int j = 0; j < tool_call_list->count; j++) {
                             free(tool_call_list->calls[j].id);
                             free(tool_call_list->calls[j].name);
-                            free(tool_call_list->calls[j].arguments);
+                            if (tool_call_list->calls[j].args) {
+                                for (int k = 0; k < tool_call_list->calls[j].args->count; k++) {
+                                    free(tool_call_list->calls[j].args->args[k].key);
+                                    free(tool_call_list->calls[j].args->args[k].value);
+                                }
+                                free(tool_call_list->calls[j].args->args);
+                                free(tool_call_list->calls[j].args);
+                            }
                         }
                         free(tool_call_list->calls);
                         free(tool_call_list);

@@ -9,10 +9,101 @@
 #include <pwd.h>
 
 #include "tool.h"
- #include "common/cJSON.h"
+#include "common/cJSON.h"
+
+// Resolve relative path to absolute path
+// If path starts with '/', return as-is (absolute path)
+// If path starts with '~', expand to home directory
+// Otherwise, resolve relative to current working directory
+static char* resolve_path(const char* path) {
+    if (!path) return NULL;
+    
+    // Absolute path - return copy
+    if (path[0] == '/') {
+        return strdup(path);
+    }
+    
+    // Home directory expansion
+    if (path[0] == '~') {
+        const char* home = getenv("HOME");
+        if (!home) {
+            struct passwd* pw = getpwuid(getuid());
+            if (pw) home = pw->pw_dir;
+        }
+        if (home) {
+            size_t home_len = strlen(home);
+            size_t path_len = strlen(path);
+            char* resolved = malloc(home_len + path_len + 1);
+            if (!resolved) return NULL;
+            strcpy(resolved, home);
+            strcat(resolved, path + 1);  // Skip the '~'
+            return resolved;
+        }
+    }
+    
+    // Relative path - resolve against current working directory
+    char cwd[1024];
+    if (!getcwd(cwd, sizeof(cwd))) {
+        return strdup(path);  // Fallback to original path
+    }
+    
+    size_t cwd_len = strlen(cwd);
+    size_t path_len = strlen(path);
+    
+    char* resolved = malloc(cwd_len + path_len + 2);
+    if (!resolved) return NULL;
+    
+    strcpy(resolved, cwd);
+    if (cwd_len > 0 && cwd[cwd_len - 1] != '/') {
+        strcat(resolved, "/");
+    }
+    strcat(resolved, path);
+    
+    return resolved;
+}
+
+// Helper to get argument value by key
+const char* tool_args_get(ToolArgs* args, const char* key) {
+    if (!args || !key) return NULL;
+    for (int i = 0; i < args->count; i++) {
+        if (args->args[i].key && strcmp(args->args[i].key, key) == 0) {
+            return args->args[i].value;
+        }
+    }
+    return NULL;
+}
+
+// Helper to create ToolArgs from a single string argument
+ToolArgs* tool_args_from_string(const char* value) {
+    ToolArgs* args = (ToolArgs*)malloc(sizeof(ToolArgs));
+    if (!args) return NULL;
+    
+    args->count = 1;
+    args->args = (ToolArg*)malloc(sizeof(ToolArg));
+    if (!args->args) {
+        free(args);
+        return NULL;
+    }
+    
+    args->args[0].key = strdup("arg");
+    args->args[0].value = value ? strdup(value) : strdup("");
+    
+    return args;
+}
+
+// Helper to free ToolArgs
+void tool_args_free(ToolArgs* args) {
+    if (!args) return;
+    for (int i = 0; i < args->count; i++) {
+        free(args->args[i].key);
+        free(args->args[i].value);
+    }
+    free(args->args);
+    free(args);
+}
 
 // Create a tool
-Tool* tool_create(const char* name, const char* description, const char* parameters_schema, int (*execute)(const char* args, char** result, int* result_len)) {
+Tool* tool_create(const char* name, const char* description, const char* parameters_schema, int (*execute)(ToolArgs* args, char** result, int* result_len)) {
     Tool* tool = (Tool*)malloc(sizeof(Tool));
     if (!tool) {
         return NULL;
@@ -133,8 +224,11 @@ void tool_registry_list(ToolRegistry* registry) {
 }
 
 // Calculate tool
-int tool_calculate(const char* args, char** result, int* result_len) {
-    if (!args) {
+int tool_calculate(ToolArgs* args, char** result, int* result_len) {
+    const char* expr_str = tool_args_get(args, "expression");
+    if (!expr_str) expr_str = tool_args_get(args, "arg");
+    
+    if (!expr_str) {
         *result = strdup("Error: No expression provided");
         *result_len = strlen(*result);
         return -1;
@@ -142,7 +236,7 @@ int tool_calculate(const char* args, char** result, int* result_len) {
     
     // Simple expression evaluation (basic arithmetic)
     double calc_result = 0;
-    char* expr = strdup(args);
+    char* expr = strdup(expr_str);
     if (!expr) {
         *result = strdup("Error: Memory allocation failed");
         *result_len = strlen(*result);
@@ -194,7 +288,8 @@ int tool_calculate(const char* args, char** result, int* result_len) {
 }
 
 // Get time tool
-int tool_get_time(const char* args, char** result, int* result_len) {
+int tool_get_time(ToolArgs* args, char** result, int* result_len) {
+    (void)args;  // Unused parameter
     time_t now = time(NULL);
     struct tm* tm_info = localtime(&now);
     
@@ -208,14 +303,17 @@ int tool_get_time(const char* args, char** result, int* result_len) {
 }
 
 // Reverse string tool
-int tool_reverse_string(const char* args, char** result, int* result_len) {
-    if (!args) {
+int tool_reverse_string(ToolArgs* args, char** result, int* result_len) {
+    const char* text = tool_args_get(args, "text");
+    if (!text) text = tool_args_get(args, "arg");
+    
+    if (!text) {
         *result = strdup("Error: No string provided");
         *result_len = strlen(*result);
         return -1;
     }
     
-    int length = strlen(args);
+    int length = strlen(text);
     char* reversed = (char*)malloc(length + 1);
     if (!reversed) {
         *result = strdup("Error: Memory allocation failed");
@@ -224,7 +322,7 @@ int tool_reverse_string(const char* args, char** result, int* result_len) {
     }
     
     for (int i = 0; i < length; i++) {
-        reversed[i] = args[length - 1 - i];
+        reversed[i] = text[length - 1 - i];
     }
     reversed[length] = '\0';
     
@@ -239,15 +337,26 @@ int tool_reverse_string(const char* args, char** result, int* result_len) {
 }
 
 // Read file tool
-int tool_read_file(const char* args, char** result, int* result_len) {
-    if (!args) {
+int tool_read_file(ToolArgs* args, char** result, int* result_len) {
+    const char* path = tool_args_get(args, "path");
+    if (!path) path = tool_args_get(args, "arg");
+    
+    if (!path || strlen(path) == 0) {
         *result = strdup("Error: No file path provided");
         *result_len = strlen(*result);
         return -1;
     }
     
-    FILE* fp = fopen(args, "r");
+    char* resolved_path = resolve_path(path);
+    if (!resolved_path) {
+        *result = strdup("Error: Failed to resolve path");
+        *result_len = strlen(*result);
+        return -1;
+    }
+    
+    FILE* fp = fopen(resolved_path, "r");
     if (!fp) {
+        free(resolved_path);
         *result = strdup("Error: Could not open file");
         *result_len = strlen(*result);
         return -1;
@@ -261,6 +370,7 @@ int tool_read_file(const char* args, char** result, int* result_len) {
     *result = (char*)malloc(length + 1);
     if (!*result) {
         fclose(fp);
+        free(resolved_path);
         *result = strdup("Error: Memory allocation failed");
         *result_len = strlen(*result);
         return -1;
@@ -270,42 +380,32 @@ int tool_read_file(const char* args, char** result, int* result_len) {
     (*result)[length] = '\0';
     *result_len = length;
     fclose(fp);
+    free(resolved_path);
     
     return 0;
 }
 
 // Write file tool
-int tool_write_file(const char* args, char** result, int* result_len) {
-    if (!args) {
-        *result = strdup("Error: No parameters provided");
+int tool_write_file(ToolArgs* args, char** result, int* result_len) {
+    const char* path = tool_args_get(args, "path");
+    const char* content = tool_args_get(args, "content");
+    
+    if (!path || !content) {
+        *result = strdup("Error: Missing path or content parameter");
         *result_len = strlen(*result);
         return -1;
     }
     
-    // Parse JSON parameters
-    cJSON* root = cJSON_Parse(args);
-    if (!root) {
-        *result = strdup("Error: Invalid JSON parameters");
+    char* resolved_path = resolve_path(path);
+    if (!resolved_path) {
+        *result = strdup("Error: Failed to resolve path");
         *result_len = strlen(*result);
         return -1;
     }
     
-    cJSON* path_obj = cJSON_GetObjectItem(root, "path");
-    cJSON* content_obj = cJSON_GetObjectItem(root, "content");
-    
-    if (!path_obj || !cJSON_IsString(path_obj) || !content_obj || !cJSON_IsString(content_obj)) {
-        cJSON_Delete(root);
-        *result = strdup("Error: Missing or invalid path/content parameters");
-        *result_len = strlen(*result);
-        return -1;
-    }
-    
-    const char* path = path_obj->valuestring;
-    const char* content = content_obj->valuestring;
-    
-    FILE* fp = fopen(path, "w");
+    FILE* fp = fopen(resolved_path, "w");
     if (!fp) {
-        cJSON_Delete(root);
+        free(resolved_path);
         *result = strdup("Error: Could not open file for writing");
         *result_len = strlen(*result);
         return -1;
@@ -313,7 +413,7 @@ int tool_write_file(const char* args, char** result, int* result_len) {
     
     fprintf(fp, "%s", content);
     fclose(fp);
-    cJSON_Delete(root);
+    free(resolved_path);
     
     *result = strdup("File written successfully");
     *result_len = strlen(*result);
@@ -321,8 +421,11 @@ int tool_write_file(const char* args, char** result, int* result_len) {
 }
 
 // Search web tool (mock)
-int tool_search_web(const char* args, char** result, int* result_len) {
-    if (!args) {
+int tool_search_web(ToolArgs* args, char** result, int* result_len) {
+    const char* query = tool_args_get(args, "query");
+    if (!query) query = tool_args_get(args, "arg");
+    
+    if (!query) {
         *result = strdup("Error: No search query provided");
         *result_len = strlen(*result);
         return -1;
@@ -330,7 +433,7 @@ int tool_search_web(const char* args, char** result, int* result_len) {
     
     *result = (char*)malloc(200);
     if (*result) {
-        snprintf(*result, 200, "Search results for '%s':\n1. Result 1\n2. Result 2\n3. Result 3", args);
+        snprintf(*result, 200, "Search results for '%s':\n1. Result 1\n2. Result 2\n3. Result 3", query);
         *result_len = strlen(*result);
     }
     
@@ -338,38 +441,18 @@ int tool_search_web(const char* args, char** result, int* result_len) {
 }
 
 // Save memory tool
-int tool_save_memory(const char* args, char** result, int* result_len) {
-    if (!args) {
-        *result = strdup("Error: No parameters provided");
+int tool_save_memory(ToolArgs* args, char** result, int* result_len) {
+    const char* key = tool_args_get(args, "key");
+    const char* value = tool_args_get(args, "value");
+    
+    if (!key || !value) {
+        *result = strdup("Error: Missing key or value parameter");
         *result_len = strlen(*result);
         return -1;
     }
-    
-    // Parse JSON parameters
-    cJSON* root = cJSON_Parse(args);
-    if (!root) {
-        *result = strdup("Error: Invalid JSON parameters");
-        *result_len = strlen(*result);
-        return -1;
-    }
-    
-    cJSON* key_obj = cJSON_GetObjectItem(root, "key");
-    cJSON* value_obj = cJSON_GetObjectItem(root, "value");
-    
-    if (!key_obj || !cJSON_IsString(key_obj) || !value_obj || !cJSON_IsString(value_obj)) {
-        cJSON_Delete(root);
-        *result = strdup("Error: Missing or invalid key/value parameters");
-        *result_len = strlen(*result);
-        return -1;
-    }
-    
-    const char* key = key_obj->valuestring;
-    const char* value = value_obj->valuestring;
     
     // Here we would normally save to memory storage
     // For now, just return success
-    cJSON_Delete(root);
-    
     *result = (char*)malloc(100);
     if (*result) {
         snprintf(*result, 100, "Saved memory: %s = %s", key, value);
@@ -380,8 +463,11 @@ int tool_save_memory(const char* args, char** result, int* result_len) {
 }
 
 // Read memory tool
-int tool_read_memory(const char* args, char** result, int* result_len) {
-    if (!args) {
+int tool_read_memory(ToolArgs* args, char** result, int* result_len) {
+    const char* key = tool_args_get(args, "key");
+    if (!key) key = tool_args_get(args, "arg");
+    
+    if (!key) {
         *result = strdup("Error: No key provided");
         *result_len = strlen(*result);
         return -1;
@@ -391,7 +477,7 @@ int tool_read_memory(const char* args, char** result, int* result_len) {
     // For now, just return a mock value
     *result = (char*)malloc(100);
     if (*result) {
-        snprintf(*result, 100, "Memory value for '%s': [mock value]", args);
+        snprintf(*result, 100, "Memory value for '%s': [mock value]", key);
         *result_len = strlen(*result);
     }
     
@@ -399,22 +485,14 @@ int tool_read_memory(const char* args, char** result, int* result_len) {
 }
 
 // Weather tool
-int tool_get_weather(const char* args, char** result, int* result_len) {
-    if (!args || strlen(args) == 0) {
+int tool_get_weather(ToolArgs* args, char** result, int* result_len) {
+    const char* location = tool_args_get(args, "location");
+    if (!location) location = tool_args_get(args, "arg");
+    
+    if (!location || strlen(location) == 0) {
         *result = strdup("Error: No location provided");
         *result_len = strlen(*result);
         return -1;
-    }
-    
-    // Parse JSON parameters to get location
-    cJSON* root = cJSON_Parse(args);
-    const char* location = args;
-    
-    if (root) {
-        cJSON* location_obj = cJSON_GetObjectItem(root, "location");
-        if (location_obj && cJSON_IsString(location_obj)) {
-            location = location_obj->valuestring;
-        }
     }
     
     *result = (char*)malloc(256);
@@ -440,161 +518,33 @@ int tool_get_weather(const char* args, char** result, int* result_len) {
         *result_len = strlen(*result);
     }
     
-    if (root) {
-        cJSON_Delete(root);
-    }
-    
     return 0;
 }
 
 // List directory tool
-int tool_list_directory(const char* args, char** result, int* result_len) {
-    if (!args || strlen(args) == 0) {
-        *result = strdup("Error: No path provided");
+int tool_list_directory(ToolArgs* args, char** result, int* result_len) {
+    const char* path = tool_args_get(args, "path");
+    if (!path) path = tool_args_get(args, "arg");
+    
+    if (!path || strlen(path) == 0) {
+        path = ".";
+    }
+    
+    char* resolved_path = resolve_path(path);
+    if (!resolved_path) {
+        *result = strdup("Error: Failed to resolve path");
         *result_len = strlen(*result);
         return -1;
     }
     
-    // Debug: print raw args
-    fprintf(stderr, "[DEBUG] list_directory args: %s\n", args);
-    
-    // Parse JSON parameters to get path
-    cJSON* root = cJSON_Parse(args);
-    char clean_path[512];
-    clean_path[0] = '\0';  // Initialize to empty string
-    
-    if (root) {
-        // Successfully parsed as JSON
-        // Support both "path" (formal) and "arg" (S-expression positional) fields
-        cJSON* path_obj = cJSON_GetObjectItem(root, "path");
-        if (!path_obj) {
-            path_obj = cJSON_GetObjectItem(root, "arg");  // Fallback for S-expression
-        }
-        if (path_obj && cJSON_IsString(path_obj)) {
-            strncpy(clean_path, path_obj->valuestring, sizeof(clean_path) - 1);
-            clean_path[sizeof(clean_path) - 1] = '\0';
-            fprintf(stderr, "[DEBUG] Extracted path from JSON: %s\n", clean_path);
-        } else {
-            // JSON parsed but no path field
-            snprintf(clean_path, sizeof(clean_path), "Error: No 'path' field in JSON: %s", args);
-            *result = strdup(clean_path);
-            *result_len = strlen(*result);
-            cJSON_Delete(root);
-            return -1;
-        }
-        cJSON_Delete(root);
-        root = NULL;  // Mark as deleted to avoid double free
-    } else {
-        // Not valid JSON, treat as plain path
-        // Check if it looks like a JSON object string {"key": "value"}
-        if (args[0] == '{' && args[strlen(args)-1] == '}') {
-            // Try to manually extract path from {"path": "..."}
-            const char* path_key = "\"path\"";
-            const char* path_start = strstr(args, path_key);
-            if (path_start) {
-                // Find the colon
-                const char* colon = strchr(path_start, ':');
-                if (colon) {
-                    // Find the opening quote
-                    const char* quote = strchr(colon, '"');
-                    if (quote) {
-                        // Find the closing quote
-                        const char* end_quote = strchr(quote + 1, '"');
-                        if (end_quote) {
-                            size_t path_len = end_quote - quote - 1;
-                            if (path_len < sizeof(clean_path)) {
-                                strncpy(clean_path, quote + 1, path_len);
-                                clean_path[path_len] = '\0';
-                                fprintf(stderr, "[DEBUG] Manually extracted path: %s\n", clean_path);
-                            } else {
-                                strncpy(clean_path, quote + 1, sizeof(clean_path) - 1);
-                                clean_path[sizeof(clean_path) - 1] = '\0';
-                            }
-                        } else {
-                            strncpy(clean_path, args, sizeof(clean_path) - 1);
-                            clean_path[sizeof(clean_path) - 1] = '\0';
-                        }
-                    } else {
-                        strncpy(clean_path, args, sizeof(clean_path) - 1);
-                        clean_path[sizeof(clean_path) - 1] = '\0';
-                    }
-                } else {
-                    strncpy(clean_path, args, sizeof(clean_path) - 1);
-                    clean_path[sizeof(clean_path) - 1] = '\0';
-                }
-            } else {
-                strncpy(clean_path, args, sizeof(clean_path) - 1);
-                clean_path[sizeof(clean_path) - 1] = '\0';
-            }
-        } else {
-            strncpy(clean_path, args, sizeof(clean_path) - 1);
-            clean_path[sizeof(clean_path) - 1] = '\0';
-        }
-        fprintf(stderr, "[DEBUG] JSON parse failed, using args as plain path: %s\n", clean_path);
-        fprintf(stderr, "[DEBUG] cJSON error: %s\n", cJSON_GetErrorPtr() ? cJSON_GetErrorPtr() : "unknown");
-    }
-    
-    // If path is "." or empty, use current directory
-    if (strcmp(clean_path, "") == 0 || strcmp(clean_path, "\"") == 0) {
-        strcpy(clean_path, ".");
-    }
-    
-    // Remove quotes if present
-    size_t len = strlen(clean_path);
-    if (len > 1 && clean_path[0] == '"' && clean_path[len-1] == '"') {
-        clean_path[len-1] = '\0';
-        memmove(clean_path, clean_path + 1, len - 1);
-    }
-    
-    // Trim whitespace
-    char* start = clean_path;
-    while (*start == ' ' || *start == '\t') start++;
-    char* end = clean_path + strlen(clean_path) - 1;
-    while (end > start && (*end == ' ' || *end == '\t')) *end-- = '\0';
-    if (start != clean_path) {
-        memmove(clean_path, start, strlen(start) + 1);
-    }
-    
-    // Expand tilde (~) to home directory
-    char expanded_path[1024];
-    if (clean_path[0] == '~') {
-        const char* home = getenv("HOME");
-        if (!home) {
-            struct passwd* pw = getpwuid(getuid());
-            if (pw) {
-                home = pw->pw_dir;
-            }
-        }
-        
-        if (home) {
-            // Build expanded path: home + rest of path
-            if (clean_path[1] == '/' || clean_path[1] == '\0') {
-                // ~/path or just ~
-                snprintf(expanded_path, sizeof(expanded_path), "%s%s", home, clean_path + 1);
-            } else {
-                // ~username/path (not implemented, just use as-is)
-                strncpy(expanded_path, clean_path, sizeof(expanded_path) - 1);
-                expanded_path[sizeof(expanded_path) - 1] = '\0';
-            }
-            fprintf(stderr, "[DEBUG] Expanded ~ to home: %s -> %s\n", clean_path, expanded_path);
-            strncpy(clean_path, expanded_path, sizeof(clean_path) - 1);
-            clean_path[sizeof(clean_path) - 1] = '\0';
-        } else {
-            *result = strdup("Error: Cannot determine home directory");
-            *result_len = strlen(*result);
-            return -1;
-        }
-    }
-    
-    fprintf(stderr, "[DEBUG] Final path: %s\n", clean_path);
-    
-    DIR* dir = opendir(clean_path);
+    DIR* dir = opendir(resolved_path);
     if (!dir) {
         *result = (char*)malloc(256);
         if (*result) {
-            snprintf(*result, 256, "Error: Cannot open directory '%s': %s", clean_path, strerror(errno));
+            snprintf(*result, 256, "Error: Cannot open directory '%s': %s", resolved_path, strerror(errno));
             *result_len = strlen(*result);
         }
+        free(resolved_path);
         return -1;
     }
     
@@ -603,10 +553,11 @@ int tool_list_directory(const char* args, char** result, int* result_len) {
     *result = (char*)malloc(buffer_size);
     if (!*result) {
         closedir(dir);
+        free(resolved_path);
         return -1;
     }
     
-    snprintf(*result, buffer_size, "Directory listing of '%s':\n", clean_path);
+    snprintf(*result, buffer_size, "Directory listing of '%s':\n", resolved_path);
     
     struct dirent* entry;
     int count = 0;
@@ -625,14 +576,15 @@ int tool_list_directory(const char* args, char** result, int* result_len) {
             if (!new_result) {
                 free(*result);
                 closedir(dir);
+                free(resolved_path);
                 return -1;
             }
             *result = new_result;
         }
         
         // Append entry type indicator using stat
-        char full_path[512];
-        snprintf(full_path, sizeof(full_path), "%s/%s", clean_path, entry->d_name);
+        char full_path[1024];
+        snprintf(full_path, sizeof(full_path), "%s/%s", resolved_path, entry->d_name);
         
         struct stat st;
         if (stat(full_path, &st) == 0) {
@@ -650,6 +602,7 @@ int tool_list_directory(const char* args, char** result, int* result_len) {
     }
     
     closedir(dir);
+    free(resolved_path);
     
     if (count >= 50) {
         strcat(*result, "... (more items)\n");

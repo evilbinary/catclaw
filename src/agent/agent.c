@@ -71,7 +71,7 @@ void agent_set_debug_mode(bool enabled) {
 
 
 // Tool registration
-bool agent_register_tool(const char *name, const char *description, const char *parameters_schema, int (*execute)(const char *args, char** result, int* result_len)) {
+bool agent_register_tool(const char *name, const char *description, const char *parameters_schema, int (*execute)(ToolArgs* args, char** result, int* result_len)) {
     debug_log("Registering tool: %s", name);
     
     // Create tool
@@ -85,8 +85,8 @@ bool agent_register_tool(const char *name, const char *description, const char *
 }
 
 // Execute a tool
-int agent_execute_tool(const char *name, const char *args, char** result, int* result_len) {
-    debug_log("Executing tool: %s with args: %s", name, args);
+int agent_execute_tool(const char *name, ToolArgs* args, char** result, int* result_len) {
+    debug_log("Executing tool: %s", name);
     
     // Get tool
     Tool* tool = tool_registry_get(g_agent.tool_registry, name);
@@ -207,24 +207,28 @@ char *agent_parse_command(const char *command) {
             expr++;
             char *tool_result;
             int result_len;
-            if (agent_execute_tool("calculator", expr, &tool_result, &result_len) == 0) {
+            ToolArgs* args = tool_args_from_string(expr);
+            if (agent_execute_tool("calculator", args, &tool_result, &result_len) == 0) {
                 snprintf(result, 2048, "Calculator result: %s", tool_result);
                 free(tool_result);
             } else {
                 snprintf(result, 2048, "Error executing calculator tool");
             }
+            tool_args_free(args);
         } else {
             snprintf(result, 2048, "Error: No expression provided for calculator");
         }
     } else if (strstr(command, "time") != NULL || strstr(command, "clock") != NULL || strstr(command, "now") != NULL) {
         char *tool_result;
         int result_len;
-        if (agent_execute_tool("time", "", &tool_result, &result_len) == 0) {
+        ToolArgs* args = tool_args_from_string("");
+        if (agent_execute_tool("time", args, &tool_result, &result_len) == 0) {
             snprintf(result, 2048, "%s", tool_result);
             free(tool_result);
         } else {
             snprintf(result, 2048, "Error executing time tool");
         }
+        tool_args_free(args);
     } else if (strstr(command, "reverse") != NULL && strstr(command, "string") != NULL) {
         // Extract string to reverse
         char *str = strstr(command, "string");
@@ -232,12 +236,14 @@ char *agent_parse_command(const char *command) {
             str += 7; // Skip "string "
             char *tool_result;
             int result_len;
-            if (agent_execute_tool("reverse_string", str, &tool_result, &result_len) == 0) {
+            ToolArgs* args = tool_args_from_string(str);
+            if (agent_execute_tool("reverse_string", args, &tool_result, &result_len) == 0) {
                 snprintf(result, 2048, "Reversed string: %s", tool_result);
                 free(tool_result);
             } else {
                 snprintf(result, 2048, "Error executing reverse_string tool");
             }
+            tool_args_free(args);
         } else {
             snprintf(result, 2048, "Error: No string provided for reversal");
         }
@@ -247,12 +253,14 @@ char *agent_parse_command(const char *command) {
             str += 10; // Skip "read file "
             char *tool_result;
             int result_len;
-            if (agent_execute_tool("read_file", str, &tool_result, &result_len) == 0) {
+            ToolArgs* args = tool_args_from_string(str);
+            if (agent_execute_tool("read_file", args, &tool_result, &result_len) == 0) {
                 snprintf(result, 2048, "File content:\n%s", tool_result);
                 free(tool_result);
             } else {
                 snprintf(result, 2048, "Error executing read_file tool");
             }
+            tool_args_free(args);
         } else {
             snprintf(result, 2048, "Error: No filename provided");
         }
@@ -262,12 +270,14 @@ char *agent_parse_command(const char *command) {
             str += 11; // Skip "write file "
             char *tool_result;
             int result_len;
-            if (agent_execute_tool("write_file", str, &tool_result, &result_len) == 0) {
+            ToolArgs* args = tool_args_from_string(str);
+            if (agent_execute_tool("write_file", args, &tool_result, &result_len) == 0) {
                 snprintf(result, 2048, "%s", tool_result);
                 free(tool_result);
             } else {
                 snprintf(result, 2048, "Error executing write_file tool");
             }
+            tool_args_free(args);
         } else {
             snprintf(result, 2048, "Error: Invalid format. Use 'write file filename content'");
         }
@@ -281,24 +291,28 @@ char *agent_parse_command(const char *command) {
         }
         char *tool_result;
         int result_len;
-        if (agent_execute_tool("web_search", str, &tool_result, &result_len) == 0) {
+        ToolArgs* args = tool_args_from_string(str);
+        if (agent_execute_tool("web_search", args, &tool_result, &result_len) == 0) {
             snprintf(result, 2048, "%s", tool_result);
             free(tool_result);
         } else {
             snprintf(result, 2048, "Error executing web_search tool");
         }
+        tool_args_free(args);
     } else if (strstr(command, "memory save") != NULL) {
         char *str = strstr(command, "memory save");
         if (str) {
             str += 12; // Skip "memory save "
             char *tool_result;
             int result_len;
-            if (agent_execute_tool("memory_save", str, &tool_result, &result_len) == 0) {
+            ToolArgs* args = tool_args_from_string(str);
+            if (agent_execute_tool("memory_save", args, &tool_result, &result_len) == 0) {
                 snprintf(result, 2048, "%s", tool_result);
                 free(tool_result);
             } else {
                 snprintf(result, 2048, "Error executing memory_save tool");
             }
+            tool_args_free(args);
         } else {
             snprintf(result, 2048, "Error: Invalid format. Use 'memory save key value'");
         }
@@ -308,12 +322,14 @@ char *agent_parse_command(const char *command) {
             str += 12; // Skip "memory load "
             char *tool_result;
             int result_len;
-            if (agent_execute_tool("memory_load", str, &tool_result, &result_len) == 0) {
+            ToolArgs* args = tool_args_from_string(str);
+            if (agent_execute_tool("memory_load", args, &tool_result, &result_len) == 0) {
                 snprintf(result, 2048, "%s", tool_result);
                 free(tool_result);
             } else {
                 snprintf(result, 2048, "Error executing memory_load tool");
             }
+            tool_args_free(args);
         } else {
             snprintf(result, 2048, "Error: No key provided");
         }
@@ -724,7 +740,8 @@ bool agent_execute_steps(void) {
         // Execute the tool
         char *tool_result;
         int result_len;
-        if (agent_execute_tool(step->tool_name, step->params, &tool_result, &result_len) == 0) {
+        ToolArgs* args = tool_args_from_string(step->params);
+        if (agent_execute_tool(step->tool_name, args, &tool_result, &result_len) == 0) {
             step->result = strdup(tool_result);
             step->completed = true;
             printf("Step %d result: %s\n", g_agent.current_step + 1, tool_result);
@@ -734,6 +751,7 @@ bool agent_execute_steps(void) {
             step->completed = true;
             printf("Step %d result: Error executing tool\n", g_agent.current_step + 1);
         }
+        tool_args_free(args);
         
         g_agent.current_step++;
     }
@@ -773,7 +791,8 @@ bool agent_resume_execution(void) {
         // Execute the tool
         char *tool_result;
         int result_len;
-        if (agent_execute_tool(step->tool_name, step->params, &tool_result, &result_len) == 0) {
+        ToolArgs* args = tool_args_from_string(step->params);
+        if (agent_execute_tool(step->tool_name, args, &tool_result, &result_len) == 0) {
             step->result = strdup(tool_result);
             step->completed = true;
             printf("Step %d result: %s\n", g_agent.current_step + 1, tool_result);
@@ -783,6 +802,7 @@ bool agent_resume_execution(void) {
             step->completed = true;
             printf("Step %d result: Error executing tool\n", g_agent.current_step + 1);
         }
+        tool_args_free(args);
         
         g_agent.current_step++;
     }
