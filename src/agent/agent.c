@@ -459,8 +459,9 @@ bool agent_init(void) {
     }
     
     // Use new config structure with fallback to legacy fields
-    const char* ai_model_name = g_config.model.name ? g_config.model.name : 
-                               (g_config.model_name ? g_config.model_name : "llama3.2");
+    const char* ai_model_name = g_config.model.model_name ? g_config.model.model_name :
+                               (g_config.model.name ? g_config.model.name :
+                               (g_config.model_name ? g_config.model_name : "llama3.2"));
     const char* base_url = g_config.model.base_url ? g_config.model.base_url : 
                           (g_config.api_base_url ? g_config.api_base_url : "http://localhost:11434/api/generate");
     const char* api_key = g_config.model.api_key ? g_config.model.api_key : 
