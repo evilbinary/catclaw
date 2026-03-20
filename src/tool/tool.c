@@ -5,6 +5,8 @@
 #include <dirent.h>
 #include <errno.h>
 #include <sys/stat.h>
+#include <unistd.h>
+#include <pwd.h>
 
 #include "tool.h"
  #include "common/cJSON.h"
@@ -459,6 +461,7 @@ int tool_list_directory(const char* args, char** result, int* result_len) {
     // Parse JSON parameters to get path
     cJSON* root = cJSON_Parse(args);
     char clean_path[512];
+    clean_path[0] = '\0';  // Initialize to empty string
     
     if (root) {
         // Successfully parsed as JSON
@@ -476,6 +479,7 @@ int tool_list_directory(const char* args, char** result, int* result_len) {
             return -1;
         }
         cJSON_Delete(root);
+        root = NULL;  // Mark as deleted to avoid double free
     } else {
         // Not valid JSON, treat as plain path
         // Check if it looks like a JSON object string {"key": "value"}
@@ -547,6 +551,37 @@ int tool_list_directory(const char* args, char** result, int* result_len) {
         memmove(clean_path, start, strlen(start) + 1);
     }
     
+    // Expand tilde (~) to home directory
+    char expanded_path[1024];
+    if (clean_path[0] == '~') {
+        const char* home = getenv("HOME");
+        if (!home) {
+            struct passwd* pw = getpwuid(getuid());
+            if (pw) {
+                home = pw->pw_dir;
+            }
+        }
+        
+        if (home) {
+            // Build expanded path: home + rest of path
+            if (clean_path[1] == '/' || clean_path[1] == '\0') {
+                // ~/path or just ~
+                snprintf(expanded_path, sizeof(expanded_path), "%s%s", home, clean_path + 1);
+            } else {
+                // ~username/path (not implemented, just use as-is)
+                strncpy(expanded_path, clean_path, sizeof(expanded_path) - 1);
+                expanded_path[sizeof(expanded_path) - 1] = '\0';
+            }
+            fprintf(stderr, "[DEBUG] Expanded ~ to home: %s -> %s\n", clean_path, expanded_path);
+            strncpy(clean_path, expanded_path, sizeof(clean_path) - 1);
+            clean_path[sizeof(clean_path) - 1] = '\0';
+        } else {
+            *result = strdup("Error: Cannot determine home directory");
+            *result_len = strlen(*result);
+            return -1;
+        }
+    }
+    
     fprintf(stderr, "[DEBUG] Final path: %s\n", clean_path);
     
     DIR* dir = opendir(clean_path);
@@ -556,7 +591,6 @@ int tool_list_directory(const char* args, char** result, int* result_len) {
             snprintf(*result, 256, "Error: Cannot open directory '%s': %s", clean_path, strerror(errno));
             *result_len = strlen(*result);
         }
-        if (root) cJSON_Delete(root);
         return -1;
     }
     
@@ -565,7 +599,6 @@ int tool_list_directory(const char* args, char** result, int* result_len) {
     *result = (char*)malloc(buffer_size);
     if (!*result) {
         closedir(dir);
-        if (root) cJSON_Delete(root);
         return -1;
     }
     
@@ -588,7 +621,6 @@ int tool_list_directory(const char* args, char** result, int* result_len) {
             if (!new_result) {
                 free(*result);
                 closedir(dir);
-                if (root) cJSON_Delete(root);
                 return -1;
             }
             *result = new_result;
@@ -620,10 +652,6 @@ int tool_list_directory(const char* args, char** result, int* result_len) {
     }
     
     *result_len = strlen(*result);
-    
-    if (root) {
-        cJSON_Delete(root);
-    }
     
     return 0;
 }
