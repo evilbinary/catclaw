@@ -5,8 +5,9 @@
 
 // Model configuration
 typedef struct {
+    char *name;               // 模型配置名称（用于切换）
     char *provider;           // 模型提供商 (llama/openai/anthropic/gemini)
-    char *name;               // 模型名称
+    char *model_name;         // 模型名称
     char *base_url;           // API 基础 URL
     char *api_key;            // API 密钥
     int max_context_tokens;   // 最大上下文 token 数
@@ -14,6 +15,14 @@ typedef struct {
     float temperature;        // 温度参数
     int max_tokens;           // 最大生成 token 数
 } ModelConfig;
+
+// Models array configuration
+typedef struct {
+    ModelConfig *models;      // 模型配置数组
+    int count;                // 模型数量
+    int capacity;             // 数组容量
+    int current_index;        // 当前使用的模型索引
+} ModelsConfig;
 
 // Gateway configuration
 typedef struct {
@@ -55,7 +64,8 @@ typedef struct {
 
 // Main configuration structure
 typedef struct {
-    ModelConfig model;
+    ModelsConfig models;      // 多模型配置
+    ModelConfig model;        // 当前选中的模型（兼容旧代码）
     GatewayConfig gateway;
     WorkspaceConfig workspace;
     SessionConfig session;
@@ -88,5 +98,11 @@ void config_print(void);
 bool config_set(const char *key, const char *value);
 const char *config_get(const char *key);
 char *get_home_dir(void);
+
+// Model management functions
+bool config_switch_model(const char *model_name);
+bool config_switch_model_by_index(int index);
+void config_list_models(void);
+const char* config_get_current_model_name(void);
 
 #endif // CONFIG_H

@@ -126,44 +126,91 @@ char *agent_parse_command(const char *command) {
         return result;
     } else if (strstr(command, "model") == command) {
         // Handle model switching command
-        char *model_name = command + 7; // Skip "/model "
-        if (*model_name) {
-            // Create temporary model config
-            AIModelConfig model_config;
-            if (strstr(model_name, "anthropic") != NULL) {
-                model_config.type = AI_MODEL_ANTHROPIC;
-                model_config.model_name = strstr(model_name, "/") ? strstr(model_name, "/") + 1 : model_name;
-            } else if (strstr(model_name, "openai") != NULL) {
-                model_config.type = AI_MODEL_OPENAI;
-                model_config.model_name = strstr(model_name, "/") ? strstr(model_name, "/") + 1 : model_name;
-            } else if (strstr(model_name, "llama") != NULL || strstr(model_name, "gemini") != NULL) {
-                if (strstr(model_name, "llama") != NULL) {
-                    model_config.type = AI_MODEL_LLAMA;
-                    model_config.model_name = strstr(model_name, "/") ? strstr(model_name, "/") + 1 : model_name;
-                } else {
-                    model_config.type = AI_MODEL_GEMINI;
-                    model_config.model_name = strstr(model_name, "/") ? strstr(model_name, "/") + 1 : model_name;
-                }
-            } else {
-                model_config.type = AI_MODEL_ANTHROPIC;
-                model_config.model_name = "claude-3-opus-20240229";
-            }
-            model_config.api_key = getenv("ANTHROPIC_API_KEY") ? getenv("ANTHROPIC_API_KEY") : getenv("OPENAI_API_KEY");
-            model_config.base_url = g_config.api_base_url;
-            
-            // Update AI model config
-            if (ai_model_set_config(&model_config)) {
-                // Update agent's model name for display
-                if (g_agent.model) {
-                    free(g_agent.model);
-                }
-                g_agent.model = strdup(model_name);
-                snprintf(result, 2048, "Model switched to: %s", model_name);
-            } else {
-                snprintf(result, 2048, "Error: Failed to switch model");
-            }
+        char *args = command + 5; // Skip "model"
+        while (*args == ' ') args++; // Skip spaces
+        
+        if (strlen(args) == 0) {
+            // List all available models
+            config_list_models();
+            snprintf(result, 2048, "Current model: %s", 
+                     config_get_current_model_name() ? config_get_current_model_name() : "(none)");
+        } else if (strcmp(args, "list") == 0) {
+            config_list_models();
+            snprintf(result, 2048, "Listed all models");
         } else {
-            snprintf(result, 2048, "Usage: /model <model_name>");
+            // Try to switch by name first
+            if (config_switch_model(args)) {
+                // Update AI model config
+                AIModelConfig model_config;
+                if (strcmp(g_config.model.provider, "openai") == 0) {
+                    model_config.type = AI_MODEL_OPENAI;
+                } else if (strcmp(g_config.model.provider, "anthropic") == 0) {
+                    model_config.type = AI_MODEL_ANTHROPIC;
+                } else if (strcmp(g_config.model.provider, "llama") == 0) {
+                    model_config.type = AI_MODEL_LLAMA;
+                } else if (strcmp(g_config.model.provider, "gemini") == 0) {
+                    model_config.type = AI_MODEL_GEMINI;
+                } else {
+                    model_config.type = AI_MODEL_OPENAI; // default
+                }
+                model_config.model_name = g_config.model.model_name;
+                model_config.api_key = g_config.model.api_key;
+                model_config.base_url = g_config.model.base_url;
+                
+                if (ai_model_set_config(&model_config)) {
+                    // Update agent's model name for display
+                    if (g_agent.model) {
+                        free(g_agent.model);
+                    }
+                    g_agent.model = strdup(g_config.model.name);
+                    snprintf(result, 2048, "Model switched to: %s (%s/%s)", 
+                             g_config.model.name, 
+                             g_config.model.provider ? g_config.model.provider : "default",
+                             g_config.model.model_name ? g_config.model.model_name : "default");
+                } else {
+                    snprintf(result, 2048, "Error: Failed to update AI model config");
+                }
+            } else {
+                // Try to parse as index
+                int index = atoi(args);
+                if (index > 0 || (index == 0 && args[0] == '0')) {
+                    if (config_switch_model_by_index(index)) {
+                        // Update AI model config
+                        AIModelConfig model_config;
+                        if (strcmp(g_config.model.provider, "openai") == 0) {
+                            model_config.type = AI_MODEL_OPENAI;
+                        } else if (strcmp(g_config.model.provider, "anthropic") == 0) {
+                            model_config.type = AI_MODEL_ANTHROPIC;
+                        } else if (strcmp(g_config.model.provider, "llama") == 0) {
+                            model_config.type = AI_MODEL_LLAMA;
+                        } else if (strcmp(g_config.model.provider, "gemini") == 0) {
+                            model_config.type = AI_MODEL_GEMINI;
+                        } else {
+                            model_config.type = AI_MODEL_OPENAI;
+                        }
+                        model_config.model_name = g_config.model.model_name;
+                        model_config.api_key = g_config.model.api_key;
+                        model_config.base_url = g_config.model.base_url;
+                        
+                        if (ai_model_set_config(&model_config)) {
+                            if (g_agent.model) {
+                                free(g_agent.model);
+                            }
+                            g_agent.model = strdup(g_config.model.name);
+                            snprintf(result, 2048, "Model switched to: %s (%s/%s)", 
+                                     g_config.model.name,
+                                     g_config.model.provider ? g_config.model.provider : "default",
+                                     g_config.model.model_name ? g_config.model.model_name : "default");
+                        } else {
+                            snprintf(result, 2048, "Error: Failed to update AI model config");
+                        }
+                    } else {
+                        snprintf(result, 2048, "Error: Model '%s' not found", args);
+                    }
+                } else {
+                    snprintf(result, 2048, "Error: Model '%s' not found. Use '/model' to list available models.", args);
+                }
+            }
         }
         return result;
     }

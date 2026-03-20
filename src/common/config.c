@@ -12,10 +12,18 @@
 
 // Global config instance
 Config g_config = {
-    // Model config defaults
+    // Models config defaults
+    .models = {
+        .models = NULL,
+        .count = 0,
+        .capacity = 0,
+        .current_index = 0
+    },
+    // Model config defaults (current selected model)
     .model = {
-        .provider = NULL,
         .name = NULL,
+        .provider = NULL,
+        .model_name = NULL,
         .base_url = NULL,
         .api_key = NULL,
         .max_context_tokens = 4096,
@@ -104,52 +112,138 @@ static char *read_file(const char *path) {
 }
 
 // Parse model configuration
-static void parse_model_config(cJSON *model) {
-    if (!model) return;
+// Parse a single model config and add to models array
+static void parse_single_model(cJSON *model_json, int index) {
+    if (!model_json) return;
     
-    cJSON *provider = cJSON_GetObjectItem(model, "provider");
-    if (provider && cJSON_IsString(provider)) {
-        free(g_config.model.provider);
-        g_config.model.provider = strdup(provider->valuestring);
+    // Ensure capacity
+    if (g_config.models.count >= g_config.models.capacity) {
+        int new_capacity = g_config.models.capacity == 0 ? 4 : g_config.models.capacity * 2;
+        ModelConfig *new_models = realloc(g_config.models.models, new_capacity * sizeof(ModelConfig));
+        if (!new_models) return;
+        g_config.models.models = new_models;
+        g_config.models.capacity = new_capacity;
     }
     
-    cJSON *name = cJSON_GetObjectItem(model, "name");
+    ModelConfig *model = &g_config.models.models[g_config.models.count];
+    memset(model, 0, sizeof(ModelConfig));
+    
+    // Set defaults
+    model->max_context_tokens = 4096;
+    model->timeout_seconds = 30;
+    model->temperature = 0.7f;
+    model->max_tokens = 1024;
+    
+    cJSON *name = cJSON_GetObjectItem(model_json, "name");
     if (name && cJSON_IsString(name)) {
-        free(g_config.model.name);
-        g_config.model.name = strdup(name->valuestring);
+        model->name = strdup(name->valuestring);
+    } else {
+        // Generate default name
+        char default_name[32];
+        snprintf(default_name, sizeof(default_name), "model_%d", index + 1);
+        model->name = strdup(default_name);
     }
     
-    cJSON *base_url = cJSON_GetObjectItem(model, "base_url");
+    cJSON *provider = cJSON_GetObjectItem(model_json, "provider");
+    if (provider && cJSON_IsString(provider)) {
+        model->provider = strdup(provider->valuestring);
+    }
+    
+    cJSON *model_name = cJSON_GetObjectItem(model_json, "model_name");
+    if (!model_name) {
+        model_name = cJSON_GetObjectItem(model_json, "name");  // fallback to name field
+    }
+    if (model_name && cJSON_IsString(model_name)) {
+        model->model_name = strdup(model_name->valuestring);
+    }
+    
+    cJSON *base_url = cJSON_GetObjectItem(model_json, "base_url");
     if (base_url && cJSON_IsString(base_url)) {
-        free(g_config.model.base_url);
-        g_config.model.base_url = strdup(base_url->valuestring);
+        model->base_url = strdup(base_url->valuestring);
     }
     
-    cJSON *api_key = cJSON_GetObjectItem(model, "api_key");
+    cJSON *api_key = cJSON_GetObjectItem(model_json, "api_key");
     if (api_key && cJSON_IsString(api_key)) {
-        free(g_config.model.api_key);
-        g_config.model.api_key = strdup(api_key->valuestring);
+        model->api_key = strdup(api_key->valuestring);
     }
     
-    cJSON *max_tokens = cJSON_GetObjectItem(model, "max_context_tokens");
-    if (max_tokens && cJSON_IsNumber(max_tokens)) {
-        g_config.model.max_context_tokens = (int)max_tokens->valuedouble;
+    cJSON *max_context_tokens = cJSON_GetObjectItem(model_json, "max_context_tokens");
+    if (max_context_tokens && cJSON_IsNumber(max_context_tokens)) {
+        model->max_context_tokens = (int)max_context_tokens->valuedouble;
     }
     
-    cJSON *timeout = cJSON_GetObjectItem(model, "timeout_seconds");
+    cJSON *timeout = cJSON_GetObjectItem(model_json, "timeout_seconds");
     if (timeout && cJSON_IsNumber(timeout)) {
-        g_config.model.timeout_seconds = (int)timeout->valuedouble;
+        model->timeout_seconds = (int)timeout->valuedouble;
     }
     
-    cJSON *temperature = cJSON_GetObjectItem(model, "temperature");
+    cJSON *temperature = cJSON_GetObjectItem(model_json, "temperature");
     if (temperature && cJSON_IsNumber(temperature)) {
-        g_config.model.temperature = (float)temperature->valuedouble;
+        model->temperature = (float)temperature->valuedouble;
     }
     
-    cJSON *max_gen_tokens = cJSON_GetObjectItem(model, "max_tokens");
-    if (max_gen_tokens && cJSON_IsNumber(max_gen_tokens)) {
-        g_config.model.max_tokens = (int)max_gen_tokens->valuedouble;
+    cJSON *max_tokens = cJSON_GetObjectItem(model_json, "max_tokens");
+    if (max_tokens && cJSON_IsNumber(max_tokens)) {
+        model->max_tokens = (int)max_tokens->valuedouble;
     }
+    
+    g_config.models.count++;
+}
+
+// Parse models array or single model config
+static void parse_models_config(cJSON *models) {
+    if (!models) return;
+    
+    if (cJSON_IsArray(models)) {
+        // Parse array of models
+        int size = cJSON_GetArraySize(models);
+        for (int i = 0; i < size; i++) {
+            cJSON *model = cJSON_GetArrayItem(models, i);
+            if (model) {
+                parse_single_model(model, i);
+            }
+        }
+    } else if (cJSON_IsObject(models)) {
+        // Single model (backward compatibility)
+        parse_single_model(models, 0);
+    }
+}
+
+// Copy model config to g_config.model (for backward compatibility)
+static void sync_current_model(void) {
+    if (g_config.models.count == 0) return;
+    
+    // Ensure current_index is valid
+    if (g_config.models.current_index >= g_config.models.count) {
+        g_config.models.current_index = 0;
+    }
+    
+    ModelConfig *src = &g_config.models.models[g_config.models.current_index];
+    ModelConfig *dst = &g_config.model;
+    
+    // Free old values
+    free(dst->name);
+    free(dst->provider);
+    free(dst->model_name);
+    free(dst->base_url);
+    free(dst->api_key);
+    
+    // Copy new values
+    dst->name = src->name ? strdup(src->name) : NULL;
+    dst->provider = src->provider ? strdup(src->provider) : NULL;
+    dst->model_name = src->model_name ? strdup(src->model_name) : NULL;
+    dst->base_url = src->base_url ? strdup(src->base_url) : NULL;
+    dst->api_key = src->api_key ? strdup(src->api_key) : NULL;
+    dst->max_context_tokens = src->max_context_tokens;
+    dst->timeout_seconds = src->timeout_seconds;
+    dst->temperature = src->temperature;
+    dst->max_tokens = src->max_tokens;
+}
+
+// Legacy function for backward compatibility
+static void parse_model_config(cJSON *model) {
+    parse_single_model(model, 0);
+    sync_current_model();
 }
 
 // Parse gateway configuration
@@ -402,8 +496,15 @@ bool config_load(void) {
         cJSON *root = cJSON_Parse(config_content);
         if (root) {
             // Parse new grouped configuration
-            cJSON *model = cJSON_GetObjectItem(root, "model");
-            if (model) parse_model_config(model);
+            // First try to parse "models" array, then fall back to "model" single config
+            cJSON *models = cJSON_GetObjectItem(root, "models");
+            if (models) {
+                parse_models_config(models);
+                sync_current_model();
+            } else {
+                cJSON *model = cJSON_GetObjectItem(root, "model");
+                if (model) parse_model_config(model);
+            }
             
             cJSON *gateway = cJSON_GetObjectItem(root, "gateway");
             if (gateway) parse_gateway_config(gateway);
@@ -495,10 +596,72 @@ bool config_load(void) {
     return true;
 }
 
+// Switch to a model by name
+bool config_switch_model(const char *model_name) {
+    if (!model_name || !g_config.models.models) return false;
+    
+    for (int i = 0; i < g_config.models.count; i++) {
+        if (g_config.models.models[i].name && 
+            strcmp(g_config.models.models[i].name, model_name) == 0) {
+            g_config.models.current_index = i;
+            sync_current_model();
+            printf("Switched to model: %s\n", model_name);
+            return true;
+        }
+    }
+    printf("Model not found: %s\n", model_name);
+    return false;
+}
+
+// Switch to a model by index
+bool config_switch_model_by_index(int index) {
+    if (index < 0 || index >= g_config.models.count) {
+        printf("Invalid model index: %d (valid range: 0-%d)\n", index, g_config.models.count - 1);
+        return false;
+    }
+    g_config.models.current_index = index;
+    sync_current_model();
+    printf("Switched to model %d: %s\n", index, g_config.models.models[index].name);
+    return true;
+}
+
+// List all available models
+void config_list_models(void) {
+    printf("Available models (%d total):\n", g_config.models.count);
+    for (int i = 0; i < g_config.models.count; i++) {
+        ModelConfig *model = &g_config.models.models[i];
+        const char *indicator = (i == g_config.models.current_index) ? " *" : "";
+        printf("  %d. %s%s\n", i, model->name ? model->name : "(unnamed)", indicator);
+        printf("     Provider: %s, Model: %s\n", 
+               model->provider ? model->provider : "(default)",
+               model->model_name ? model->model_name : "(default)");
+    }
+}
+
+// Get current model name
+const char* config_get_current_model_name(void) {
+    if (g_config.models.count == 0) return NULL;
+    if (g_config.models.current_index >= g_config.models.count) return NULL;
+    return g_config.models.models[g_config.models.current_index].name;
+}
+
 void config_cleanup(void) {
-    // Cleanup model config
-    free(g_config.model.provider);
+    // Cleanup all models in the array
+    if (g_config.models.models) {
+        for (int i = 0; i < g_config.models.count; i++) {
+            free(g_config.models.models[i].name);
+            free(g_config.models.models[i].provider);
+            free(g_config.models.models[i].model_name);
+            free(g_config.models.models[i].base_url);
+            free(g_config.models.models[i].api_key);
+        }
+        free(g_config.models.models);
+    }
+    
+    // Cleanup current model config
     free(g_config.model.name);
+    free(g_config.model.provider);
+    free(g_config.model.model_name);
     free(g_config.model.base_url);
     free(g_config.model.api_key);
     
