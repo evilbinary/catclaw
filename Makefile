@@ -11,7 +11,7 @@ SRC_DIR = src
 OBJ_DIR = obj
 
 # Exclude old files in src/ that have been moved to subdirectories
-SOURCES = $(filter-out $(SRC_DIR)/skill_weather.c $(SRC_DIR)/agent.c $(SRC_DIR)/channels.c $(SRC_DIR)/discord.c $(SRC_DIR)/telegram.c $(SRC_DIR)/websocket.c $(SRC_DIR)/gateway.c $(SRC_DIR)/ai_model.c $(SRC_DIR)/cJSON.c $(SRC_DIR)/config.c $(SRC_DIR)/log.c $(SRC_DIR)/plugin.c $(SRC_DIR)/thread_pool.c, $(wildcard $(SRC_DIR)/*.c) $(wildcard $(SRC_DIR)/*/*.c))
+SOURCES = $(filter-out $(SRC_DIR)/skill_weather.c $(SRC_DIR)/agent.c $(SRC_DIR)/channels.c $(SRC_DIR)/discord.c $(SRC_DIR)/telegram.c $(SRC_DIR)/websocket.c $(SRC_DIR)/gateway.c $(SRC_DIR)/cJSON.c $(SRC_DIR)/config.c $(SRC_DIR)/log.c $(SRC_DIR)/plugin.c $(SRC_DIR)/thread_pool.c, $(wildcard $(SRC_DIR)/*.c) $(wildcard $(SRC_DIR)/*/*.c))
 OBJECTS = $(patsubst $(SRC_DIR)/%.c, $(OBJ_DIR)/%.o, $(SOURCES))
 
 TARGET = catclaw

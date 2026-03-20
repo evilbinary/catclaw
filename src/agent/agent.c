@@ -141,18 +141,7 @@ char *agent_parse_command(const char *command) {
             // Try to switch by name first
             if (config_switch_model(args)) {
                 // Update AI model config
-                AIModelConfig model_config;
-                if (strcmp(g_config.model.provider, "openai") == 0) {
-                    model_config.type = AI_MODEL_OPENAI;
-                } else if (strcmp(g_config.model.provider, "anthropic") == 0) {
-                    model_config.type = AI_MODEL_ANTHROPIC;
-                } else if (strcmp(g_config.model.provider, "llama") == 0) {
-                    model_config.type = AI_MODEL_LLAMA;
-                } else if (strcmp(g_config.model.provider, "gemini") == 0) {
-                    model_config.type = AI_MODEL_GEMINI;
-                } else {
-                    model_config.type = AI_MODEL_OPENAI; // default
-                }
+                AIModelConfig model_config = {0};
                 model_config.model_name = g_config.model.model_name;
                 model_config.api_key = g_config.model.api_key;
                 model_config.base_url = g_config.model.base_url;
@@ -179,18 +168,7 @@ char *agent_parse_command(const char *command) {
                 if (index > 0 || (index == 0 && args[0] == '0')) {
                     if (config_switch_model_by_index(index)) {
                         // Update AI model config
-                        AIModelConfig model_config;
-                        if (strcmp(g_config.model.provider, "openai") == 0) {
-                            model_config.type = AI_MODEL_OPENAI;
-                        } else if (strcmp(g_config.model.provider, "anthropic") == 0) {
-                            model_config.type = AI_MODEL_ANTHROPIC;
-                        } else if (strcmp(g_config.model.provider, "llama") == 0) {
-                            model_config.type = AI_MODEL_LLAMA;
-                        } else if (strcmp(g_config.model.provider, "gemini") == 0) {
-                            model_config.type = AI_MODEL_GEMINI;
-                        } else {
-                            model_config.type = AI_MODEL_OPENAI;
-                        }
+                        AIModelConfig model_config = {0};
                         model_config.model_name = g_config.model.model_name;
                         model_config.api_key = g_config.model.api_key;
                         model_config.base_url = g_config.model.base_url;
@@ -439,24 +417,12 @@ bool agent_init(void) {
     }
 
     // Initialize AI model
-    AIModelConfig model_config;
+    AIModelConfig model_config = {0};
     
     // Use new config structure with fallback to legacy fields
     const char* provider = g_config.model.provider ? g_config.model.provider : 
                           (g_config.model_provider ? g_config.model_provider : "llama");
     printf("[DEBUG] ai_model_init: provider=%s\n", provider);
-    
-    if (strcmp(provider, "anthropic") == 0) {
-        model_config.type = AI_MODEL_ANTHROPIC;
-    } else if (strcmp(provider, "openai") == 0) {
-        model_config.type = AI_MODEL_OPENAI;
-    } else if (strcmp(provider, "llama") == 0) {
-        model_config.type = AI_MODEL_LLAMA;
-    } else if (strcmp(provider, "gemini") == 0) {
-        model_config.type = AI_MODEL_GEMINI;
-    } else {
-        model_config.type = AI_MODEL_LLAMA;
-    }
     
     // Use new config structure with fallback to legacy fields
     const char* ai_model_name = g_config.model.model_name ? g_config.model.model_name :
@@ -469,9 +435,9 @@ bool agent_init(void) {
     
     printf("[DEBUG] ai_model_init: model_name=%s, base_url=%s\n", ai_model_name, base_url);
     
-    model_config.model_name = ai_model_name;
-    model_config.api_key = api_key ? api_key : (getenv("ANTHROPIC_API_KEY") ? getenv("ANTHROPIC_API_KEY") : getenv("OPENAI_API_KEY"));
-    model_config.base_url = base_url;
+    model_config.model_name = (char*)ai_model_name;
+    model_config.api_key = (char*)(api_key ? api_key : (getenv("ANTHROPIC_API_KEY") ? getenv("ANTHROPIC_API_KEY") : getenv("OPENAI_API_KEY")));
+    model_config.base_url = (char*)base_url;
     model_config.temperature = g_config.model.temperature > 0 ? g_config.model.temperature : 0.7f;
     model_config.max_tokens = g_config.model.max_tokens > 0 ? g_config.model.max_tokens : 1024;
     model_config.stream = g_config.model.stream;
