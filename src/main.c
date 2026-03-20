@@ -75,6 +75,20 @@ int main(int argc, char *argv[]) {
     printf("🐦 CatClaw - C version\n");
     printf("Based on OpenClaw functionality\n\n");
 
+    // Parse command-line arguments for log level
+    const char *cli_log_level = NULL;
+    for (int i = 1; i < argc; i++) {
+        if ((strcmp(argv[i], "--log-level") == 0 || strcmp(argv[i], "-l") == 0) && i + 1 < argc) {
+            cli_log_level = argv[++i];
+        } else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
+            printf("Usage: catclaw [options]\n\n");
+            printf("Options:\n");
+            printf("  -l, --log-level <level>  Set log level: debug, info, warn, error, fatal\n");
+            printf("  -h, --help               Show this help\n");
+            return 0;
+        }
+    }
+
     // Load configuration
     if (!config_load()) {
         fprintf(stderr, "Failed to load configuration\n");
@@ -83,28 +97,43 @@ int main(int argc, char *argv[]) {
 
     // Initialize log system
     log_init();
-    // Set log level based on configuration
+    // Set log level based on CLI argument, then config, then debug flag
     LogLevel log_level = LOG_LEVEL_INFO;
-    
-    // Try to get loglevel from new logging config
-    const char *loglevel_str = g_config.logging.level;
-    if (loglevel_str && loglevel_str[0] != '\0') {
-        printf("[DEBUG] Setting log level from config: %s\n", loglevel_str);
-        if (strcmp(loglevel_str, "debug") == 0) {
+
+    if (cli_log_level && cli_log_level[0] != '\0') {
+        if (strcmp(cli_log_level, "debug") == 0) {
             log_level = LOG_LEVEL_DEBUG;
-        } else if (strcmp(loglevel_str, "info") == 0) {
+        } else if (strcmp(cli_log_level, "info") == 0) {
             log_level = LOG_LEVEL_INFO;
-        } else if (strcmp(loglevel_str, "warn") == 0) {
+        } else if (strcmp(cli_log_level, "warn") == 0) {
             log_level = LOG_LEVEL_WARN;
-        } else if (strcmp(loglevel_str, "error") == 0) {
+        } else if (strcmp(cli_log_level, "error") == 0) {
             log_level = LOG_LEVEL_ERROR;
-        } else if (strcmp(loglevel_str, "fatal") == 0) {
+        } else if (strcmp(cli_log_level, "fatal") == 0) {
             log_level = LOG_LEVEL_FATAL;
+        } else {
+            fprintf(stderr, "Unknown log level: %s (use: debug, info, warn, error, fatal)\n", cli_log_level);
         }
-    } else if (g_config.debug) {
-        // Fallback to debug flag
-        printf("[DEBUG] Setting log level from debug flag\n");
-        log_level = LOG_LEVEL_DEBUG;
+    } else {
+        const char *loglevel_str = g_config.logging.level;
+        if (loglevel_str && loglevel_str[0] != '\0') {
+            printf("[DEBUG] Setting log level from config: %s\n", loglevel_str);
+            if (strcmp(loglevel_str, "debug") == 0) {
+                log_level = LOG_LEVEL_DEBUG;
+            } else if (strcmp(loglevel_str, "info") == 0) {
+                log_level = LOG_LEVEL_INFO;
+            } else if (strcmp(loglevel_str, "warn") == 0) {
+                log_level = LOG_LEVEL_WARN;
+            } else if (strcmp(loglevel_str, "error") == 0) {
+                log_level = LOG_LEVEL_ERROR;
+            } else if (strcmp(loglevel_str, "fatal") == 0) {
+                log_level = LOG_LEVEL_FATAL;
+            }
+        } else if (g_config.debug) {
+            // Fallback to debug flag
+            printf("[DEBUG] Setting log level from debug flag\n");
+            log_level = LOG_LEVEL_DEBUG;
+        }
     }
     
     log_set_level(log_level);
@@ -263,6 +292,7 @@ int main(int argc, char *argv[]) {
                     printf("  /steps list        - List steps\n");
                     printf("  /debug on          - Enable debug mode\n");
                     printf("  /debug off         - Disable debug mode\n");
+                    printf("  /loglevel <level>  - Set log level (debug, info, warn, error, fatal)\n");
                     printf("  /health            - Show health check\n");
                     printf("  /exit              - Exit\n");
                 } else if (strcmp(cmd, "status") == 0) {
@@ -273,6 +303,27 @@ int main(int argc, char *argv[]) {
                     agent_status();
                     printf("\n");
                     channels_status();
+                } else if (strncmp(cmd, "loglevel", 8) == 0) {
+                    char *level_str = cmd + 9;
+                    if (*level_str) {
+                        while (*level_str == ' ') level_str++;
+                        LogLevel level = LOG_LEVEL_INFO;
+                        bool valid = true;
+                        if (strcmp(level_str, "debug") == 0) level = LOG_LEVEL_DEBUG;
+                        else if (strcmp(level_str, "info") == 0) level = LOG_LEVEL_INFO;
+                        else if (strcmp(level_str, "warn") == 0) level = LOG_LEVEL_WARN;
+                        else if (strcmp(level_str, "error") == 0) level = LOG_LEVEL_ERROR;
+                        else if (strcmp(level_str, "fatal") == 0) level = LOG_LEVEL_FATAL;
+                        else { valid = false; }
+                        if (valid) {
+                            log_set_level(level);
+                            printf("Log level set to: %s\n", level_str);
+                        } else {
+                            printf("Unknown log level: %s (use: debug, info, warn, error, fatal)\n", level_str);
+                        }
+                    } else {
+                        printf("Usage: /loglevel <level>  (debug, info, warn, error, fatal)\n");
+                    }
                 } else if (strcmp(cmd, "health") == 0) {
                     printf("Health Check\n");
                     printf("─────────────────────────────────────\n\n");
