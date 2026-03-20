@@ -430,13 +430,31 @@ void* agent_node_worker_thread(void* arg) {
                         log_debug("AI model returned success\n");
                     }
                     
-                    // 6.2 Act: Add assistant message to session
+                    // 6.2 Pre-check: Detect if content is a tool_calls JSON
+                    bool has_tool_calls_in_content = false;
+                    log_debug("response->content: '%s'", response->content ? response->content : "(null)");
+                    log_debug("response->tool_calls: '%s'", response->tool_calls ? response->tool_calls : "(null)");
+                    if (response->content && strlen(response->content) > 0) {
+                        cJSON *content_root = cJSON_Parse(response->content);
+                        if (content_root) {
+                            cJSON *tc = cJSON_GetObjectItem(content_root, "tool_calls");
+                            if (tc && cJSON_IsArray(tc)) {
+                                has_tool_calls_in_content = true;
+                            }
+                            cJSON_Delete(content_root);
+                        }
+                    }
+                    
+                    // 6.3 Act: Add assistant message to session
                     Message* assistant_msg = message_create(ROLE_ASSISTANT, response->content);
                     session_add_message(session, assistant_msg);
                     
-                    printf("\n[AI Response]: %s\n\n", response->content);
+                    // Only print response if it's not a tool_calls JSON
+                    if (!has_tool_calls_in_content) {
+                        printf("\n[AI Response]: %s\n\n", response->content);
+                    }
                     
-                    // 6.3 Observe: Check for tool calls
+                    // 6.4 Observe: Check for tool calls
                     if (g_config.debug) {
                         log_debug("Checking for tool calls\n");
                     }
@@ -444,14 +462,30 @@ void* agent_node_worker_thread(void* arg) {
                     ToolCallList* tool_call_list = NULL;
                     
                     // Parse tool_calls from AI model response
+                    // 1. Check response->tool_calls (OpenAI native tool_calls format)
                     if (response->tool_calls && strlen(response->tool_calls) > 0) {
                         if (g_config.debug) {
-                            log_debug("Found tool_calls in response: %s\n", response->tool_calls);
+                            log_debug("Found tool_calls in response.tool_calls: %s\n", response->tool_calls);
                         }
                         cJSON *tool_calls_json = cJSON_Parse(response->tool_calls);
                         if (tool_calls_json) {
                             tool_call_list = parse_tool_calls_from_json(tool_calls_json);
                             cJSON_Delete(tool_calls_json);
+                        }
+                    }
+                    
+                    // 2. Check response->content for text-based tool_calls JSON: {"tool_calls": [...]}
+                    if (!tool_call_list && response->content && strlen(response->content) > 0) {
+                        cJSON *content_root = cJSON_Parse(response->content);
+                        if (content_root) {
+                            cJSON *tool_calls_arr = cJSON_GetObjectItem(content_root, "tool_calls");
+                            if (tool_calls_arr && cJSON_IsArray(tool_calls_arr)) {
+                                if (g_config.debug) {
+                                    log_debug("Found tool_calls in response.content: %s\n", response->content);
+                                }
+                                tool_call_list = parse_tool_calls_from_json(tool_calls_arr);
+                            }
+                            cJSON_Delete(content_root);
                         }
                     }
                     

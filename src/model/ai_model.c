@@ -659,6 +659,7 @@ AIModelResponse *ai_model_send_message(const char *message) {
             }
             free(buf_copy);
 
+            log_debug("[send_messages] full_text: '%s'", full_text ? full_text : "(null)");
             if (strlen(full_text) > 0) {
                 log_debug("OpenAI streamed content length: %zu", strlen(full_text));
                 response = create_response(full_text, true, NULL);
@@ -947,20 +948,30 @@ AIModelResponse *ai_model_send_messages(MessageList *messages, const char *syste
                 // Add conversation history
                 if (messages) {
                     for (int i = 0; i < messages->count; i++) {
-                        if (messages->messages[i] && messages->messages[i]->content) {
-                            cJSON *msg_obj = cJSON_CreateObject();
-                            const char *role_str = "user";
-                            if (messages->messages[i]->role == ROLE_ASSISTANT) {
-                                role_str = "assistant";
-                            } else if (messages->messages[i]->role == ROLE_SYSTEM) {
-                                role_str = "system";
-                            } else if (messages->messages[i]->role == ROLE_TOOL) {
-                                role_str = "tool";
-                            }
-                            cJSON_AddStringToObject(msg_obj, "role", role_str);
-                            cJSON_AddStringToObject(msg_obj, "content", messages->messages[i]->content);
-                            cJSON_AddItemToArray(messages_json, msg_obj);
+                        Message *msg = messages->messages[i];
+                        if (!msg) continue;
+
+                        cJSON *msg_obj = cJSON_CreateObject();
+                        const char *role_str = "user";
+                        if (msg->role == ROLE_ASSISTANT) {
+                            role_str = "assistant";
+                        } else if (msg->role == ROLE_SYSTEM) {
+                            role_str = "system";
+                        } else if (msg->role == ROLE_TOOL) {
+                            role_str = "tool";
                         }
+                        cJSON_AddStringToObject(msg_obj, "role", role_str);
+
+                        // For tool messages, include tool_call_id (required by OpenAI API)
+                        if (msg->role == ROLE_TOOL && msg->tool_call_id) {
+                            cJSON_AddStringToObject(msg_obj, "tool_call_id", msg->tool_call_id);
+                        }
+
+                        // Content can be NULL for assistant messages with only tool_calls
+                        const char *content_str = msg->content ? msg->content : "";
+                        cJSON_AddStringToObject(msg_obj, "content", content_str);
+
+                        cJSON_AddItemToArray(messages_json, msg_obj);
                     }
                 }
                 
@@ -1204,6 +1215,7 @@ AIModelResponse *ai_model_send_messages(MessageList *messages, const char *syste
             }
             free(buf_copy);
 
+            log_debug("[send_messages] full_text: '%s'", full_text ? full_text : "(null)");
             if (strlen(full_text) > 0) {
                 log_debug("[send_messages] OpenAI streamed content length: %zu", strlen(full_text));
                 response = create_response(full_text, true, NULL);

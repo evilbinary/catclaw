@@ -153,7 +153,7 @@ char* message_to_json(const Message* message) {
         return NULL;
     }
     
-    log_debug("message_to_json: processing message with role %d", message->role);
+    // log_debug("message_to_json: processing message with role %d", message->role);
     
     cJSON* root = cJSON_CreateObject();
     if (!root) {
@@ -180,33 +180,33 @@ char* message_to_json(const Message* message) {
             role_str = "user";
             break;
     }
-    log_debug("message_to_json: adding role: %s", role_str);
+    //log_debug("message_to_json: adding role: %s", role_str);
     cJSON_AddStringToObject(root, "role", role_str);
     
     // Content (use empty string if NULL)
     const char* content_str = message->content ? message->content : "";
-    log_debug("message_to_json: adding content: %s", content_str);
+    // log_debug("message_to_json: adding content: %s", content_str);
     cJSON_AddStringToObject(root, "content", content_str);
     
     // Tool name (for tool messages)
     if (message->tool_name) {
-        log_debug("message_to_json: adding tool_name: %s", message->tool_name);
+        // log_debug("message_to_json: adding tool_name: %s", message->tool_name);
         cJSON_AddStringToObject(root, "tool_name", message->tool_name);
     }
     
     // Tool call ID (for tool messages)
     if (message->tool_call_id) {
-        log_debug("message_to_json: adding tool_call_id: %s", message->tool_call_id);
+        // log_debug("message_to_json: adding tool_call_id: %s", message->tool_call_id);
         cJSON_AddStringToObject(root, "tool_call_id", message->tool_call_id);
     }
     
     // Timestamp
-    log_debug("message_to_json: adding timestamp: %lld", message->timestamp);
+    // log_debug("message_to_json: adding timestamp: %lld", message->timestamp);
     cJSON_AddNumberToObject(root, "timestamp", message->timestamp);
     
-    log_debug("message_to_json: calling cJSON_PrintUnformatted");
+    // log_debug("message_to_json: calling cJSON_PrintUnformatted");
     char* json = cJSON_PrintUnformatted(root);
-    log_debug("message_to_json: cJSON_PrintUnformatted returned");
+    // log_debug("message_to_json: cJSON_PrintUnformatted returned");
     cJSON_Delete(root);
     
     return json;
