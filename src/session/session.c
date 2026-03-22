@@ -398,8 +398,6 @@ Session* session_load(const char* session_id, const char* sessions_dir) {
     jsonl[length] = '\0';
     fclose(fp);
     
-    log_debug("session_load: file content:\n%s", jsonl);
-    
     // Parse JSONL
     MessageList* history = message_list_from_jsonl(jsonl);
     free(jsonl);
@@ -560,23 +558,12 @@ Session* session_manager_get_or_create(SessionManager* manager, const char* sess
         return NULL;
     }
     
-    // Check if session already exists
+    // Check if session already exists in memory
     for (int i = 0; i < manager->session_count; i++) {
         if (strcmp(manager->sessions[i]->session_key, session_key) == 0) {
             log_debug("session_manager_get_or_create: found existing session in memory: %s", session_key);
-            // Try to reload from disk to get latest history
-            char* session_id = session_key_to_id(session_key);
-            if (session_id) {
-                Session* reloaded_session = session_load(session_id, manager->sessions_dir);
-                free(session_id);
-                if (reloaded_session) {
-                    log_info("session_manager_get_or_create: reloaded session from disk: %s with %d messages", session_key, reloaded_session->history->count);
-                    // Replace existing session
-                    session_destroy(manager->sessions[i]);
-                    manager->sessions[i] = reloaded_session;
-                    return reloaded_session;
-                }
-            }
+            // 直接返回内存中的会话，不重新加载
+            // 内存中的会话应该已经是最新的（因为我们在每次保存后会更新内存）
             return manager->sessions[i];
         }
     }

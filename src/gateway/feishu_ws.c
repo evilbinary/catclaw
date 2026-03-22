@@ -22,9 +22,42 @@
 #define MSG_TYPE_EVENT "event"
 #define MSG_TYPE_CARD "card"
 
-// Frame 类型
-#define FRAME_TYPE_CONTROL 1
-#define FRAME_TYPE_DATA     2
+// Frame 类型 (注意: 0=CONTROL, 1=DATA)
+#define FRAME_TYPE_CONTROL 0
+#define FRAME_TYPE_DATA    1
+
+// 消息去重缓存大小
+#define TRACE_ID_CACHE_SIZE 64
+
+// 全局 trace_id 缓存（用于去重）
+static char *trace_id_cache[TRACE_ID_CACHE_SIZE];
+static int trace_id_cache_index = 0;
+static bool trace_id_cache_initialized = false;
+
+// 检查消息是否已处理（基于 trace_id 去重）
+static bool feishu_is_duplicate_message(const char *trace_id) {
+    if (!trace_id) return false;
+    
+    // 初始化缓存
+    if (!trace_id_cache_initialized) {
+        memset(trace_id_cache, 0, sizeof(trace_id_cache));
+        trace_id_cache_initialized = true;
+    }
+    
+    // 检查是否已存在
+    for (int i = 0; i < TRACE_ID_CACHE_SIZE; i++) {
+        if (trace_id_cache[i] && strcmp(trace_id_cache[i], trace_id) == 0) {
+            return true;
+        }
+    }
+    
+    // 添加到缓存
+    free(trace_id_cache[trace_id_cache_index]);
+    trace_id_cache[trace_id_cache_index] = strdup(trace_id);
+    trace_id_cache_index = (trace_id_cache_index + 1) % TRACE_ID_CACHE_SIZE;
+    
+    return false;
+}
 
 // ==================== Protobuf 编解码 ====================
 
@@ -290,28 +323,35 @@ static size_t pb_encode_ping_frame(uint8_t *buf, size_t buf_size, int64_t servic
     return len;
 }
 
-// 编码 ACK 响应帧
-static size_t pb_encode_ack_frame(uint8_t *buf, size_t buf_size, PbFrame *req_frame) {
+// 编码响应帧（按照 Go SDK 的方式：复用原帧字段，payload 放响应 JSON）
+static size_t pb_encode_response_frame(uint8_t *buf, size_t buf_size, PbFrame *req_frame, const char *response_json) {
     size_t len = 0;
     
-    // Field 1: log_id (same as request)
-    len = pb_write_varint_field(buf, 1, req_frame->log_id);
+    // Field 1: SeqID (保持原值)
+    len = pb_write_varint_field(buf, 1, req_frame->seq_id);
     
-    // Field 2: service_id (same as request)  
-    len += pb_write_varint_field(buf + len, 2, req_frame->service_id);
+    // Field 2: LogID (保持原值)
+    len += pb_write_varint_field(buf + len, 2, req_frame->log_id);
     
-    // Field 3: seq_id (same as request)
-    len += pb_write_varint_field(buf + len, 3, req_frame->seq_id);
+    // Field 3: Service (保持原值)
+    len += pb_write_varint_field(buf + len, 3, (uint64_t)req_frame->service_id);
     
-    // Field 4: method = CONTROL (same as request for ack)
-    len += pb_write_varint_field(buf + len, 4, FRAME_TYPE_CONTROL);
+    // Field 4: Method = DATA (1) - 响应帧使用 DATA 类型
+    len += pb_write_varint_field(buf + len, 4, FRAME_TYPE_DATA);
     
-    // Field 5: headers - add type=ack
-    uint8_t header_buf[64];
-    size_t header_len = 0;
-    header_len = pb_write_string(header_buf, 1, "type", 4);
-    header_len += pb_write_string(header_buf + header_len, 2, "ack", 3);
-    len += pb_write_string(buf + len, 5, (char *)header_buf, header_len);
+    // Field 5: Headers (保持原有的 headers)
+    for (int i = 0; i < req_frame->header_count; i++) {
+        uint8_t header_buf[256];
+        size_t header_len = 0;
+        header_len = pb_write_string(header_buf, 1, req_frame->headers[i].key, strlen(req_frame->headers[i].key));
+        header_len += pb_write_string(header_buf + header_len, 2, req_frame->headers[i].value, strlen(req_frame->headers[i].value));
+        len += pb_write_string(buf + len, 5, (char *)header_buf, header_len);
+    }
+    
+    // Field 8: Payload (响应 JSON)
+    if (response_json) {
+        len += pb_write_string(buf + len, 8, response_json, strlen(response_json));
+    }
     
     (void)buf_size;
     return len;
@@ -460,6 +500,19 @@ static bool feishu_ws_on_message(WsClient *ws, const char *data, size_t len, voi
                   msg_id ? msg_id : "unknown",
                   trace_id ? trace_id : "unknown");
         
+        // 检查是否重复消息（基于 trace_id 去重）
+        if (trace_id && feishu_is_duplicate_message(trace_id)) {
+            log_warn("[FeishuWS] Duplicate message detected, skipping: trace_id=%s", trace_id);
+            // 仍然发送响应，但不处理消息
+            uint8_t resp_buf[4096];
+            const char *response_json = "{\"code\":200}";
+            size_t resp_len = pb_encode_response_frame(resp_buf, sizeof(resp_buf), &frame, response_json);
+            ws_client_send_binary(ws, resp_buf, resp_len);
+            log_debug("[FeishuWS] Sent response for duplicate message, len=%zu", resp_len);
+            pb_frame_free(&frame);
+            return true;
+        }
+        
         // 处理事件
         log_info("[FeishuWS] Event payload: %.*s", (int)frame.payload_len, frame.payload);
         
@@ -491,11 +544,12 @@ static bool feishu_ws_on_message(WsClient *ws, const char *data, size_t len, voi
             feishu_message_free(msg);
         }
         
-        // 发送 ACK 响应
+        // 发送响应帧（按照 Go SDK 的方式：payload 放响应 JSON）
         uint8_t resp_buf[4096];
-        size_t resp_len = pb_encode_ack_frame(resp_buf, sizeof(resp_buf), &frame);
+        const char *response_json = "{\"code\":200}";
+        size_t resp_len = pb_encode_response_frame(resp_buf, sizeof(resp_buf), &frame, response_json);
         ws_client_send_binary(ws, resp_buf, resp_len);
-        log_debug("[FeishuWS] Sent ACK frame, len=%zu", resp_len);
+        log_debug("[FeishuWS] Sent response frame, len=%zu, payload=%s", resp_len, response_json);
     } else if (type && strcmp(type, MSG_TYPE_PING) == 0) {
         log_debug("[FeishuWS] Received PING");
     } else if (type && strcmp(type, MSG_TYPE_PONG) == 0) {
