@@ -756,19 +756,34 @@ static void* ws_client_event_loop(void *arg) {
             continue;
         }
         
-        fd_set read_fds;
-        FD_ZERO(&read_fds);
-        FD_SET(client->socket, &read_fds);
+        bool has_data = false;
         
-        struct timeval timeout;
-        timeout.tv_sec = 1;
-        timeout.tv_usec = 0;
+#ifdef HAVE_OPENSSL
+        // For SSL, check SSL_pending() first as select() doesn't see SSL buffer
+        if (client->ssl && SSL_pending((SSL*)client->ssl) > 0) {
+            has_data = true;
+        }
+#endif
         
-        int result = select(client->socket + 1, &read_fds, NULL, NULL, &timeout);
+        if (!has_data) {
+            fd_set read_fds;
+            FD_ZERO(&read_fds);
+            FD_SET(client->socket, &read_fds);
+            
+            struct timeval timeout;
+            timeout.tv_sec = 1;
+            timeout.tv_usec = 0;
+            
+            int result = select(client->socket + 1, &read_fds, NULL, NULL, &timeout);
+            
+            if (!client->running) break;
+            
+            if (result > 0) {
+                has_data = true;
+            }
+        }
         
-        if (!client->running) break;
-        
-        if (result > 0) {
+        if (has_data) {
             // Receive and process frames
             uint8_t opcode;
             char *payload = NULL;

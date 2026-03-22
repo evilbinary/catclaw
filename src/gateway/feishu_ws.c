@@ -179,6 +179,15 @@ static bool pb_decode_frame(const uint8_t *buf, size_t buf_len, PbFrame *frame) 
     memset(frame, 0, sizeof(PbFrame));
     size_t offset = 0;
     
+    // Debug: print raw bytes
+    log_debug("[FeishuWS] Decoding frame, len=%zu, bytes:", buf_len);
+    char hex_buf[512];
+    size_t hex_len = 0;
+    for (size_t i = 0; i < buf_len && hex_len < sizeof(hex_buf) - 4; i++) {
+        hex_len += snprintf(hex_buf + hex_len, sizeof(hex_buf) - hex_len, "%02x ", buf[i]);
+    }
+    log_debug("[FeishuWS] Raw: %s", hex_buf);
+    
     // Temporary storage for headers
     PbHeader headers[32];
     int header_count = 0;
@@ -191,11 +200,13 @@ static bool pb_decode_frame(const uint8_t *buf, size_t buf_len, PbFrame *frame) 
         int field_num = tag >> 3;
         int wire_type = tag & 0x7;
         
+        log_debug("[FeishuWS] Field %d, wire_type=%d, tag=%lu, offset=%zu", 
+                  field_num, wire_type, (unsigned long)tag, offset);
+        
         if (wire_type == 2) {  // length-delimited
-            if (field_num == 1) {  // headers (repeated)
+            if (field_num == 5) {  // headers (repeated)
                 uint8_t *header_data;
                 size_t header_len;
-                size_t inner_offset = offset;
                 if (!pb_read_bytes(buf, buf_len, &offset, &header_data, &header_len)) break;
                 
                 if (header_count < 32) {
@@ -204,11 +215,6 @@ static bool pb_decode_frame(const uint8_t *buf, size_t buf_len, PbFrame *frame) 
                     }
                 }
                 free(header_data);
-            } else if (field_num == 2) {  // service (string)
-                char *service_str;
-                if (!pb_read_string(buf, buf_len, &offset, &service_str)) break;
-                frame->service_id = atoll(service_str);
-                free(service_str);
             } else if (field_num == 6) {  // payload
                 if (!pb_read_bytes(buf, buf_len, &offset, &frame->payload, &frame->payload_len)) break;
             } else {
@@ -221,12 +227,14 @@ static bool pb_decode_frame(const uint8_t *buf, size_t buf_len, PbFrame *frame) 
             uint64_t val;
             if (!pb_read_varint(buf, buf_len, &offset, &val)) break;
             
-            if (field_num == 3) {
-                frame->method = (int)val;
-            } else if (field_num == 4) {
+            if (field_num == 1) {
+                frame->log_id = (int64_t)val;  // or some other ID
+            } else if (field_num == 2) {
+                frame->service_id = (int64_t)val;
+            } else if (field_num == 3) {
                 frame->seq_id = (int64_t)val;
-            } else if (field_num == 5) {
-                frame->log_id = (int64_t)val;
+            } else if (field_num == 4) {
+                frame->method = (int)val;
             }
         } else {
             offset = prev_offset;
@@ -260,22 +268,21 @@ static size_t pb_encode_ping_frame(uint8_t *buf, size_t buf_size, int64_t servic
     header_len = pb_write_string(header_buf, 1, type_key, strlen(type_key));
     header_len += pb_write_string(header_buf + header_len, 2, type_val, strlen(type_val));
     
-    // Encode frame
-    len = pb_write_string(buf, 1, (char *)header_buf, header_len);  // headers
+    // Encode frame (field numbers based on actual Feishu protocol)
+    // Field 1: log_id
+    len = pb_write_varint_field(buf, 1, 0);
     
-    // Service ID as string
-    char service_str[32];
-    snprintf(service_str, sizeof(service_str), "%ld", (long)service_id);
-    len += pb_write_string(buf + len, 2, service_str, strlen(service_str));
+    // Field 2: service_id
+    len += pb_write_varint_field(buf + len, 2, service_id);
     
-    // Method = CONTROL
-    len += pb_write_varint_field(buf + len, 3, FRAME_TYPE_CONTROL);
+    // Field 3: seq_id
+    len += pb_write_varint_field(buf + len, 3, 0);
     
-    // SeqID = 0
-    len += pb_write_varint_field(buf + len, 4, 0);
+    // Field 4: method = CONTROL
+    len += pb_write_varint_field(buf + len, 4, FRAME_TYPE_CONTROL);
     
-    // LogID = 0
-    len += pb_write_varint_field(buf + len, 5, 0);
+    // Field 5: headers
+    len += pb_write_string(buf + len, 5, (char *)header_buf, header_len);
     
     (void)buf_size;
     return len;
@@ -286,7 +293,19 @@ static size_t pb_encode_response_frame(uint8_t *buf, size_t buf_size,
                                         PbFrame *req_frame, const char *response_json) {
     size_t len = 0;
     
-    // Copy headers from request
+    // Field 1: log_id
+    len = pb_write_varint_field(buf, 1, req_frame->log_id);
+    
+    // Field 2: service_id
+    len += pb_write_varint_field(buf + len, 2, req_frame->service_id);
+    
+    // Field 3: seq_id
+    len += pb_write_varint_field(buf + len, 3, req_frame->seq_id);
+    
+    // Field 4: method = DATA
+    len += pb_write_varint_field(buf + len, 4, FRAME_TYPE_DATA);
+    
+    // Field 5: headers
     for (int i = 0; i < req_frame->header_count; i++) {
         uint8_t header_buf[256];
         size_t header_len = 0;
@@ -295,24 +314,10 @@ static size_t pb_encode_response_frame(uint8_t *buf, size_t buf_size,
         header_len += pb_write_string(header_buf + header_len, 2, 
                                       req_frame->headers[i].value, 
                                       strlen(req_frame->headers[i].value));
-        len += pb_write_string(buf + len, 1, (char *)header_buf, header_len);
+        len += pb_write_string(buf + len, 5, (char *)header_buf, header_len);
     }
     
-    // Service ID as string
-    char service_str[32];
-    snprintf(service_str, sizeof(service_str), "%ld", (long)req_frame->service_id);
-    len += pb_write_string(buf + len, 2, service_str, strlen(service_str));
-    
-    // Method = DATA
-    len += pb_write_varint_field(buf + len, 3, FRAME_TYPE_DATA);
-    
-    // SeqID
-    len += pb_write_varint_field(buf + len, 4, req_frame->seq_id);
-    
-    // LogID
-    len += pb_write_varint_field(buf + len, 5, req_frame->log_id);
-    
-    // Payload
+    // Field 6: payload
     len += pb_write_string(buf + len, 6, response_json, strlen(response_json));
     
     (void)buf_size;
