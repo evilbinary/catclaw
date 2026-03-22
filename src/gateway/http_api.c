@@ -7,6 +7,7 @@
 #include "../model/ai_model.h"
 #include "../tool/tool.h"
 #include "../session/session.h"
+#include "feishu.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -434,6 +435,9 @@ static SrvResponse* handle_session_clear(const SrvRequest* request, void* user_d
     return response;
 }
 
+// 前向声明
+static SrvResponse* handle_feishu_webhook(const SrvRequest* request, void* user_data);
+
 // 路由处理
 static SrvResponse* route_request(const SrvRequest* request, void* user_data) {
     const char* path = request->path;
@@ -480,8 +484,41 @@ static SrvResponse* route_request(const SrvRequest* request, void* user_data) {
         return handle_session_clear(request, user_data);
     }
     
+    // POST /webhook/feishu - 飞书事件回调
+    if (strcmp(path, "/webhook/feishu") == 0 && strcmp(request->method, "POST") == 0) {
+        return handle_feishu_webhook(request, user_data);
+    }
+    
+    // POST /webhook/feishu - 飞书事件回调
+    if (strcmp(path, "/webhook/feishu") == 0 && strcmp(request->method, "POST") == 0) {
+        return handle_feishu_webhook(request, user_data);
+    }
+    
     // 404
     return srv_response_error(404, "Not found");
+}
+
+// 处理飞书webhook回调
+static SrvResponse* handle_feishu_webhook(const SrvRequest* request, void* user_data) {
+    (void)user_data;
+    
+    if (!request->body) {
+        return srv_response_error(400, "Missing request body");
+    }
+    
+    log_info("[HTTP] Received Feishu webhook event");
+    
+    // 调用飞书事件处理函数
+    char *response_str = feishu_handle_event(request->body);
+    if (!response_str) {
+        return srv_response_error(500, "Failed to process event");
+    }
+    
+    // 构建响应
+    SrvResponse *response = srv_response_json(200, response_str);
+    free(response_str);
+    
+    return response;
 }
 
 // ==================== 公共 API ====================

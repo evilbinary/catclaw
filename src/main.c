@@ -10,6 +10,7 @@
 #include "common/config.h"
 #include "gateway/gateway.h"
 #include "gateway/channels.h"
+#include "gateway/feishu_ws.h"
 #include "agent/agent.h"
 #include "common/plugin.h"
 #include "tool/skill.h"
@@ -24,6 +25,9 @@ static bool gateway_thread_running = false;
 
 // HTTP API server
 static HttpServer* g_http_api_server = NULL;
+
+// Feishu WebSocket client
+static FeishuWsClient* g_feishu_ws_client = NULL;
 
 // Thread pool
 static ThreadPool *g_thread_pool = NULL;
@@ -213,6 +217,39 @@ int main(int argc, char *argv[]) {
         }
     } else {
         log_info("HTTP API server is disabled");
+    }
+    
+    // Start Feishu WebSocket client (if enabled)
+    if (g_config.feishu_ws.enabled) {
+        // Find first Feishu channel with app_id and app_secret
+        for (int i = 0; i < g_config.channels.count; i++) {
+            ChannelConfigEntry *ch = &g_config.channels.channels[i];
+            if (ch->type && strcmp(ch->type, "feishu") == 0 && 
+                ch->app_id && ch->app_secret) {
+                g_feishu_ws_client = feishu_ws_create(ch->app_id, ch->app_secret);
+                if (g_feishu_ws_client) {
+                    if (g_config.feishu_ws.domain) {
+                        feishu_ws_set_domain(g_feishu_ws_client, g_config.feishu_ws.domain);
+                    }
+                    feishu_ws_set_ping_interval(g_feishu_ws_client, g_config.feishu_ws.ping_interval_sec);
+                    feishu_ws_set_reconnect(g_feishu_ws_client, 
+                                           g_config.feishu_ws.reconnect_interval_sec,
+                                           g_config.feishu_ws.max_reconnect_count);
+                    
+                    if (feishu_ws_start(g_feishu_ws_client)) {
+                        log_info("Feishu WebSocket client started for channel: %s", ch->id);
+                    } else {
+                        log_error("Failed to start Feishu WebSocket client");
+                        feishu_ws_destroy(g_feishu_ws_client);
+                        g_feishu_ws_client = NULL;
+                    }
+                }
+                break;  // Only use first Feishu channel
+            }
+        }
+        if (!g_feishu_ws_client) {
+            log_warn("Feishu WebSocket enabled but no valid Feishu channel found");
+        }
     }
 
     log_info("CatClaw initialized successfully!");
@@ -595,6 +632,13 @@ int main(int argc, char *argv[]) {
     // Cleanup
     stop_gateway_server();
     agent_stop_worker_thread();
+    
+    // Stop Feishu WebSocket client
+    if (g_feishu_ws_client) {
+        feishu_ws_stop(g_feishu_ws_client);
+        feishu_ws_destroy(g_feishu_ws_client);
+        g_feishu_ws_client = NULL;
+    }
     
     // Stop HTTP API server
     if (g_http_api_server) {

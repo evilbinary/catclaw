@@ -264,6 +264,67 @@
 
 ---
 
+## 飞书 WebSocket 配置 (feishu_ws)
+
+飞书 WebSocket 用于订阅飞书事件，实时接收用户消息。
+
+```json
+{
+  "feishu_ws": {
+    "enabled": true,
+    "domain": "https://open.feishu.cn",
+    "ping_interval_sec": 120,
+    "reconnect_interval_sec": 120,
+    "max_reconnect_count": -1
+  }
+}
+```
+
+|| 字段 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `enabled` | bool | false | 是否启用飞书 WebSocket 订阅 |
+| `domain` | string | https://open.feishu.cn | 飞书 API 域名 |
+| `ping_interval_sec` | int | 120 | 心跳间隔(秒) |
+| `reconnect_interval_sec` | int | 120 | 重连间隔(秒) |
+| `max_reconnect_count` | int | -1 | 最大重连次数，-1 表示无限 |
+
+### 使用说明
+
+1. 启用 `feishu_ws.enabled = true`
+2. 在 `channels` 配置中添加飞书渠道，需要配置 `app_id` 和 `app_secret`
+3. 系统会自动使用第一个飞书渠道的凭证建立 WebSocket 连接
+
+### 配置示例
+
+```json
+{
+  "channels": {
+    "list": [
+      {
+        "id": "feishu-main",
+        "type": "feishu",
+        "app_id": "cli_xxx",
+        "app_secret": "xxx"
+      }
+    ]
+  },
+  "feishu_ws": {
+    "enabled": true
+  }
+}
+```
+
+### 与 HTTP Webhook 的区别
+
+| 特性 | WebSocket 订阅 | HTTP Webhook |
+|------|---------------|--------------|
+| 接收消息 | 实时推送 | 需要配置事件订阅 |
+| 网络要求 | 支持内网穿透 | 需要公网 IP |
+| 配置复杂度 | 简单 | 需要配置回调 URL |
+| 适用场景 | 本地开发、内网环境 | 生产环境 |
+
+---
+
 ## 网关配置 (gateway)
 
 ```json

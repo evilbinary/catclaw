@@ -1,6 +1,9 @@
 #include "feishu.h"
 #include "common/http_client.h"
 #include "common/cJSON.h"
+#include "common/config.h"
+#include "common/log.h"
+#include "agent/agent.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -245,6 +248,7 @@ static bool feishu_send_message(ChannelInstance *channel, const char *message) {
 
 // 接收消息
 static bool feishu_receive_message(ChannelInstance *channel, const char *message) {
+    (void)channel;  // unused
     printf("[Feishu] Receiving message: %s\n", message);
     return true;
 }
@@ -291,4 +295,199 @@ void feishu_set_receive_id(ChannelInstance *channel, const char *receive_id, con
     config->receive_id_type = receive_id_type ? strdup(receive_id_type) : strdup("open_id");
     
     printf("[Feishu] Receive ID set to: %s (type: %s)\n", receive_id, config->receive_id_type);
+}
+
+// ==================== 事件处理 ====================
+
+// 解析飞书消息事件
+FeishuMessage* feishu_parse_message(const char *event_json) {
+    if (!event_json) return NULL;
+    
+    cJSON *root = cJSON_Parse(event_json);
+    if (!root) return NULL;
+    
+    FeishuMessage *msg = (FeishuMessage *)calloc(1, sizeof(FeishuMessage));
+    if (!msg) {
+        cJSON_Delete(root);
+        return NULL;
+    }
+    
+    // 解析事件结构
+    cJSON *event = cJSON_GetObjectItem(root, "event");
+    if (!event) {
+        cJSON_Delete(root);
+        free(msg);
+        return NULL;
+    }
+    
+    // 解析消息内容
+    cJSON *message = cJSON_GetObjectItem(event, "message");
+    if (message) {
+        cJSON *message_id = cJSON_GetObjectItem(message, "message_id");
+        if (message_id && cJSON_IsString(message_id)) {
+            msg->message_id = strdup(message_id->valuestring);
+        }
+        
+        cJSON *message_type = cJSON_GetObjectItem(message, "message_type");
+        if (message_type && cJSON_IsString(message_type)) {
+            msg->message_type = strdup(message_type->valuestring);
+        }
+        
+        cJSON *chat_id = cJSON_GetObjectItem(message, "chat_id");
+        if (chat_id && cJSON_IsString(chat_id)) {
+            msg->chat_id = strdup(chat_id->valuestring);
+        }
+        
+        // 解析消息内容 (JSON字符串)
+        cJSON *content = cJSON_GetObjectItem(message, "content");
+        if (content && cJSON_IsString(content)) {
+            // content 是JSON字符串，需要解析获取text
+            cJSON *content_json = cJSON_Parse(content->valuestring);
+            if (content_json) {
+                cJSON *text = cJSON_GetObjectItem(content_json, "text");
+                if (text && cJSON_IsString(text)) {
+                    msg->content = strdup(text->valuestring);
+                }
+                cJSON_Delete(content_json);
+            }
+            if (!msg->content) {
+                // 如果解析失败，直接使用原始内容
+                msg->content = strdup(content->valuestring);
+            }
+        }
+    }
+    
+    // 解析发送者信息
+    cJSON *sender = cJSON_GetObjectItem(event, "sender");
+    if (sender) {
+        cJSON *sender_id = cJSON_GetObjectItem(sender, "sender_id");
+        if (sender_id) {
+            cJSON *open_id = cJSON_GetObjectItem(sender_id, "open_id");
+            if (open_id && cJSON_IsString(open_id)) {
+                msg->sender_id = strdup(open_id->valuestring);
+                msg->sender_type = strdup("open_id");
+            } else {
+                cJSON *user_id = cJSON_GetObjectItem(sender_id, "user_id");
+                if (user_id && cJSON_IsString(user_id)) {
+                    msg->sender_id = strdup(user_id->valuestring);
+                    msg->sender_type = strdup("user_id");
+                } else {
+                    cJSON *union_id = cJSON_GetObjectItem(sender_id, "union_id");
+                    if (union_id && cJSON_IsString(union_id)) {
+                        msg->sender_id = strdup(union_id->valuestring);
+                        msg->sender_type = strdup("union_id");
+                    }
+                }
+            }
+        }
+    }
+    
+    cJSON_Delete(root);
+    return msg;
+}
+
+// 释放消息结构
+void feishu_message_free(FeishuMessage *msg) {
+    if (!msg) return;
+    free(msg->sender_id);
+    free(msg->sender_type);
+    free(msg->message_id);
+    free(msg->message_type);
+    free(msg->content);
+    free(msg->chat_id);
+    free(msg->channel_id);
+    free(msg);
+}
+
+// 回复飞书消息
+bool feishu_reply_message(const char *channel_id, const char *message_id, const char *content) {
+    (void)message_id;  // unused for now
+    
+    if (!channel_id || !content) return false;
+    
+    // 查找对应的飞书渠道实例
+    ChannelInstance *channel = channel_find(channel_id);
+    if (!channel || channel->type != CHANNEL_FEISHU) {
+        log_error("[Feishu] Channel not found or not a Feishu channel: %s", channel_id);
+        return false;
+    }
+    
+    // 使用渠道的发送消息功能
+    return channel_send_message(channel, content);
+}
+
+// 处理飞书事件回调
+char* feishu_handle_event(const char *body) {
+    if (!body) {
+        return strdup("{\"code\":400,\"msg\":\"Empty body\"}");
+    }
+    
+    log_info("[Feishu] Received event: %.200s", body);
+    
+    cJSON *root = cJSON_Parse(body);
+    if (!root) {
+        return strdup("{\"code\":400,\"msg\":\"Invalid JSON\"}");
+    }
+    
+    // 检查是否是URL验证请求
+    cJSON *type = cJSON_GetObjectItem(root, "type");
+    if (type && cJSON_IsString(type) && strcmp(type->valuestring, "url_verification") == 0) {
+        cJSON *challenge = cJSON_GetObjectItem(root, "challenge");
+        if (challenge && cJSON_IsString(challenge)) {
+            char *response = (char *)malloc(strlen(challenge->valuestring) + 64);
+            snprintf(response, strlen(challenge->valuestring) + 64,
+                     "{\"challenge\":\"%s\"}", challenge->valuestring);
+            cJSON_Delete(root);
+            log_info("[Feishu] URL verification completed");
+            return response;
+        }
+    }
+    
+    // 处理事件回调
+    cJSON *schema = cJSON_GetObjectItem(root, "schema");
+    if (schema && cJSON_IsString(schema) && strcmp(schema->valuestring, "2.0") == 0) {
+        cJSON *header = cJSON_GetObjectItem(root, "header");
+        if (header) {
+            cJSON *event_type = cJSON_GetObjectItem(header, "event_type");
+            if (event_type && cJSON_IsString(event_type)) {
+                log_info("[Feishu] Event type: %s", event_type->valuestring);
+                
+                // 处理消息事件
+                if (strncmp(event_type->valuestring, "im.message", 10) == 0) {
+                    FeishuMessage *msg = feishu_parse_message(body);
+                    if (msg && msg->content) {
+                        log_info("[Feishu] Message from %s: %s", 
+                                 msg->sender_id ? msg->sender_id : "unknown",
+                                 msg->content);
+                        
+                        // 构建带有上下文的消息
+                        // 格式: [feishu:sender_id:message_id] content
+                        char *context_msg = (char *)malloc(512 + strlen(msg->content));
+                        if (context_msg) {
+                            snprintf(context_msg, 512 + strlen(msg->content),
+                                     "[feishu:%s:%s] %s",
+                                     msg->sender_id ? msg->sender_id : "unknown",
+                                     msg->chat_id ? msg->chat_id : msg->message_id,
+                                     msg->content);
+                            
+                            // 发送到 agent
+                            if (agent_send_message(context_msg)) {
+                                log_info("[Feishu] Message sent to agent successfully");
+                            } else {
+                                log_error("[Feishu] Failed to send message to agent");
+                            }
+                            free(context_msg);
+                        }
+                        
+                        feishu_message_free(msg);
+                    }
+                }
+            }
+        }
+    }
+    
+    cJSON_Delete(root);
+    
+    // 返回成功响应
+    return strdup("{\"code\":0,\"msg\":\"success\"}");
 }

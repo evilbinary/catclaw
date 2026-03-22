@@ -78,6 +78,14 @@ Config g_config = {
         .default_index = 0,
         .default_channel = NULL
     },
+    // Feishu WebSocket config defaults
+    .feishu_ws = {
+        .enabled = false,
+        .domain = NULL,
+        .ping_interval_sec = 120,
+        .reconnect_interval_sec = 120,
+        .max_reconnect_count = -1
+    },
     // Legacy fields
     .workspace_path = NULL,
     .model_provider = NULL,
@@ -348,6 +356,37 @@ static void parse_gateway_config(cJSON *gateway) {
     cJSON *websocket = cJSON_GetObjectItem(gateway, "websocket_enabled");
     if (websocket && (cJSON_IsTrue(websocket) || cJSON_IsFalse(websocket))) {
         g_config.gateway.websocket_enabled = cJSON_IsTrue(websocket);
+    }
+}
+
+// Parse Feishu WebSocket configuration
+static void parse_feishu_ws_config(cJSON *feishu_ws) {
+    if (!feishu_ws) return;
+    
+    cJSON *enabled = cJSON_GetObjectItem(feishu_ws, "enabled");
+    if (enabled && (cJSON_IsTrue(enabled) || cJSON_IsFalse(enabled))) {
+        g_config.feishu_ws.enabled = cJSON_IsTrue(enabled);
+    }
+    
+    cJSON *domain = cJSON_GetObjectItem(feishu_ws, "domain");
+    if (domain && cJSON_IsString(domain)) {
+        free(g_config.feishu_ws.domain);
+        g_config.feishu_ws.domain = strdup(domain->valuestring);
+    }
+    
+    cJSON *ping_interval = cJSON_GetObjectItem(feishu_ws, "ping_interval_sec");
+    if (ping_interval && cJSON_IsNumber(ping_interval)) {
+        g_config.feishu_ws.ping_interval_sec = (int)ping_interval->valuedouble;
+    }
+    
+    cJSON *reconnect_interval = cJSON_GetObjectItem(feishu_ws, "reconnect_interval_sec");
+    if (reconnect_interval && cJSON_IsNumber(reconnect_interval)) {
+        g_config.feishu_ws.reconnect_interval_sec = (int)reconnect_interval->valuedouble;
+    }
+    
+    cJSON *max_reconnect = cJSON_GetObjectItem(feishu_ws, "max_reconnect_count");
+    if (max_reconnect && cJSON_IsNumber(max_reconnect)) {
+        g_config.feishu_ws.max_reconnect_count = (int)max_reconnect->valuedouble;
     }
 }
 
@@ -832,6 +871,11 @@ bool config_load(void) {
                 sync_default_channel();
             }
             
+            cJSON *feishu_ws = cJSON_GetObjectItem(root, "feishu_ws");
+            if (feishu_ws) {
+                parse_feishu_ws_config(feishu_ws);
+            }
+            
             // Parse legacy configuration for backward compatibility
             parse_legacy_config(root);
 
@@ -1028,6 +1072,9 @@ void config_cleanup(void) {
         free(g_config.channels.channels);
     }
     free(g_config.channels.default_channel);
+    
+    // Cleanup feishu_ws config
+    free(g_config.feishu_ws.domain);
     
     // Cleanup legacy fields
     free(g_config.workspace_path);
