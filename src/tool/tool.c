@@ -10,6 +10,7 @@
 
 #include "tool.h"
 #include "common/cJSON.h"
+#include "common/http_client.h"
 
 // Resolve relative path to absolute path
 // If path starts with '/', return as-is (absolute path)
@@ -484,7 +485,7 @@ int tool_read_memory(ToolArgs* args, char** result, int* result_len) {
     return 0;
 }
 
-// Weather tool
+// Weather tool - calls wttr.in API
 int tool_get_weather(ToolArgs* args, char** result, int* result_len) {
     const char* location = tool_args_get(args, "location");
     if (!location) location = tool_args_get(args, "arg");
@@ -495,30 +496,130 @@ int tool_get_weather(ToolArgs* args, char** result, int* result_len) {
         return -1;
     }
     
-    *result = (char*)malloc(256);
-    if (*result) {
-        // Simple mock weather data
-        if (strstr(location, "beijing") || strstr(location, "北京")) {
-            snprintf(*result, 256, "北京天气：22°C，晴朗，湿度：45%%");
-        } else if (strstr(location, "shanghai") || strstr(location, "上海")) {
-            snprintf(*result, 256, "上海天气：25°C，多云，湿度：60%%");
-        } else if (strstr(location, "guangzhou") || strstr(location, "广州")) {
-            snprintf(*result, 256, "广州天气：28°C，雷阵雨，湿度：75%%");
-        } else if (strstr(location, "shenzhen") || strstr(location, "深圳")) {
-            snprintf(*result, 256, "深圳天气：27°C，多云，湿度：70%%");
-        } else if (strstr(location, "new york") || strstr(location, "纽约")) {
-            snprintf(*result, 256, "纽约天气：18°C，小雨，湿度：75%%");
-        } else if (strstr(location, "london") || strstr(location, "伦敦")) {
-            snprintf(*result, 256, "伦敦天气：15°C，雾，湿度：80%%");
-        } else if (strstr(location, "tokyo") || strstr(location, "东京")) {
-            snprintf(*result, 256, "东京天气：20°C，晴间多云，湿度：55%%");
-        } else {
-            snprintf(*result, 256, "%s天气：20°C，局部多云，湿度：50%%", location);
+#ifdef HAVE_CURL
+    // Build URL for wttr.in API (format=j1 for JSON)
+    char url[512];
+    char* encoded_location = http_url_encode(location);
+    if (!encoded_location) {
+        *result = strdup("Error: Failed to encode location");
+        *result_len = strlen(*result);
+        return -1;
+    }
+    snprintf(url, sizeof(url), "https://wttr.in/%s?format=j1", encoded_location);
+    free(encoded_location);
+    
+    // Make HTTP request
+    HttpResponse* resp = http_get(url);
+    if (!resp || !resp->success) {
+        if (resp) http_response_free(resp);
+        *result = strdup("Error: Failed to fetch weather data");
+        *result_len = strlen(*result);
+        return -1;
+    }
+    
+    // Parse JSON response
+    cJSON* root = cJSON_Parse(resp->body);
+    http_response_free(resp);
+    
+    if (!root) {
+        *result = strdup("Error: Failed to parse weather data");
+        *result_len = strlen(*result);
+        return -1;
+    }
+    
+    // Extract weather info from current_condition array
+    cJSON* current = cJSON_GetObjectItem(root, "current_condition");
+    cJSON* area = cJSON_GetObjectItem(root, "nearest_area");
+    
+    char* weather_desc = NULL;
+    char* temp_c = NULL;
+    char* humidity = NULL;
+    char* feels_like = NULL;
+    char* wind_speed = NULL;
+    char* area_name = NULL;
+    
+    if (current && cJSON_IsArray(current) && cJSON_GetArraySize(current) > 0) {
+        cJSON* cond = cJSON_GetArrayItem(current, 0);
+        if (cond) {
+            cJSON* desc_arr = cJSON_GetObjectItem(cond, "weatherDesc");
+            if (desc_arr && cJSON_IsArray(desc_arr) && cJSON_GetArraySize(desc_arr) > 0) {
+                cJSON* desc_item = cJSON_GetArrayItem(desc_arr, 0);
+                if (desc_item) {
+                    cJSON* val = cJSON_GetObjectItem(desc_item, "value");
+                    if (val && cJSON_IsString(val)) {
+                        weather_desc = strdup(val->valuestring);
+                    }
+                }
+            }
+            cJSON* temp = cJSON_GetObjectItem(cond, "temp_C");
+            if (temp && cJSON_IsString(temp)) {
+                temp_c = strdup(temp->valuestring);
+            }
+            cJSON* hum = cJSON_GetObjectItem(cond, "humidity");
+            if (hum && cJSON_IsString(hum)) {
+                humidity = strdup(hum->valuestring);
+            }
+            cJSON* feels = cJSON_GetObjectItem(cond, "FeelsLikeC");
+            if (feels && cJSON_IsString(feels)) {
+                feels_like = strdup(feels->valuestring);
+            }
+            cJSON* wind = cJSON_GetObjectItem(cond, "windspeedKmph");
+            if (wind && cJSON_IsString(wind)) {
+                wind_speed = strdup(wind->valuestring);
+            }
         }
+    }
+    
+    // Get area name
+    if (area && cJSON_IsArray(area) && cJSON_GetArraySize(area) > 0) {
+        cJSON* area_obj = cJSON_GetArrayItem(area, 0);
+        if (area_obj) {
+            cJSON* name_arr = cJSON_GetObjectItem(area_obj, "areaName");
+            if (name_arr && cJSON_IsArray(name_arr) && cJSON_GetArraySize(name_arr) > 0) {
+                cJSON* name_item = cJSON_GetArrayItem(name_arr, 0);
+                if (name_item) {
+                    cJSON* val = cJSON_GetObjectItem(name_item, "value");
+                    if (val && cJSON_IsString(val)) {
+                        area_name = strdup(val->valuestring);
+                    }
+                }
+            }
+        }
+    }
+    
+    cJSON_Delete(root);
+    
+    // Format result
+    size_t buf_size = 512;
+    *result = (char*)malloc(buf_size);
+    if (*result) {
+        snprintf(*result, buf_size, "%s天气：%s，温度：%s°C (体感%s°C)，湿度：%s%%，风速：%skm/h",
+            area_name ? area_name : location,
+            weather_desc ? weather_desc : "未知",
+            temp_c ? temp_c : "?",
+            feels_like ? feels_like : "?",
+            humidity ? humidity : "?",
+            wind_speed ? wind_speed : "?");
         *result_len = strlen(*result);
     }
     
+    free(weather_desc);
+    free(temp_c);
+    free(humidity);
+    free(feels_like);
+    free(wind_speed);
+    free(area_name);
+    
     return 0;
+#else
+    // Fallback when curl is not available
+    *result = (char*)malloc(256);
+    if (*result) {
+        snprintf(*result, 256, "%s天气：20°C，局部多云，湿度：50%% (未启用HTTP)", location);
+        *result_len = strlen(*result);
+    }
+    return 0;
+#endif
 }
 
 // List directory tool
