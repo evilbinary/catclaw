@@ -193,7 +193,11 @@
   "app_id": "cli_xxx",
   "app_secret": "xxx",
   "receive_id": "ou_xxx",
-  "receive_id_type": "open_id"
+  "receive_id_type": "open_id",
+  "ws_enabled": true,
+  "ws_ping_interval": 120,
+  "ws_reconnect_interval": 120,
+  "ws_max_reconnect": -1
 }
 ```
 
