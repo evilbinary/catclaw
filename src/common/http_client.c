@@ -191,6 +191,7 @@ static HttpResponse* do_request(const HttpRequest* req, bool stream,
     // 设置超时
     if (req->timeout_sec > 0) {
         curl_easy_setopt(curl, CURLOPT_TIMEOUT, req->timeout_sec);
+        curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L);  // 连接超时 10 秒
     }
     
     // 设置重定向
@@ -258,11 +259,15 @@ static HttpResponse* do_request(const HttpRequest* req, bool stream,
 
 // ==================== 简单接口 ====================
 
+// 默认超时时间（秒）
+#define DEFAULT_TIMEOUT_SEC 30
+
 HttpResponse* http_get(const char* url) {
     HttpRequest req = {
         .url = url,
         .method = "GET",
-        .follow_redirects = true
+        .follow_redirects = true,
+        .timeout_sec = DEFAULT_TIMEOUT_SEC
     };
     return do_request(&req, false, NULL, NULL);
 }
@@ -273,7 +278,8 @@ HttpResponse* http_post(const char* url, const char* json_body) {
         .method = "POST",
         .body = json_body,
         .content_type = "application/json",
-        .follow_redirects = true
+        .follow_redirects = true,
+        .timeout_sec = DEFAULT_TIMEOUT_SEC
     };
     return do_request(&req, false, NULL, NULL);
 }
@@ -284,7 +290,8 @@ HttpResponse* http_post_data(const char* url, const char* body, const char* cont
         .method = "POST",
         .body = body,
         .content_type = content_type,
-        .follow_redirects = true
+        .follow_redirects = true,
+        .timeout_sec = DEFAULT_TIMEOUT_SEC
     };
     return do_request(&req, false, NULL, NULL);
 }

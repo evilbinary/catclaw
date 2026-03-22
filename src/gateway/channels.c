@@ -127,16 +127,21 @@ bool channels_init(void) {
     g_channel_manager.head = NULL;
     g_channel_manager.count = 0;
     
-    // Add default WebChat channel
-    ChannelConfig webchat_config = {
-        .id = "webchat-default",
-        .name = "WebChat",
-        .type = CHANNEL_WEBCHAT
-    };
-    ChannelInstance *webchat = channel_add("webchat-default", CHANNEL_WEBCHAT, &webchat_config);
-    if (webchat) {
-        webchat->enabled = true;
-        webchat->connected = true;
+    // Load channels from configuration if available
+    if (g_config.channels.count > 0) {
+        channels_load_from_config();
+    } else {
+        // No channels configured, add default WebChat channel
+        ChannelConfig webchat_config = {
+            .id = "webchat-default",
+            .name = "WebChat",
+            .type = CHANNEL_WEBCHAT
+        };
+        ChannelInstance *webchat = channel_add("webchat-default", CHANNEL_WEBCHAT, &webchat_config);
+        if (webchat) {
+            webchat->enabled = true;
+            webchat->connected = true;
+        }
     }
     
     printf("[Channel] Manager initialized\n");

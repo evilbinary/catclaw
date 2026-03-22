@@ -101,46 +101,57 @@
 
 ```json
 {
+  "channels": {
+    "list": [
+      {
+        "id": "feishu-webhook-1",
+        "name": "飞书通知机器人",
+        "type": "feishu",
+        "enabled": true,
+        "webhook_url": "https://open.feishu.cn/open-apis/bot/v2/hook/xxx"
+      },
+      {
+        "id": "feishu-api-1",
+        "name": "飞书API机器人",
+        "type": "feishu",
+        "enabled": true,
+        "app_id": "cli_xxx",
+        "app_secret": "xxx",
+        "receive_id": "ou_xxx",
+        "receive_id_type": "open_id"
+      },
+      {
+        "id": "telegram-1",
+        "name": "Telegram Bot",
+        "type": "telegram",
+        "enabled": true,
+        "bot_token": "123456:ABC-xxx",
+        "chat_id": "-1001234567890"
+      },
+      {
+        "id": "discord-1",
+        "name": "Discord Bot",
+        "type": "discord",
+        "enabled": true,
+        "bot_token": "xxx.xxx.xxx",
+        "channel_id": "123456789012345678"
+      }
+    ],
+    "default": "feishu-webhook-1"
+  }
+}
+```
+
+### 简化配置（数组格式，向后兼容）
+
+```json
+{
   "channels": [
     {
-      "id": "feishu-webhook-1",
-      "name": "飞书通知机器人",
+      "id": "feishu-1",
+      "name": "飞书机器人",
       "type": "feishu",
-      "enabled": true,
       "webhook_url": "https://open.feishu.cn/open-apis/bot/v2/hook/xxx"
-    },
-    {
-      "id": "feishu-api-1",
-      "name": "飞书API机器人",
-      "type": "feishu",
-      "enabled": true,
-      "app_id": "cli_xxx",
-      "app_secret": "xxx",
-      "receive_id": "ou_xxx",
-      "receive_id_type": "open_id"
-    },
-    {
-      "id": "telegram-1",
-      "name": "Telegram Bot",
-      "type": "telegram",
-      "enabled": true,
-      "bot_token": "123456:ABC-xxx",
-      "chat_id": "-1001234567890"
-    },
-    {
-      "id": "discord-1",
-      "name": "Discord Bot",
-      "type": "discord",
-      "enabled": true,
-      "bot_token": "xxx.xxx.xxx",
-      "channel_id": "123456789012345678"
-    },
-    {
-      "id": "discord-webhook-1",
-      "name": "Discord Webhook",
-      "type": "discord",
-      "enabled": true,
-      "webhook_url": "https://discord.com/api/webhooks/xxx/xxx"
     }
   ]
 }

@@ -101,6 +101,9 @@ typedef struct {
     ChannelConfigEntry *channels;  // 渠道配置数组
     int count;                      // 渠道数量
     int capacity;                   // 数组容量
+    int current_index;              // 当前使用的渠道索引
+    int default_index;              // 默认渠道索引
+    char *default_channel;          // 默认渠道名称（优先使用）
 } ChannelsConfig;
 
 // Main configuration structure
@@ -152,5 +155,8 @@ const char* config_get_current_model_name(void);
 void config_list_channels(void);
 int config_get_channel_count(void);
 ChannelConfigEntry* config_get_channel(int index);
+ChannelConfigEntry* config_get_default_channel(void);
+ChannelConfigEntry* config_get_current_channel(void);
+bool config_switch_channel(const char *channel_id_or_name);
 
 #endif // CONFIG_H

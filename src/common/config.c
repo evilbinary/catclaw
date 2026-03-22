@@ -71,7 +71,10 @@ Config g_config = {
     .channels = {
         .channels = NULL,
         .count = 0,
-        .capacity = 0
+        .capacity = 0,
+        .current_index = 0,
+        .default_index = 0,
+        .default_channel = NULL
     },
     // Legacy fields
     .workspace_path = NULL,
@@ -555,7 +558,26 @@ static void parse_single_channel(cJSON *channel_json, int index) {
 static void parse_channels_config(cJSON *channels) {
     if (!channels) return;
     
-    if (cJSON_IsArray(channels)) {
+    // Check if this is an object with "list" and "default" fields
+    cJSON *list = cJSON_GetObjectItem(channels, "list");
+    cJSON *default_channel = cJSON_GetObjectItem(channels, "default");
+    
+    if (list && cJSON_IsArray(list)) {
+        // Parse array of channels from "list" field
+        int size = cJSON_GetArraySize(list);
+        for (int i = 0; i < size; i++) {
+            cJSON *channel = cJSON_GetArrayItem(list, i);
+            if (channel) {
+                parse_single_channel(channel, i);
+            }
+        }
+        
+        // Parse default channel
+        if (default_channel && cJSON_IsString(default_channel)) {
+            g_config.channels.default_channel = strdup(default_channel->valuestring);
+        }
+    } else if (cJSON_IsArray(channels)) {
+        // Direct array (backward compatibility)
         int size = cJSON_GetArraySize(channels);
         for (int i = 0; i < size; i++) {
             cJSON *channel = cJSON_GetArrayItem(channels, i);
@@ -564,9 +586,56 @@ static void parse_channels_config(cJSON *channels) {
             }
         }
     } else if (cJSON_IsObject(channels)) {
-        // Single channel config
+        // Single channel (backward compatibility)
         parse_single_channel(channels, 0);
     }
+}
+
+// Find channel index by id or name
+static int find_channel_index(const char *name_or_id) {
+    if (!name_or_id || !g_config.channels.channels) return -1;
+    
+    for (int i = 0; i < g_config.channels.count; i++) {
+        // Try to match by id first
+        if (g_config.channels.channels[i].id &&
+            strcmp(g_config.channels.channels[i].id, name_or_id) == 0) {
+            return i;
+        }
+        // Then try to match by name
+        if (g_config.channels.channels[i].name &&
+            strcmp(g_config.channels.channels[i].name, name_or_id) == 0) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+// Sync default channel index after loading config
+static void sync_default_channel(void) {
+    if (g_config.channels.count == 0) return;
+    
+    // If we have a default channel name, find its index
+    if (g_config.channels.default_channel) {
+        int idx = find_channel_index(g_config.channels.default_channel);
+        if (idx >= 0) {
+            g_config.channels.default_index = idx;
+            g_config.channels.current_index = idx;
+            return;
+        }
+    }
+    
+    // Fall back to first enabled channel
+    for (int i = 0; i < g_config.channels.count; i++) {
+        if (g_config.channels.channels[i].enabled) {
+            g_config.channels.default_index = i;
+            g_config.channels.current_index = i;
+            return;
+        }
+    }
+    
+    // If no enabled channel, use first one
+    g_config.channels.default_index = 0;
+    g_config.channels.current_index = 0;
 }
 
 // Parse legacy configuration (for backward compatibility)
@@ -746,7 +815,10 @@ bool config_load(void) {
             if (agent) parse_agent_config(agent);
             
             cJSON *channels = cJSON_GetObjectItem(root, "channels");
-            if (channels) parse_channels_config(channels);
+            if (channels) {
+                parse_channels_config(channels);
+                sync_default_channel();
+            }
             
             // Parse legacy configuration for backward compatibility
             parse_legacy_config(root);
@@ -943,6 +1015,7 @@ void config_cleanup(void) {
         }
         free(g_config.channels.channels);
     }
+    free(g_config.channels.default_channel);
     
     // Cleanup legacy fields
     free(g_config.workspace_path);
@@ -1031,11 +1104,15 @@ void config_list_channels(void) {
     printf("Configured channels (%d total):\n", g_config.channels.count);
     for (int i = 0; i < g_config.channels.count; i++) {
         ChannelConfigEntry *ch = &g_config.channels.channels[i];
-        printf("  %d. [%s] %s (type: %s) %s\n", i,
+        const char *current_indicator = (i == g_config.channels.current_index) ? " [current]" : "";
+        const char *default_indicator = (i == g_config.channels.default_index) ? " [default]" : "";
+        printf("  %d. [%s] %s (type: %s) %s%s%s\n", i,
                ch->id ? ch->id : "(no-id)",
                ch->name ? ch->name : "(unnamed)",
                ch->type ? ch->type : "(unknown)",
-               ch->enabled ? "[enabled]" : "[disabled]");
+               ch->enabled ? "[enabled]" : "[disabled]",
+               current_indicator,
+               default_indicator);
     }
 }
 
@@ -1048,4 +1125,38 @@ int config_get_channel_count(void) {
 ChannelConfigEntry* config_get_channel(int index) {
     if (index < 0 || index >= g_config.channels.count) return NULL;
     return &g_config.channels.channels[index];
+}
+
+// Get default channel
+ChannelConfigEntry* config_get_default_channel(void) {
+    if (g_config.channels.count == 0) return NULL;
+    if (g_config.channels.default_index < 0 || 
+        g_config.channels.default_index >= g_config.channels.count) {
+        return &g_config.channels.channels[0];
+    }
+    return &g_config.channels.channels[g_config.channels.default_index];
+}
+
+// Get current channel
+ChannelConfigEntry* config_get_current_channel(void) {
+    if (g_config.channels.count == 0) return NULL;
+    if (g_config.channels.current_index < 0 || 
+        g_config.channels.current_index >= g_config.channels.count) {
+        return &g_config.channels.channels[0];
+    }
+    return &g_config.channels.channels[g_config.channels.current_index];
+}
+
+// Switch to a channel by id or name
+bool config_switch_channel(const char *channel_id_or_name) {
+    if (!channel_id_or_name || !g_config.channels.channels) return false;
+    
+    int idx = find_channel_index(channel_id_or_name);
+    if (idx >= 0) {
+        g_config.channels.current_index = idx;
+        printf("Switched to channel: %s\n", channel_id_or_name);
+        return true;
+    }
+    printf("Channel not found: %s\n", channel_id_or_name);
+    return false;
 }
