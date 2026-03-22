@@ -117,23 +117,23 @@ void tool_execute_request_free(ToolExecuteRequest* req) {
 // ==================== API 处理函数 ====================
 
 // POST /chat
-static HttpResponse* handle_chat(const HttpRequest* request, void* user_data) {
+static SrvResponse* handle_chat(const SrvRequest* request, void* user_data) {
     (void)user_data;
     
     if (!request->body) {
-        return http_response_error(400, "Missing request body");
+        return srv_response_error(400, "Missing request body");
     }
     
     ChatRequest* chat_req = chat_request_parse(request->body);
     if (!chat_req || !chat_req->message) {
         chat_request_free(chat_req);
-        return http_response_error(400, "Invalid chat request");
+        return srv_response_error(400, "Invalid chat request");
     }
     
     // 发送消息到 agent
     if (!agent_send_message(chat_req->message)) {
         chat_request_free(chat_req);
-        return http_response_error(500, "Failed to send message");
+        return srv_response_error(500, "Failed to send message");
     }
     
     // 构造响应
@@ -145,7 +145,7 @@ static HttpResponse* handle_chat(const HttpRequest* request, void* user_data) {
     char* json_str = cJSON_Print(response_json);
     cJSON_Delete(response_json);
     
-    HttpResponse* response = http_response_json(200, json_str);
+    SrvResponse* response = srv_response_json(200, json_str);
     free(json_str);
     chat_request_free(chat_req);
     
@@ -153,8 +153,8 @@ static HttpResponse* handle_chat(const HttpRequest* request, void* user_data) {
 }
 
 // 流式 chat 处理
-static bool handle_chat_stream(const HttpRequest* request, 
-                                StreamCallback callback, 
+static bool handle_chat_stream(const SrvRequest* request, 
+                                SrvStreamCallback callback, 
                                 void* user_data) {
     (void)user_data;
     
@@ -191,7 +191,7 @@ static bool handle_chat_stream(const HttpRequest* request,
 }
 
 // GET /health
-static HttpResponse* handle_health(const HttpRequest* request, void* user_data) {
+static SrvResponse* handle_health(const SrvRequest* request, void* user_data) {
     (void)request;
     (void)user_data;
     
@@ -203,14 +203,14 @@ static HttpResponse* handle_health(const HttpRequest* request, void* user_data) 
     char* json_str = cJSON_Print(response_json);
     cJSON_Delete(response_json);
     
-    HttpResponse* response = http_response_json(200, json_str);
+    SrvResponse* response = srv_response_json(200, json_str);
     free(json_str);
     
     return response;
 }
 
 // GET /models
-static HttpResponse* handle_models(const HttpRequest* request, void* user_data) {
+static SrvResponse* handle_models(const SrvRequest* request, void* user_data) {
     (void)request;
     (void)user_data;
     
@@ -230,24 +230,24 @@ static HttpResponse* handle_models(const HttpRequest* request, void* user_data) 
     char* json_str = cJSON_Print(response_json);
     cJSON_Delete(response_json);
     
-    HttpResponse* response = http_response_json(200, json_str);
+    SrvResponse* response = srv_response_json(200, json_str);
     free(json_str);
     
     return response;
 }
 
 // POST /model/switch
-static HttpResponse* handle_model_switch(const HttpRequest* request, void* user_data) {
+static SrvResponse* handle_model_switch(const SrvRequest* request, void* user_data) {
     (void)user_data;
     
     if (!request->body) {
-        return http_response_error(400, "Missing request body");
+        return srv_response_error(400, "Missing request body");
     }
     
     ModelSwitchRequest* switch_req = model_switch_request_parse(request->body);
     if (!switch_req || !switch_req->model) {
         model_switch_request_free(switch_req);
-        return http_response_error(400, "Invalid model switch request");
+        return srv_response_error(400, "Invalid model switch request");
     }
     
     // 切换模型
@@ -284,7 +284,7 @@ static HttpResponse* handle_model_switch(const HttpRequest* request, void* user_
     char* json_str = cJSON_Print(response_json);
     cJSON_Delete(response_json);
     
-    HttpResponse* response = http_response_json(success ? 200 : 400, json_str);
+    SrvResponse* response = srv_response_json(success ? 200 : 400, json_str);
     free(json_str);
     model_switch_request_free(switch_req);
     
@@ -292,7 +292,7 @@ static HttpResponse* handle_model_switch(const HttpRequest* request, void* user_
 }
 
 // GET /tools
-static HttpResponse* handle_tools(const HttpRequest* request, void* user_data) {
+static SrvResponse* handle_tools(const SrvRequest* request, void* user_data) {
     (void)request;
     (void)user_data;
     
@@ -317,24 +317,24 @@ static HttpResponse* handle_tools(const HttpRequest* request, void* user_data) {
     char* json_str = cJSON_Print(response_json);
     cJSON_Delete(response_json);
     
-    HttpResponse* response = http_response_json(200, json_str);
+    SrvResponse* response = srv_response_json(200, json_str);
     free(json_str);
     
     return response;
 }
 
 // POST /tools/execute
-static HttpResponse* handle_tools_execute(const HttpRequest* request, void* user_data) {
+static SrvResponse* handle_tools_execute(const SrvRequest* request, void* user_data) {
     (void)user_data;
     
     if (!request->body) {
-        return http_response_error(400, "Missing request body");
+        return srv_response_error(400, "Missing request body");
     }
     
     ToolExecuteRequest* tool_req = tool_execute_request_parse(request->body);
     if (!tool_req || !tool_req->name) {
         tool_execute_request_free(tool_req);
-        return http_response_error(400, "Invalid tool execute request");
+        return srv_response_error(400, "Invalid tool execute request");
     }
     
     // 执行工具
@@ -361,7 +361,7 @@ static HttpResponse* handle_tools_execute(const HttpRequest* request, void* user
     char* json_str = cJSON_Print(response_json);
     cJSON_Delete(response_json);
     
-    HttpResponse* response = http_response_json(ret == 0 ? 200 : 500, json_str);
+    SrvResponse* response = srv_response_json(ret == 0 ? 200 : 500, json_str);
     free(json_str);
     tool_execute_request_free(tool_req);
     
@@ -369,7 +369,7 @@ static HttpResponse* handle_tools_execute(const HttpRequest* request, void* user
 }
 
 // GET /sessions
-static HttpResponse* handle_sessions(const HttpRequest* request, void* user_data) {
+static SrvResponse* handle_sessions(const SrvRequest* request, void* user_data) {
     (void)request;
     (void)user_data;
     
@@ -390,14 +390,14 @@ static HttpResponse* handle_sessions(const HttpRequest* request, void* user_data
     char* json_str = cJSON_Print(response_json);
     cJSON_Delete(response_json);
     
-    HttpResponse* response = http_response_json(200, json_str);
+    SrvResponse* response = srv_response_json(200, json_str);
     free(json_str);
     
     return response;
 }
 
 // POST /session/clear
-static HttpResponse* handle_session_clear(const HttpRequest* request, void* user_data) {
+static SrvResponse* handle_session_clear(const SrvRequest* request, void* user_data) {
     (void)user_data;
     
     // 解析 session_id
@@ -427,7 +427,7 @@ static HttpResponse* handle_session_clear(const HttpRequest* request, void* user
     char* json_str = cJSON_Print(response_json);
     cJSON_Delete(response_json);
     
-    HttpResponse* response = http_response_json(200, json_str);
+    SrvResponse* response = srv_response_json(200, json_str);
     free(json_str);
     free(session_id);
     
@@ -435,7 +435,7 @@ static HttpResponse* handle_session_clear(const HttpRequest* request, void* user
 }
 
 // 路由处理
-static HttpResponse* route_request(const HttpRequest* request, void* user_data) {
+static SrvResponse* route_request(const SrvRequest* request, void* user_data) {
     const char* path = request->path;
     
     log_debug("Routing request: %s %s", request->method, path);
@@ -481,13 +481,13 @@ static HttpResponse* route_request(const HttpRequest* request, void* user_data) 
     }
     
     // 404
-    return http_response_error(404, "Not found");
+    return srv_response_error(404, "Not found");
 }
 
 // ==================== 公共 API ====================
 
 HttpServer* http_api_init(int port) {
-    HttpServerConfig config = {
+    SrvConfig config = {
         .port = port,
         .max_connections = 100,
         .handler = route_request,

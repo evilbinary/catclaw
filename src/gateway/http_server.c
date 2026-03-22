@@ -44,7 +44,7 @@ static const char* http_status_text(int status_code) {
 }
 
 // URL 解码
-char* http_url_decode(const char* src) {
+char* srv_url_decode(const char* src) {
     if (!src) return NULL;
     
     size_t len = strlen(src);
@@ -70,7 +70,7 @@ char* http_url_decode(const char* src) {
 }
 
 // 解析查询参数
-char* http_get_query_param(const char* query, const char* key) {
+char* srv_get_query_param(const char* query, const char* key) {
     if (!query || !key) return NULL;
     
     size_t key_len = strlen(key);
@@ -82,7 +82,7 @@ char* http_get_query_param(const char* query, const char* key) {
             const char* val_start = ptr + key_len + 1;
             const char* val_end = strchr(val_start, '&');
             
-            size_t val_len = val_end ? (val_end - val_start) : strlen(val_start);
+            size_t val_len = val_end ? (size_t)(val_end - val_start) : strlen(val_start);
             char* value = (char*)malloc(val_len + 1);
             if (!value) return NULL;
             
@@ -90,7 +90,7 @@ char* http_get_query_param(const char* query, const char* key) {
             value[val_len] = '\0';
             
             // URL 解码
-            char* decoded = http_url_decode(value);
+            char* decoded = srv_url_decode(value);
             free(value);
             return decoded;
         }
@@ -104,8 +104,8 @@ char* http_get_query_param(const char* query, const char* key) {
 }
 
 // 创建 HTTP 响应
-HttpResponse* http_response_create(int status_code, const char* content_type, const char* body) {
-    HttpResponse* response = (HttpResponse*)calloc(1, sizeof(HttpResponse));
+SrvResponse* srv_response_create(int status_code, const char* content_type, const char* body) {
+    SrvResponse* response = (SrvResponse*)calloc(1, sizeof(SrvResponse));
     if (!response) return NULL;
     
     response->status_code = status_code;
@@ -126,12 +126,12 @@ HttpResponse* http_response_create(int status_code, const char* content_type, co
 }
 
 // 创建 JSON 响应
-HttpResponse* http_response_json(int status_code, const char* json) {
-    return http_response_create(status_code, "application/json", json);
+SrvResponse* srv_response_json(int status_code, const char* json) {
+    return srv_response_create(status_code, "application/json", json);
 }
 
 // 创建错误响应
-HttpResponse* http_response_error(int status_code, const char* message) {
+SrvResponse* srv_response_error(int status_code, const char* message) {
     cJSON* root = cJSON_CreateObject();
     cJSON_AddStringToObject(root, "error", message);
     cJSON_AddNumberToObject(root, "status", status_code);
@@ -139,15 +139,15 @@ HttpResponse* http_response_error(int status_code, const char* message) {
     char* json_str = cJSON_Print(root);
     cJSON_Delete(root);
     
-    HttpResponse* response = http_response_json(status_code, json_str);
+    SrvResponse* response = srv_response_json(status_code, json_str);
     free(json_str);
     
     return response;
 }
 
 // 创建流式响应
-HttpResponse* http_response_stream(const char* content_type) {
-    HttpResponse* response = (HttpResponse*)calloc(1, sizeof(HttpResponse));
+SrvResponse* srv_response_stream(const char* content_type) {
+    SrvResponse* response = (SrvResponse*)calloc(1, sizeof(SrvResponse));
     if (!response) return NULL;
     
     response->status_code = 200;
@@ -163,14 +163,14 @@ HttpResponse* http_response_stream(const char* content_type) {
 }
 
 // 释放响应
-void http_response_free(HttpResponse* response) {
+void srv_response_free(SrvResponse* response) {
     if (!response) return;
     if (response->body) free(response->body);
     free(response);
 }
 
 // 释放请求
-void http_request_free(HttpRequest* request) {
+void srv_request_free(SrvRequest* request) {
     if (!request) return;
     if (request->body) free(request->body);
     if (request->headers) free(request->headers);
@@ -178,7 +178,7 @@ void http_request_free(HttpRequest* request) {
 }
 
 // 发送 SSE 事件
-bool http_send_sse_event(int client_socket, const char* event, const char* data) {
+bool srv_send_sse_event(int client_socket, const char* event, const char* data) {
     char buffer[BUFFER_SIZE];
     int len = 0;
     
@@ -207,18 +207,18 @@ bool http_send_sse_event(int client_socket, const char* event, const char* data)
 }
 
 // 发送 SSE 完成
-bool http_send_sse_done(int client_socket) {
-    return http_send_sse_event(client_socket, "done", "[DONE]");
+bool srv_send_sse_done(int client_socket) {
+    return srv_send_sse_event(client_socket, "done", "[DONE]");
 }
 
 // 解析 HTTP 请求
-static HttpRequest* parse_request(const char* buffer, size_t len) {
-    HttpRequest* request = (HttpRequest*)calloc(1, sizeof(HttpRequest));
+static SrvRequest* parse_request(const char* buffer, size_t len) {
+    SrvRequest* request = (SrvRequest*)calloc(1, sizeof(SrvRequest));
     if (!request) return NULL;
     
     // 解析请求行
     if (sscanf(buffer, "%15s %255s", request->method, request->path) != 2) {
-        http_request_free(request);
+        srv_request_free(request);
         return NULL;
     }
     
@@ -227,7 +227,7 @@ static HttpRequest* parse_request(const char* buffer, size_t len) {
     if (!header_end) {
         header_end = strstr(buffer, "\n\n");
         if (!header_end) {
-            http_request_free(request);
+            srv_request_free(request);
             return NULL;
         }
         header_end += 2;
@@ -273,7 +273,7 @@ static HttpRequest* parse_request(const char* buffer, size_t len) {
 }
 
 // 发送 HTTP 响应头
-static void send_response_headers(int client_socket, HttpResponse* response, bool stream) {
+static void send_response_headers(int client_socket, SrvResponse* response, bool stream) {
     char headers[BUFFER_SIZE];
     int len = 0;
     
@@ -326,11 +326,11 @@ static void handle_connection(int client_socket, HttpServer* server) {
     }
     
     // 解析请求
-    HttpRequest* request = parse_request(buffer, bytes_received);
+    SrvRequest* request = parse_request(buffer, bytes_received);
     if (!request) {
-        HttpResponse* error = http_response_error(400, "Invalid request");
+        SrvResponse* error = srv_response_error(400, "Invalid request");
         send_response_headers(client_socket, error, false);
-        http_response_free(error);
+        srv_response_free(error);
         closesocket(client_socket);
         return;
     }
@@ -355,11 +355,11 @@ static void handle_connection(int client_socket, HttpServer* server) {
         is_stream_request = true;
     }
     
-    HttpResponse* response = NULL;
+    SrvResponse* response = NULL;
     
     if (is_stream_request && server->stream_handler) {
         // 流式响应
-        response = http_response_stream("text/event-stream");
+        response = srv_response_stream("text/event-stream");
         send_response_headers(client_socket, response, true);
         
         // 定义流式回调
@@ -371,14 +371,14 @@ static void handle_connection(int client_socket, HttpServer* server) {
         
         // 调用流式处理器
         bool success = server->stream_handler(request, 
-            (StreamCallback)http_send_sse_event, 
+            (SrvStreamCallback)srv_send_sse_event, 
             &ctx);
         
         if (success) {
-            http_send_sse_done(client_socket);
+            srv_send_sse_done(client_socket);
         }
         
-        http_response_free(response);
+        srv_response_free(response);
     } else if (server->handler) {
         // 普通响应
         response = server->handler(request, server->user_data);
@@ -388,20 +388,20 @@ static void handle_connection(int client_socket, HttpServer* server) {
             if (response->body && response->body_len > 0) {
                 send(client_socket, response->body, response->body_len, 0);
             }
-            http_response_free(response);
+            srv_response_free(response);
         } else {
-            HttpResponse* error = http_response_error(500, "Handler error");
+            SrvResponse* error = srv_response_error(500, "Handler error");
             send_response_headers(client_socket, error, false);
-            http_response_free(error);
+            srv_response_free(error);
         }
     } else {
         // 没有处理器
-        response = http_response_error(404, "Not found");
+        response = srv_response_error(404, "Not found");
         send_response_headers(client_socket, response, false);
-        http_response_free(response);
+        srv_response_free(response);
     }
     
-    http_request_free(request);
+    srv_request_free(request);
     closesocket(client_socket);
 }
 
@@ -447,7 +447,6 @@ static void* server_thread(void* arg) {
         log_debug("HTTP client connected");
         
         // 处理连接 (简单实现：在主线程处理)
-        // TODO: 使用线程池处理并发连接
         handle_connection(client_socket, server);
     }
     
@@ -456,7 +455,7 @@ static void* server_thread(void* arg) {
 }
 
 // 创建 HTTP 服务器
-HttpServer* http_server_create(const HttpServerConfig* config) {
+HttpServer* http_server_create(const SrvConfig* config) {
     HttpServer* server = (HttpServer*)calloc(1, sizeof(HttpServer));
     if (!server) return NULL;
     
