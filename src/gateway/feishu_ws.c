@@ -290,37 +290,28 @@ static size_t pb_encode_ping_frame(uint8_t *buf, size_t buf_size, int64_t servic
     return len;
 }
 
-// 编码响应帧
-static size_t pb_encode_response_frame(uint8_t *buf, size_t buf_size, 
-                                        PbFrame *req_frame, const char *response_json) {
+// 编码 ACK 响应帧
+static size_t pb_encode_ack_frame(uint8_t *buf, size_t buf_size, PbFrame *req_frame) {
     size_t len = 0;
     
-    // Field 1: log_id
+    // Field 1: log_id (same as request)
     len = pb_write_varint_field(buf, 1, req_frame->log_id);
     
-    // Field 2: service_id
+    // Field 2: service_id (same as request)  
     len += pb_write_varint_field(buf + len, 2, req_frame->service_id);
     
-    // Field 3: seq_id
+    // Field 3: seq_id (same as request)
     len += pb_write_varint_field(buf + len, 3, req_frame->seq_id);
     
-    // Field 4: method = DATA
-    len += pb_write_varint_field(buf + len, 4, FRAME_TYPE_DATA);
+    // Field 4: method = CONTROL (same as request for ack)
+    len += pb_write_varint_field(buf + len, 4, FRAME_TYPE_CONTROL);
     
-    // Field 5: headers
-    for (int i = 0; i < req_frame->header_count; i++) {
-        uint8_t header_buf[256];
-        size_t header_len = 0;
-        header_len = pb_write_string(header_buf, 1, req_frame->headers[i].key, 
-                                     strlen(req_frame->headers[i].key));
-        header_len += pb_write_string(header_buf + header_len, 2, 
-                                      req_frame->headers[i].value, 
-                                      strlen(req_frame->headers[i].value));
-        len += pb_write_string(buf + len, 5, (char *)header_buf, header_len);
-    }
-    
-    // Field 6: payload
-    len += pb_write_string(buf + len, 6, response_json, strlen(response_json));
+    // Field 5: headers - add type=ack
+    uint8_t header_buf[64];
+    size_t header_len = 0;
+    header_len = pb_write_string(header_buf, 1, "type", 4);
+    header_len += pb_write_string(header_buf + header_len, 2, "ack", 3);
+    len += pb_write_string(buf + len, 5, (char *)header_buf, header_len);
     
     (void)buf_size;
     return len;
@@ -500,12 +491,11 @@ static bool feishu_ws_on_message(WsClient *ws, const char *data, size_t len, voi
             feishu_message_free(msg);
         }
         
-        // 发送响应
+        // 发送 ACK 响应
         uint8_t resp_buf[4096];
-        size_t resp_len = pb_encode_response_frame(resp_buf, sizeof(resp_buf), 
-                                                    &frame, "{\"code\":0,\"msg\":\"success\"}");
+        size_t resp_len = pb_encode_ack_frame(resp_buf, sizeof(resp_buf), &frame);
         ws_client_send_binary(ws, resp_buf, resp_len);
-        log_debug("[FeishuWS] Sent response frame, len=%zu", resp_len);
+        log_debug("[FeishuWS] Sent ACK frame, len=%zu", resp_len);
     } else if (type && strcmp(type, MSG_TYPE_PING) == 0) {
         log_debug("[FeishuWS] Received PING");
     } else if (type && strcmp(type, MSG_TYPE_PONG) == 0) {
