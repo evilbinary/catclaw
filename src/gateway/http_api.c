@@ -492,7 +492,8 @@ HttpServer* http_api_init(int port) {
         .max_connections = 100,
         .handler = route_request,
         .stream_handler = handle_chat_stream,
-        .user_data = NULL
+        .user_data = NULL,
+        .api_key = g_config.gateway.http_api_key
     };
     
     return http_server_create(&config);

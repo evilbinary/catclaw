@@ -335,6 +335,74 @@ static void handle_connection(int client_socket, HttpServer* server) {
         return;
     }
     
+    // 检查授权
+    if (server->api_key && server->api_key[0] != '\0') {
+        bool authorized = false;
+        
+        // 检查 Authorization header: "Bearer <token>"
+        if (request->headers) {
+            const char* auth = strcasestr(request->headers, "Authorization:");
+            if (auth) {
+                auth += 14; // skip "Authorization:"
+                while (*auth == ' ') auth++;
+                
+                // 支持 "Bearer <token>" 格式
+                if (strncasecmp(auth, "Bearer ", 7) == 0) {
+                    auth += 7;
+                    const char* auth_end = strstr(auth, "\r\n");
+                    if (!auth_end) auth_end = strstr(auth, "\n");
+                    
+                    size_t token_len = auth_end ? (size_t)(auth_end - auth) : strlen(auth);
+                    if (token_len == strlen(server->api_key) && 
+                        strncmp(auth, server->api_key, token_len) == 0) {
+                        authorized = true;
+                    }
+                }
+                
+                // 也支持直接传 token
+                if (!authorized) {
+                    const char* auth_end = strstr(auth, "\r\n");
+                    if (!auth_end) auth_end = strstr(auth, "\n");
+                    size_t token_len = auth_end ? (size_t)(auth_end - auth) : strlen(auth);
+                    if (token_len == strlen(server->api_key) && 
+                        strncmp(auth, server->api_key, token_len) == 0) {
+                        authorized = true;
+                    }
+                }
+            }
+            
+            // 检查 X-API-Key header
+            if (!authorized) {
+                const char* api_key_header = strcasestr(request->headers, "X-API-Key:");
+                if (api_key_header) {
+                    api_key_header += 10;
+                    while (*api_key_header == ' ') api_key_header++;
+                    const char* key_end = strstr(api_key_header, "\r\n");
+                    if (!key_end) key_end = strstr(api_key_header, "\n");
+                    size_t key_len = key_end ? (size_t)(key_end - api_key_header) : strlen(api_key_header);
+                    if (key_len == strlen(server->api_key) && 
+                        strncmp(api_key_header, server->api_key, key_len) == 0) {
+                        authorized = true;
+                    }
+                }
+            }
+        }
+        
+        if (!authorized) {
+            log_warn("HTTP request unauthorized: %s %s", request->method, request->path);
+            char response[] = "HTTP/1.1 401 Unauthorized\r\n"
+                             "Content-Type: application/json\r\n"
+                             "Access-Control-Allow-Origin: *\r\n"
+                             "WWW-Authenticate: Bearer\r\n"
+                             "Connection: close\r\n\r\n"
+                             "{\"error\":\"Unauthorized\",\"status\":401}";
+            send(client_socket, response, strlen(response), 0);
+            srv_request_free(request);
+            closesocket(client_socket);
+            return;
+        }
+    }
+    
     log_debug("HTTP Request: %s %s", request->method, request->path);
     
     // 检查是否需要流式响应
@@ -466,10 +534,16 @@ HttpServer* http_server_create(const SrvConfig* config) {
     server->user_data = config->user_data;
     server->running = false;
     
+    // 复制 API key
+    if (config->api_key) {
+        server->api_key = strdup(config->api_key);
+    }
+    
     // 创建 socket
     server->socket = socket(AF_INET, SOCK_STREAM, 0);
     if (server->socket < 0) {
         log_error("Failed to create HTTP socket");
+        free(server->api_key);
         free(server);
         return NULL;
     }
@@ -548,5 +622,6 @@ void http_server_destroy(HttpServer* server) {
         closesocket(server->socket);
     }
     
+    free(server->api_key);
     free(server);
 }

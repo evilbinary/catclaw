@@ -36,7 +36,9 @@ Config g_config = {
     // Gateway config defaults
     .gateway = {
         .port = 18789,
-        .browser_enabled = false
+        .browser_enabled = false,
+        .http_api_key = NULL,
+        .http_auth_enabled = false
     },
     // Workspace config defaults
     .workspace = {
@@ -313,6 +315,18 @@ static void parse_gateway_config(cJSON *gateway) {
     cJSON *browser = cJSON_GetObjectItem(gateway, "browser_enabled");
     if (browser && (cJSON_IsTrue(browser) || cJSON_IsFalse(browser))) {
         g_config.gateway.browser_enabled = cJSON_IsTrue(browser);
+    }
+    
+    cJSON *http_api_key = cJSON_GetObjectItem(gateway, "http_api_key");
+    if (http_api_key && cJSON_IsString(http_api_key)) {
+        free(g_config.gateway.http_api_key);
+        g_config.gateway.http_api_key = strdup(http_api_key->valuestring);
+        g_config.gateway.http_auth_enabled = true;
+    }
+    
+    cJSON *http_auth = cJSON_GetObjectItem(gateway, "http_auth_enabled");
+    if (http_auth && (cJSON_IsTrue(http_auth) || cJSON_IsFalse(http_auth))) {
+        g_config.gateway.http_auth_enabled = cJSON_IsTrue(http_auth);
     }
 }
 

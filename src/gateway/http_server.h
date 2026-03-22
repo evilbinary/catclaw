@@ -42,6 +42,7 @@ typedef struct {
     SrvRequestHandler handler;      // 普通请求处理器
     SrvStreamHandler stream_handler; // 流式请求处理器
     void* user_data;                // 用户数据
+    const char* api_key;            // API 授权密钥 (可选)
 } SrvConfig;
 
 // HTTP 服务器结构
@@ -54,6 +55,7 @@ typedef struct {
     SrvStreamHandler stream_handler;
     void* user_data;
     pthread_t thread;
+    char* api_key;                  // API 授权密钥
 } HttpServer;
 
 // ==================== 服务器 API ====================
