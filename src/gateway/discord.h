@@ -3,10 +3,10 @@
 
 #include "channels.h"
 
-// Initialize Discord channel
-void discord_channel_init(Channel *channel, ChannelConfig *base_config);
+// 初始化 Discord 渠道
+void discord_channel_init(ChannelInstance *channel, ChannelConfig *config);
 
-// Set Discord channel ID
-void discord_set_channel_id(Channel *channel, const char *channel_id);
+// 设置 Discord channel ID
+void discord_set_channel_id(ChannelInstance *channel, const char *channel_id);
 
 #endif // DISCORD_H

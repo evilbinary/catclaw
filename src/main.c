@@ -18,9 +18,6 @@
 #include "gateway/http_api.h"
 #include "model/ai_model.h"
 
-// External reference to channels array
-extern Channel channels[CHANNEL_MAX];
-
 // Gateway server thread
 static pthread_t gateway_thread;
 static bool gateway_thread_running = false;
@@ -153,6 +150,11 @@ int main(int argc, char *argv[]) {
     if (!channels_init()) {
         log_fatal("Failed to initialize channels");
         return 1;
+    }
+    
+    // Load channels from configuration
+    if (!channels_load_from_config()) {
+        log_warn("No channels loaded from configuration");
     }
 
     // Initialize agent
@@ -356,12 +358,7 @@ int main(int argc, char *argv[]) {
                     printf("\n");
                     
                     // Channels health check
-                    printf("Channels:\n");
-                    for (int i = 0; i < CHANNEL_MAX; i++) {
-                        if (channels[i].connected) {
-                            printf("  %s: ✓ connected\n", channels[i].name);
-                        }
-                    }
+                    channels_status();
                     printf("\n");
                     
                     // Sessions count
@@ -425,53 +422,55 @@ int main(int argc, char *argv[]) {
                         printf("Usage: /config get <key>\n");
                     }
                 } else if (strncmp(cmd, "channel enable", 14) == 0) {
-                    char *channel_name = cmd + 15;
-                    if (*channel_name) {
-                        ChannelType type = channel_name_to_type(channel_name);
-                        if (type != CHANNEL_MAX) {
-                            channel_enable(type);
+                    char *channel_id = cmd + 15;
+                    if (*channel_id) {
+                        ChannelInstance *ch = channel_find(channel_id);
+                        if (ch) {
+                            channel_enable(ch);
                         } else {
-                            printf("Error: Invalid channel name\n");
+                            printf("Error: Channel not found: %s\n", channel_id);
                         }
                     } else {
-                        printf("Usage: /channel enable <name>\n");
+                        printf("Usage: /channel enable <id>\n");
                     }
                 } else if (strncmp(cmd, "channel disable", 15) == 0) {
-                    char *channel_name = cmd + 16;
-                    if (*channel_name) {
-                        ChannelType type = channel_name_to_type(channel_name);
-                        if (type != CHANNEL_MAX) {
-                            channel_disable(type);
+                    char *channel_id = cmd + 16;
+                    if (*channel_id) {
+                        ChannelInstance *ch = channel_find(channel_id);
+                        if (ch) {
+                            channel_disable(ch);
                         } else {
-                            printf("Error: Invalid channel name\n");
+                            printf("Error: Channel not found: %s\n", channel_id);
                         }
                     } else {
-                        printf("Usage: /channel disable <name>\n");
+                        printf("Usage: /channel disable <id>\n");
                     }
                 } else if (strncmp(cmd, "channel connect", 15) == 0) {
-                    char *channel_name = cmd + 16;
-                    if (*channel_name) {
-                        ChannelType type = channel_name_to_type(channel_name);
-                        if (type != CHANNEL_MAX) {
-                            channel_connect(type);
+                    char *channel_id = cmd + 16;
+                    if (*channel_id) {
+                        ChannelInstance *ch = channel_find(channel_id);
+                        if (ch) {
+                            channel_connect(ch);
                         } else {
-                            printf("Error: Invalid channel name\n");
+                            printf("Error: Channel not found: %s\n", channel_id);
                         }
                     } else {
-                        printf("Usage: /channel connect <name>\n");
+                        printf("Usage: /channel connect <id>\n");
                     }
                 } else if (strncmp(cmd, "channel disconnect", 18) == 0) {
-                    char *channel_name = cmd + 19;
-                    if (*channel_name) {
-                        ChannelType type = channel_name_to_type(channel_name);
-                        if (type != CHANNEL_MAX) {
-                            channel_disconnect(type);
+                    char *channel_id = cmd + 19;
+                    if (*channel_id) {
+                        ChannelInstance *ch = channel_find(channel_id);
+                        if (ch) {
+                            channel_disconnect(ch);
                         } else {
-                            printf("Error: Invalid channel name\n");
+                            printf("Error: Channel not found: %s\n", channel_id);
                         }
                     } else {
-                        printf("Usage: /channel disconnect <name>\n");
+                        printf("Usage: /channel disconnect <id>\n");
                     }
+                } else if (strcmp(cmd, "channel list") == 0) {
+                    channels_status();
                 } else if (strcmp(cmd, "model list") == 0) {
                     printf("Available models:\n");
                     printf("  openai/gpt-4o\n");

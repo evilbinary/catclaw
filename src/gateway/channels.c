@@ -1,135 +1,352 @@
 #include "channels.h"
 #include "agent/agent.h"
+#include "common/config.h"
 #include "telegram.h"
 #include "discord.h"
+#include "feishu.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
-// Channel names
-static const char *channel_names[] = {
+// Channel type names
+const char *channel_type_names[] = {
     "WhatsApp",
     "Telegram",
     "Slack",
     "Discord",
     "Signal",
-    "WebChat"
+    "WebChat",
+    "Feishu"
 };
 
-// Channels array
-Channel channels[CHANNEL_MAX];
+// Global channel manager
+static ChannelManager g_channel_manager = {NULL, 0};
 
 // Default channel callback functions
-static void default_connect(struct Channel *channel) {
-    printf("Connecting to %s channel\n", channel->name);
+static void default_connect(ChannelInstance *channel) {
+    printf("[Channel] Connecting to %s (%s)\n", channel->name, channel_type_names[channel->type]);
     channel->connected = true;
 }
 
-static void default_disconnect(struct Channel *channel) {
-    printf("Disconnecting from %s channel\n", channel->name);
+static void default_disconnect(ChannelInstance *channel) {
+    printf("[Channel] Disconnecting from %s (%s)\n", channel->name, channel_type_names[channel->type]);
     channel->connected = false;
 }
 
-static bool default_send_message(struct Channel *channel, const char *message) {
-    printf("Sending message to %s: %s\n", channel->name, message);
+static bool default_send_message(ChannelInstance *channel, const char *message) {
+    printf("[Channel] Sending message to %s: %s\n", channel->name, message);
     return true;
 }
 
-static bool default_receive_message(struct Channel *channel, const char *message) {
-    printf("Receiving message from %s: %s\n", channel->name, message);
+static bool default_receive_message(ChannelInstance *channel, const char *message) {
+    printf("[Channel] Receiving message from %s: %s\n", channel->name, message);
     return true;
+}
+
+static void default_cleanup(ChannelInstance *channel) {
+    // Default cleanup does nothing
+}
+
+// Create a new channel instance
+static ChannelInstance* channel_create(const char *id, ChannelType type, ChannelConfig *config) {
+    ChannelInstance *channel = (ChannelInstance *)calloc(1, sizeof(ChannelInstance));
+    if (!channel) {
+        fprintf(stderr, "[Channel] Memory allocation failed\n");
+        return NULL;
+    }
+    
+    // Set basic properties
+    channel->id = strdup(id);
+    channel->name = config && config->name ? strdup(config->name) : strdup(channel_type_names[type]);
+    channel->type = type;
+    channel->enabled = true;
+    channel->connected = false;
+    channel->config = NULL;
+    channel->user_data = NULL;
+    channel->next = NULL;
+    
+    // Set default callbacks
+    channel->connect = default_connect;
+    channel->disconnect = default_disconnect;
+    channel->send_message = default_send_message;
+    channel->receive_message = default_receive_message;
+    channel->cleanup = default_cleanup;
+    
+    // Initialize type-specific implementation
+    switch (type) {
+        case CHANNEL_TELEGRAM:
+            telegram_channel_init(channel, config);
+            break;
+        case CHANNEL_DISCORD:
+            discord_channel_init(channel, config);
+            break;
+        case CHANNEL_FEISHU:
+            feishu_channel_init(channel, config);
+            break;
+        case CHANNEL_WEBCHAT:
+            // WebChat uses default callbacks
+            channel->connected = true;
+            break;
+        default:
+            // Use default implementation
+            if (config) {
+                channel->config = malloc(sizeof(ChannelConfig));
+                if (channel->config) {
+                    memcpy(channel->config, config, sizeof(ChannelConfig));
+                }
+            }
+            break;
+    }
+    
+    return channel;
+}
+
+// Free a channel instance
+static void channel_free(ChannelInstance *channel) {
+    if (!channel) return;
+    
+    // Call type-specific cleanup
+    if (channel->cleanup) {
+        channel->cleanup(channel);
+    }
+    
+    // Free basic properties
+    free(channel->id);
+    free(channel->name);
+    
+    // Free config (if not handled by type-specific cleanup)
+    if (channel->config) {
+        free(channel->config);
+    }
+    
+    free(channel);
 }
 
 bool channels_init(void) {
-    // Initialize all channels
-    for (int i = 0; i < CHANNEL_MAX; i++) {
-        channels[i].type = i;
-        channels[i].name = (char *)channel_names[i];
-        channels[i].enabled = false;
-        channels[i].connected = false;
-        channels[i].config = NULL;
-        channels[i].connect = default_connect;
-        channels[i].disconnect = default_disconnect;
-        channels[i].send_message = default_send_message;
-        channels[i].receive_message = default_receive_message;
-    }
-
-    // Initialize Telegram channel
-    telegram_channel_init(&channels[CHANNEL_TELEGRAM], NULL);
+    g_channel_manager.head = NULL;
+    g_channel_manager.count = 0;
     
-    // Initialize Discord channel
-    discord_channel_init(&channels[CHANNEL_DISCORD], NULL);
-
-    // Enable WebChat by default
-    channels[CHANNEL_WEBCHAT].enabled = true;
-    channels[CHANNEL_WEBCHAT].connected = true; // WebChat is always connected through WebSocket
-
-    printf("Channels initialized\n");
+    // Add default WebChat channel
+    ChannelConfig webchat_config = {
+        .id = "webchat-default",
+        .name = "WebChat",
+        .type = CHANNEL_WEBCHAT
+    };
+    ChannelInstance *webchat = channel_add("webchat-default", CHANNEL_WEBCHAT, &webchat_config);
+    if (webchat) {
+        webchat->enabled = true;
+        webchat->connected = true;
+    }
+    
+    printf("[Channel] Manager initialized\n");
     return true;
 }
 
 void channels_cleanup(void) {
-    // Cleanup channels
-    for (int i = 0; i < CHANNEL_MAX; i++) {
-        if (channels[i].config) {
-            free(channels[i].config);
-            channels[i].config = NULL;
-        }
+    ChannelInstance *current = g_channel_manager.head;
+    while (current) {
+        ChannelInstance *next = current->next;
+        channel_free(current);
+        current = next;
     }
-    printf("Channels cleaned up\n");
+    g_channel_manager.head = NULL;
+    g_channel_manager.count = 0;
+    printf("[Channel] Manager cleaned up\n");
 }
 
 void channels_status(void) {
-    printf("Channels:\n");
-    for (int i = 0; i < CHANNEL_MAX; i++) {
-        if (channels[i].connected) {
-            printf("  %s: connected\n", channels[i].name);
-        }
+    printf("Channels (%d):\n", g_channel_manager.count);
+    ChannelInstance *current = g_channel_manager.head;
+    while (current) {
+        printf("  [%s] %s (%s): %s, %s\n",
+               current->id,
+               current->name,
+               channel_type_names[current->type],
+               current->enabled ? "enabled" : "disabled",
+               current->connected ? "connected" : "disconnected");
+        current = current->next;
     }
 }
 
-bool channel_send_message(ChannelType type, const char *message) {
-    if (type < 0 || type >= CHANNEL_MAX) {
-        fprintf(stderr, "Invalid channel type\n");
+ChannelInstance* channel_add(const char *id, ChannelType type, ChannelConfig *config) {
+    // Check if channel with same ID exists
+    if (channel_find(id)) {
+        fprintf(stderr, "[Channel] Channel with ID '%s' already exists\n", id);
+        return NULL;
+    }
+    
+    // Create new channel
+    ChannelInstance *channel = channel_create(id, type, config);
+    if (!channel) {
+        return NULL;
+    }
+    
+    // Add to list
+    channel->next = g_channel_manager.head;
+    g_channel_manager.head = channel;
+    g_channel_manager.count++;
+    
+    printf("[Channel] Added channel '%s' (type: %s)\n", id, channel_type_names[type]);
+    return channel;
+}
+
+bool channel_remove(const char *id) {
+    ChannelInstance *prev = NULL;
+    ChannelInstance *current = g_channel_manager.head;
+    
+    while (current) {
+        if (strcmp(current->id, id) == 0) {
+            if (prev) {
+                prev->next = current->next;
+            } else {
+                g_channel_manager.head = current->next;
+            }
+            g_channel_manager.count--;
+            
+            // Disconnect before freeing
+            if (current->connected && current->disconnect) {
+                current->disconnect(current);
+            }
+            
+            channel_free(current);
+            printf("[Channel] Removed channel '%s'\n", id);
+            return true;
+        }
+        prev = current;
+        current = current->next;
+    }
+    
+    fprintf(stderr, "[Channel] Channel '%s' not found\n", id);
+    return false;
+}
+
+ChannelInstance* channel_find(const char *id) {
+    ChannelInstance *current = g_channel_manager.head;
+    while (current) {
+        if (strcmp(current->id, id) == 0) {
+            return current;
+        }
+        current = current->next;
+    }
+    return NULL;
+}
+
+ChannelInstance* channel_first_of_type(ChannelType type) {
+    ChannelInstance *current = g_channel_manager.head;
+    while (current) {
+        if (current->type == type) {
+            return current;
+        }
+        current = current->next;
+    }
+    return NULL;
+}
+
+bool channel_send_message(ChannelInstance *channel, const char *message) {
+    if (!channel) {
+        fprintf(stderr, "[Channel] Invalid channel\n");
         return false;
     }
-
-    Channel *channel = &channels[type];
+    
     if (!channel->enabled) {
-        fprintf(stderr, "Channel %s is disabled\n", channel->name);
+        fprintf(stderr, "[Channel] '%s' is disabled\n", channel->name);
         return false;
     }
-
+    
     if (!channel->connected) {
-        fprintf(stderr, "Channel %s is not connected\n", channel->name);
+        fprintf(stderr, "[Channel] '%s' is not connected\n", channel->name);
         return false;
     }
-
+    
     return channel->send_message(channel, message);
+}
+
+bool channel_send_message_by_id(const char *id, const char *message) {
+    ChannelInstance *channel = channel_find(id);
+    return channel_send_message(channel, message);
 }
 
 bool channel_send_message_to_all(const char *message) {
     bool success = true;
-    for (int i = 0; i < CHANNEL_MAX; i++) {
-        Channel *channel = &channels[i];
-        if (channel->enabled && channel->connected) {
-            if (!channel->send_message(channel, message)) {
+    ChannelInstance *current = g_channel_manager.head;
+    while (current) {
+        if (current->enabled && current->connected) {
+            if (!channel_send_message(current, message)) {
                 success = false;
             }
         }
+        current = current->next;
     }
     return success;
 }
 
-// Function to handle WebSocket messages
+bool channel_send_message_to_type(ChannelType type, const char *message) {
+    bool success = true;
+    ChannelInstance *current = g_channel_manager.head;
+    while (current) {
+        if (current->type == type && current->enabled && current->connected) {
+            if (!channel_send_message(current, message)) {
+                success = false;
+            }
+        }
+        current = current->next;
+    }
+    return success;
+}
+
+bool channel_enable(ChannelInstance *channel) {
+    if (!channel) return false;
+    channel->enabled = true;
+    printf("[Channel] '%s' enabled\n", channel->name);
+    return true;
+}
+
+bool channel_disable(ChannelInstance *channel) {
+    if (!channel) return false;
+    channel->enabled = false;
+    if (channel->connected && channel->disconnect) {
+        channel->disconnect(channel);
+    }
+    printf("[Channel] '%s' disabled\n", channel->name);
+    return true;
+}
+
+bool channel_connect(ChannelInstance *channel) {
+    if (!channel) return false;
+    if (!channel->enabled) {
+        fprintf(stderr, "[Channel] '%s' is disabled\n", channel->name);
+        return false;
+    }
+    if (channel->connected) {
+        fprintf(stderr, "[Channel] '%s' is already connected\n", channel->name);
+        return false;
+    }
+    channel->connect(channel);
+    return true;
+}
+
+bool channel_disconnect(ChannelInstance *channel) {
+    if (!channel) return false;
+    if (!channel->connected) {
+        fprintf(stderr, "[Channel] '%s' is not connected\n", channel->name);
+        return false;
+    }
+    channel->disconnect(channel);
+    return true;
+}
+
 void channels_handle_websocket_message(const char *message) {
-    // Process WebSocket message
-    printf("Received WebSocket message: %s\n", message);
+    printf("[Channel] Received WebSocket message: %s\n", message);
+    
+    // Find WebChat channel
+    ChannelInstance *webchat = channel_first_of_type(CHANNEL_WEBCHAT);
+    if (!webchat) return;
     
     // Create channel message
     ChannelMessage msg;
-    msg.source = CHANNEL_WEBCHAT;
+    msg.source = webchat;
+    msg.source_type = CHANNEL_WEBCHAT;
     msg.sender = "webchat";
     msg.content = (char *)message;
     
@@ -143,139 +360,94 @@ void channels_handle_websocket_message(const char *message) {
     channels_process_message(&msg);
 }
 
-bool channels_register_channel(ChannelType type, ChannelConfig *config) {
-    if (type < 0 || type >= CHANNEL_MAX) {
-        fprintf(stderr, "Invalid channel type\n");
-        return false;
-    }
-
-    Channel *channel = &channels[type];
-    
-    // Allocate and copy config
-    if (config) {
-        ChannelConfig *new_config = (ChannelConfig *)malloc(sizeof(ChannelConfig));
-        if (!new_config) {
-            fprintf(stderr, "Memory allocation failed\n");
-            return false;
-        }
-        *new_config = *config;
-        channel->config = new_config;
-    }
-    
-    channel->enabled = true;
-    channel->connect(channel);
-    
-    printf("Channel %s registered\n", channel->name);
-    return true;
-}
-
-bool channels_unregister_channel(ChannelType type) {
-    if (type < 0 || type >= CHANNEL_MAX) {
-        fprintf(stderr, "Invalid channel type\n");
-        return false;
-    }
-
-    Channel *channel = &channels[type];
-    
-    if (channel->connected) {
-        channel->disconnect(channel);
-    }
-    
-    if (channel->config) {
-        free(channel->config);
-        channel->config = NULL;
-    }
-    
-    channel->enabled = false;
-    
-    printf("Channel %s unregistered\n", channel->name);
-    return true;
-}
-
 void channels_process_message(ChannelMessage *message) {
-    // Process the message
-    printf("Processing message from %s: %s\n", 
-           channel_names[message->source], 
+    if (!message) return;
+    
+    printf("[Channel] Processing message from %s (%s): %s\n",
+           message->source ? message->source->name : "unknown",
+           channel_type_names[message->source_type],
            message->content);
     
     // Forward message to agent
     agent_send_message(message->content);
-    
-    // TODO: Add message routing logic here
-    // For example, forward to other channels if needed
-}
-
-bool channel_enable(ChannelType type) {
-    if (type < 0 || type >= CHANNEL_MAX) {
-        fprintf(stderr, "Invalid channel type\n");
-        return false;
-    }
-
-    Channel *channel = &channels[type];
-    channel->enabled = true;
-    printf("Channel %s enabled\n", channel->name);
-    return true;
-}
-
-bool channel_disable(ChannelType type) {
-    if (type < 0 || type >= CHANNEL_MAX) {
-        fprintf(stderr, "Invalid channel type\n");
-        return false;
-    }
-
-    Channel *channel = &channels[type];
-    channel->enabled = false;
-    if (channel->connected) {
-        channel->disconnect(channel);
-    }
-    printf("Channel %s disabled\n", channel->name);
-    return true;
-}
-
-bool channel_connect(ChannelType type) {
-    if (type < 0 || type >= CHANNEL_MAX) {
-        fprintf(stderr, "Invalid channel type\n");
-        return false;
-    }
-
-    Channel *channel = &channels[type];
-    if (!channel->enabled) {
-        fprintf(stderr, "Channel %s is disabled\n", channel->name);
-        return false;
-    }
-
-    if (channel->connected) {
-        fprintf(stderr, "Channel %s is already connected\n", channel->name);
-        return false;
-    }
-
-    channel->connect(channel);
-    return true;
-}
-
-bool channel_disconnect(ChannelType type) {
-    if (type < 0 || type >= CHANNEL_MAX) {
-        fprintf(stderr, "Invalid channel type\n");
-        return false;
-    }
-
-    Channel *channel = &channels[type];
-    if (!channel->connected) {
-        fprintf(stderr, "Channel %s is not connected\n", channel->name);
-        return false;
-    }
-
-    channel->disconnect(channel);
-    return true;
 }
 
 ChannelType channel_name_to_type(const char *name) {
     for (int i = 0; i < CHANNEL_MAX; i++) {
-        if (strcmp(name, channel_names[i]) == 0) {
-            return i;
+        if (strcasecmp(name, channel_type_names[i]) == 0) {
+            return (ChannelType)i;
         }
     }
+    // Also support alternate names
+    if (strcasecmp(name, "lark") == 0) return CHANNEL_FEISHU;
+    if (strcasecmp(name, "飞书") == 0) return CHANNEL_FEISHU;
     return CHANNEL_MAX;
 }
 
+const char* channel_type_to_name(ChannelType type) {
+    if (type < 0 || type >= CHANNEL_MAX) return "Unknown";
+    return channel_type_names[type];
+}
 
+void channels_foreach(ChannelIterator callback, void *user_data) {
+    ChannelInstance *current = g_channel_manager.head;
+    while (current) {
+        callback(current, user_data);
+        current = current->next;
+    }
+}
+
+// Load channels from configuration
+bool channels_load_from_config(void) {
+    int loaded = 0;
+    
+    for (int i = 0; i < g_config.channels.count; i++) {
+        ChannelConfigEntry *entry = &g_config.channels.channels[i];
+        
+        // Skip if not enabled
+        if (!entry->enabled) {
+            printf("[Channel] Skipping disabled channel '%s'\n", entry->id);
+            continue;
+        }
+        
+        // Determine channel type
+        ChannelType type = channel_name_to_type(entry->type);
+        if (type == CHANNEL_MAX) {
+            fprintf(stderr, "[Channel] Unknown channel type: %s\n", entry->type);
+            continue;
+        }
+        
+        // Create channel config
+        ChannelConfig config = {
+            .id = entry->id,
+            .name = entry->name,
+            .type = type,
+            .api_key = entry->api_key,
+            .api_secret = entry->api_secret,
+            .server = entry->server,
+            .port = entry->port,
+            .enable_ssl = entry->enable_ssl,
+            .app_id = entry->app_id,
+            .app_secret = entry->app_secret,
+            .webhook_url = entry->webhook_url,
+            .receive_id = entry->receive_id,
+            .receive_id_type = entry->receive_id_type,
+            .chat_id = entry->chat_id,
+            .channel_id = entry->channel_id,
+            .bot_token = entry->bot_token
+        };
+        
+        // Add channel
+        ChannelInstance *channel = channel_add(entry->id, type, &config);
+        if (channel) {
+            // Connect if enabled
+            if (entry->enabled) {
+                channel_connect(channel);
+            }
+            loaded++;
+        }
+    }
+    
+    printf("[Channel] Loaded %d channels from configuration\n", loaded);
+    return loaded > 0 || g_config.channels.count == 0;
+}

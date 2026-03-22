@@ -67,6 +67,42 @@ typedef struct {
     char *system_prompt;      // 系统提示词
 } AgentConfig;
 
+// Channel configuration for config file
+typedef struct {
+    char *id;                    // 唯一标识符
+    char *name;                  // 显示名称
+    char *type;                  // 渠道类型: telegram, discord, feishu, webchat, etc.
+    
+    // 通用配置
+    char *api_key;
+    char *api_secret;
+    char *server;
+    int port;
+    bool enable_ssl;
+    bool enabled;                // 是否启用
+    
+    // 飞书专用
+    char *app_id;
+    char *app_secret;
+    char *webhook_url;
+    char *receive_id;            // 接收消息的用户/群组ID
+    char *receive_id_type;       // 接收ID类型: open_id, user_id, union_id, chat_id
+    
+    // Telegram 专用
+    char *chat_id;
+    
+    // Discord 专用
+    char *channel_id;
+    char *bot_token;
+} ChannelConfigEntry;
+
+// Channels configuration
+typedef struct {
+    ChannelConfigEntry *channels;  // 渠道配置数组
+    int count;                      // 渠道数量
+    int capacity;                   // 数组容量
+} ChannelsConfig;
+
 // Main configuration structure
 typedef struct {
     ModelsConfig models;      // 多模型配置
@@ -77,6 +113,7 @@ typedef struct {
     LoggingConfig logging;
     CompactionConfig compaction;
     AgentConfig agent;
+    ChannelsConfig channels;  // 多渠道配置
     
     // Legacy fields for backward compatibility
     char *workspace_path;
@@ -110,5 +147,10 @@ bool config_switch_model(const char *model_name);
 bool config_switch_model_by_index(int index);
 void config_list_models(void);
 const char* config_get_current_model_name(void);
+
+// Channel management functions
+void config_list_channels(void);
+int config_get_channel_count(void);
+ChannelConfigEntry* config_get_channel(int index);
 
 #endif // CONFIG_H

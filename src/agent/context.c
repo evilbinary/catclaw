@@ -763,7 +763,7 @@ void* agent_node_worker_thread(void* arg) {
                         if (g_config.debug) {
                             log_debug("Sending message to WebChat\n");
                         }
-                        channel_send_message(CHANNEL_WEBCHAT, response->content);
+                        channel_send_message_to_type(CHANNEL_WEBCHAT, response->content);
                         
                         ai_model_free_response(response);
                         break;

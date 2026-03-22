@@ -67,6 +67,12 @@ Config g_config = {
     .agent = {
         .system_prompt = NULL
     },
+    // Channels config defaults
+    .channels = {
+        .channels = NULL,
+        .count = 0,
+        .capacity = 0
+    },
     // Legacy fields
     .workspace_path = NULL,
     .model_provider = NULL,
@@ -423,6 +429,146 @@ static void parse_agent_config(cJSON *agent) {
     }
 }
 
+// Parse a single channel config
+static void parse_single_channel(cJSON *channel_json, int index) {
+    if (!channel_json) return;
+    
+    // Ensure capacity
+    if (g_config.channels.count >= g_config.channels.capacity) {
+        int new_capacity = g_config.channels.capacity == 0 ? 4 : g_config.channels.capacity * 2;
+        ChannelConfigEntry *new_channels = realloc(g_config.channels.channels, new_capacity * sizeof(ChannelConfigEntry));
+        if (!new_channels) return;
+        g_config.channels.channels = new_channels;
+        g_config.channels.capacity = new_capacity;
+    }
+    
+    ChannelConfigEntry *channel = &g_config.channels.channels[g_config.channels.count];
+    memset(channel, 0, sizeof(ChannelConfigEntry));
+    
+    // Set defaults
+    channel->enabled = true;
+    channel->port = 0;
+    channel->enable_ssl = true;
+    
+    // Parse id
+    cJSON *id = cJSON_GetObjectItem(channel_json, "id");
+    if (id && cJSON_IsString(id)) {
+        channel->id = strdup(id->valuestring);
+    } else {
+        // Generate default id
+        char default_id[32];
+        snprintf(default_id, sizeof(default_id), "channel_%d", index + 1);
+        channel->id = strdup(default_id);
+    }
+    
+    // Parse name
+    cJSON *name = cJSON_GetObjectItem(channel_json, "name");
+    if (name && cJSON_IsString(name)) {
+        channel->name = strdup(name->valuestring);
+    }
+    
+    // Parse type
+    cJSON *type = cJSON_GetObjectItem(channel_json, "type");
+    if (type && cJSON_IsString(type)) {
+        channel->type = strdup(type->valuestring);
+    }
+    
+    // Parse enabled
+    cJSON *enabled = cJSON_GetObjectItem(channel_json, "enabled");
+    if (enabled && (cJSON_IsTrue(enabled) || cJSON_IsFalse(enabled))) {
+        channel->enabled = cJSON_IsTrue(enabled);
+    }
+    
+    // Parse common config
+    cJSON *api_key = cJSON_GetObjectItem(channel_json, "api_key");
+    if (api_key && cJSON_IsString(api_key)) {
+        channel->api_key = strdup(api_key->valuestring);
+    }
+    
+    cJSON *api_secret = cJSON_GetObjectItem(channel_json, "api_secret");
+    if (api_secret && cJSON_IsString(api_secret)) {
+        channel->api_secret = strdup(api_secret->valuestring);
+    }
+    
+    cJSON *server = cJSON_GetObjectItem(channel_json, "server");
+    if (server && cJSON_IsString(server)) {
+        channel->server = strdup(server->valuestring);
+    }
+    
+    cJSON *port = cJSON_GetObjectItem(channel_json, "port");
+    if (port && cJSON_IsNumber(port)) {
+        channel->port = (int)port->valuedouble;
+    }
+    
+    cJSON *enable_ssl = cJSON_GetObjectItem(channel_json, "enable_ssl");
+    if (enable_ssl && (cJSON_IsTrue(enable_ssl) || cJSON_IsFalse(enable_ssl))) {
+        channel->enable_ssl = cJSON_IsTrue(enable_ssl);
+    }
+    
+    // Parse Feishu-specific config
+    cJSON *app_id = cJSON_GetObjectItem(channel_json, "app_id");
+    if (app_id && cJSON_IsString(app_id)) {
+        channel->app_id = strdup(app_id->valuestring);
+    }
+    
+    cJSON *app_secret = cJSON_GetObjectItem(channel_json, "app_secret");
+    if (app_secret && cJSON_IsString(app_secret)) {
+        channel->app_secret = strdup(app_secret->valuestring);
+    }
+    
+    cJSON *webhook_url = cJSON_GetObjectItem(channel_json, "webhook_url");
+    if (webhook_url && cJSON_IsString(webhook_url)) {
+        channel->webhook_url = strdup(webhook_url->valuestring);
+    }
+    
+    cJSON *receive_id = cJSON_GetObjectItem(channel_json, "receive_id");
+    if (receive_id && cJSON_IsString(receive_id)) {
+        channel->receive_id = strdup(receive_id->valuestring);
+    }
+    
+    cJSON *receive_id_type = cJSON_GetObjectItem(channel_json, "receive_id_type");
+    if (receive_id_type && cJSON_IsString(receive_id_type)) {
+        channel->receive_id_type = strdup(receive_id_type->valuestring);
+    }
+    
+    // Parse Telegram-specific config
+    cJSON *chat_id = cJSON_GetObjectItem(channel_json, "chat_id");
+    if (chat_id && cJSON_IsString(chat_id)) {
+        channel->chat_id = strdup(chat_id->valuestring);
+    }
+    
+    // Parse Discord-specific config
+    cJSON *channel_id = cJSON_GetObjectItem(channel_json, "channel_id");
+    if (channel_id && cJSON_IsString(channel_id)) {
+        channel->channel_id = strdup(channel_id->valuestring);
+    }
+    
+    cJSON *bot_token = cJSON_GetObjectItem(channel_json, "bot_token");
+    if (bot_token && cJSON_IsString(bot_token)) {
+        channel->bot_token = strdup(bot_token->valuestring);
+    }
+    
+    g_config.channels.count++;
+}
+
+// Parse channels configuration
+static void parse_channels_config(cJSON *channels) {
+    if (!channels) return;
+    
+    if (cJSON_IsArray(channels)) {
+        int size = cJSON_GetArraySize(channels);
+        for (int i = 0; i < size; i++) {
+            cJSON *channel = cJSON_GetArrayItem(channels, i);
+            if (channel) {
+                parse_single_channel(channel, i);
+            }
+        }
+    } else if (cJSON_IsObject(channels)) {
+        // Single channel config
+        parse_single_channel(channels, 0);
+    }
+}
+
 // Parse legacy configuration (for backward compatibility)
 static void parse_legacy_config(cJSON *root) {
     // Parse workspace path (support both workspace_path and workspace_dir)
@@ -599,6 +745,9 @@ bool config_load(void) {
             cJSON *agent = cJSON_GetObjectItem(root, "agent");
             if (agent) parse_agent_config(agent);
             
+            cJSON *channels = cJSON_GetObjectItem(root, "channels");
+            if (channels) parse_channels_config(channels);
+            
             // Parse legacy configuration for backward compatibility
             parse_legacy_config(root);
 
@@ -773,6 +922,28 @@ void config_cleanup(void) {
     // Cleanup agent config
     free(g_config.agent.system_prompt);
     
+    // Cleanup channels config
+    if (g_config.channels.channels) {
+        for (int i = 0; i < g_config.channels.count; i++) {
+            ChannelConfigEntry *ch = &g_config.channels.channels[i];
+            free(ch->id);
+            free(ch->name);
+            free(ch->type);
+            free(ch->api_key);
+            free(ch->api_secret);
+            free(ch->server);
+            free(ch->app_id);
+            free(ch->app_secret);
+            free(ch->webhook_url);
+            free(ch->receive_id);
+            free(ch->receive_id_type);
+            free(ch->chat_id);
+            free(ch->channel_id);
+            free(ch->bot_token);
+        }
+        free(g_config.channels.channels);
+    }
+    
     // Cleanup legacy fields
     free(g_config.workspace_path);
     free(g_config.model_provider);
@@ -812,6 +983,15 @@ void config_print(void) {
     printf("    Threshold: %d\n", g_config.compaction.threshold);
     printf("  Agent:\n");
     printf("    System Prompt: %s\n", g_config.agent.system_prompt ? "(configured)" : "(default)");
+    printf("  Channels:\n");
+    printf("    Count: %d\n", g_config.channels.count);
+    for (int i = 0; i < g_config.channels.count; i++) {
+        ChannelConfigEntry *ch = &g_config.channels.channels[i];
+        printf("      [%d] %s (%s) %s\n", i,
+               ch->name ? ch->name : "(unnamed)",
+               ch->type ? ch->type : "(unknown)",
+               ch->enabled ? "enabled" : "disabled");
+    }
 }
 
 bool config_set(const char *key, const char *value) {
@@ -844,4 +1024,28 @@ const char *config_get(const char *key) {
     if (strcmp(key, "loglevel") == 0) return g_config.logging.level;
     
     return NULL;
+}
+
+// List all configured channels
+void config_list_channels(void) {
+    printf("Configured channels (%d total):\n", g_config.channels.count);
+    for (int i = 0; i < g_config.channels.count; i++) {
+        ChannelConfigEntry *ch = &g_config.channels.channels[i];
+        printf("  %d. [%s] %s (type: %s) %s\n", i,
+               ch->id ? ch->id : "(no-id)",
+               ch->name ? ch->name : "(unnamed)",
+               ch->type ? ch->type : "(unknown)",
+               ch->enabled ? "[enabled]" : "[disabled]");
+    }
+}
+
+// Get channel count
+int config_get_channel_count(void) {
+    return g_config.channels.count;
+}
+
+// Get channel by index
+ChannelConfigEntry* config_get_channel(int index) {
+    if (index < 0 || index >= g_config.channels.count) return NULL;
+    return &g_config.channels.channels[index];
 }
