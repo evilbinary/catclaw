@@ -2,9 +2,10 @@
 
 ## 概述
 
-CatClaw 提供 HTTP REST API，用于外部程序集成和远程控制。
+CatClaw 提供 HTTP REST API 和 WebSocket API，用于外部程序集成和远程控制。
 
-- **默认端口**: 8080
+- **HTTP API 端口**: 8080
+- **WebSocket 端口**: 18789 (与 gateway 端口相同)
 - **Content-Type**: `application/json`
 - **CORS**: 已启用，允许跨域请求
 
@@ -23,9 +24,9 @@ CatClaw 提供 HTTP REST API，用于外部程序集成和远程控制。
 }
 ```
 
-配置 `http_api_key` 后，所有 HTTP API 请求都需要授权。
+配置 `http_api_key` 后，所有 HTTP API 和 WebSocket 连接都需要授权。
 
-### 授权方式
+### HTTP API 授权方式
 
 支持两种方式传递 API Key：
 
@@ -41,10 +42,29 @@ curl -H "X-API-Key: your-secret-api-key" \
   http://localhost:8080/chat
 ```
 
+### WebSocket 授权方式
+
+WebSocket 连接支持三种授权方式：
+
+**方式 1: URL 查询参数 (推荐)**
+```javascript
+const ws = new WebSocket('ws://localhost:18789?token=your-secret-api-key');
+```
+
+**方式 2: Authorization Header**
+```javascript
+// 浏览器 WebSocket API 不支持自定义 header
+// 需要在服务端或使用支持自定义 header 的客户端
+```
+
+**方式 3: X-API-Key Header**
+```javascript
+// 同上，需要支持自定义 header 的 WebSocket 客户端
+```
+
 ### 未授权响应
 
-如果未提供正确的 API Key，将返回：
-
+**HTTP API:**
 ```json
 {
   "error": "Unauthorized",
@@ -52,10 +72,8 @@ curl -H "X-API-Key: your-secret-api-key" \
 }
 ```
 
-响应头包含：
-```
-WWW-Authenticate: Bearer
-```
+**WebSocket:**
+连接将被拒绝，返回 HTTP 401 响应后关闭连接。
 
 ## 通用响应格式
 

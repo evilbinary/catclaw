@@ -8,6 +8,7 @@
 typedef struct {
     int socket;
     bool handshake_completed;
+    bool authorized;
     char buffer[4096];
     int buffer_len;
 } WebSocketConnection;
@@ -20,10 +21,11 @@ typedef struct {
     WebSocketConnection *connections;
     int connection_count;
     int max_connections;
+    char* api_key;                      // API 授权密钥
 } WebSocketServer;
 
 // Functions
-bool websocket_server_init(WebSocketServer *server, int port, int max_connections);
+bool websocket_server_init(WebSocketServer *server, int port, int max_connections, const char* api_key);
 bool websocket_server_start(WebSocketServer *server);
 void websocket_server_stop(WebSocketServer *server);
 void websocket_server_cleanup(WebSocketServer *server);

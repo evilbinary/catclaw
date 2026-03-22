@@ -56,11 +56,11 @@ static void platform_cleanup(void) {
 }
 #endif
 
-static bool websocket_handshake(WebSocketConnection *conn);
+static bool websocket_handshake(WebSocketConnection *conn, WebSocketServer *server);
 static bool websocket_parse_frame(WebSocketConnection *conn, char **message, int *message_len);
 static bool websocket_send_frame(WebSocketConnection *conn, const char *data, int len);
 
-bool websocket_server_init(WebSocketServer *server, int port, int max_connections) {
+bool websocket_server_init(WebSocketServer *server, int port, int max_connections, const char* api_key) {
     struct sockaddr_in addr;
 
     // Initialize platform
@@ -110,9 +110,18 @@ bool websocket_server_init(WebSocketServer *server, int port, int max_connection
     server->running = false;
     server->max_connections = max_connections;
     server->connection_count = 0;
+    
+    // 保存 API key
+    if (api_key) {
+        server->api_key = strdup(api_key);
+    } else {
+        server->api_key = NULL;
+    }
+    
     server->connections = (WebSocketConnection *)malloc(sizeof(WebSocketConnection) * max_connections);
     if (!server->connections) {
         fprintf(stderr, "malloc failed\n");
+        free(server->api_key);
         closesocket(server->server_socket);
         platform_cleanup();
         return false;
@@ -207,8 +216,9 @@ bool websocket_server_start(WebSocketServer *server) {
 
                     if (!conn->handshake_completed) {
                         // Handle handshake
-                        if (websocket_handshake(conn)) {
+                        if (websocket_handshake(conn, server)) {
                             conn->handshake_completed = true;
+                            conn->authorized = true;
                             printf("WebSocket handshake completed\n");
                         }
                     } else {
@@ -265,6 +275,11 @@ void websocket_server_cleanup(WebSocketServer *server) {
     if (server->connections) {
         free(server->connections);
         server->connections = NULL;
+    }
+    
+    if (server->api_key) {
+        free(server->api_key);
+        server->api_key = NULL;
     }
 
     printf("WebSocket server cleaned up\n");
@@ -402,11 +417,85 @@ static void sha1(const unsigned char *input, int length, unsigned char *output) 
     output[19] = h4 & 0xFF;
 }
 
-static bool websocket_handshake(WebSocketConnection *conn) {
+static bool websocket_handshake(WebSocketConnection *conn, WebSocketServer *server) {
     // Look for end of HTTP request
     char *end = strstr(conn->buffer, "\r\n\r\n");
     if (!end) {
         return false;
+    }
+
+    // 检查授权 (如果配置了 api_key)
+    if (server->api_key && server->api_key[0] != '\0') {
+        bool authorized = false;
+        
+        // 方式1: 从 URL 查询参数获取 token (?token=xxx)
+        char *path_start = strstr(conn->buffer, " ");
+        if (path_start) {
+            path_start++;
+            char *token_param = strstr(path_start, "token=");
+            if (token_param) {
+                token_param += 6;
+                char *token_end = strstr(token_param, "&");
+                if (!token_end) token_end = strstr(token_param, " ");
+                if (token_end) {
+                    size_t token_len = token_end - token_param;
+                    if (token_len == strlen(server->api_key) &&
+                        strncmp(token_param, server->api_key, token_len) == 0) {
+                        authorized = true;
+                    }
+                }
+            }
+        }
+        
+        // 方式2: 从 Authorization header 获取
+        if (!authorized) {
+            char *auth_header = strcasestr(conn->buffer, "Authorization:");
+            if (auth_header) {
+                auth_header += 14;
+                while (*auth_header == ' ') auth_header++;
+                
+                // 支持 "Bearer <token>" 格式
+                if (strncasecmp(auth_header, "Bearer ", 7) == 0) {
+                    auth_header += 7;
+                }
+                
+                char *auth_end = strstr(auth_header, "\r\n");
+                if (auth_end) {
+                    size_t token_len = auth_end - auth_header;
+                    if (token_len == strlen(server->api_key) &&
+                        strncmp(auth_header, server->api_key, token_len) == 0) {
+                        authorized = true;
+                    }
+                }
+            }
+        }
+        
+        // 方式3: 从 X-API-Key header 获取
+        if (!authorized) {
+            char *key_header = strcasestr(conn->buffer, "X-API-Key:");
+            if (key_header) {
+                key_header += 10;
+                while (*key_header == ' ') key_header++;
+                char *key_end = strstr(key_header, "\r\n");
+                if (key_end) {
+                    size_t key_len = key_end - key_header;
+                    if (key_len == strlen(server->api_key) &&
+                        strncmp(key_header, server->api_key, key_len) == 0) {
+                        authorized = true;
+                    }
+                }
+            }
+        }
+        
+        if (!authorized) {
+            fprintf(stderr, "WebSocket connection unauthorized\n");
+            char response[] = "HTTP/1.1 401 Unauthorized\r\n"
+                             "Content-Type: application/json\r\n"
+                             "Connection: close\r\n\r\n"
+                             "{\"error\":\"Unauthorized\"}";
+            send(conn->socket, response, strlen(response), 0);
+            return false;
+        }
     }
 
     // Find Sec-WebSocket-Key header

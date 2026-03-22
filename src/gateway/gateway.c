@@ -15,7 +15,7 @@ bool gateway_init(void) {
     g_gateway.running = false;
 
     // Initialize WebSocket server
-    if (!websocket_server_init(&g_gateway.ws_server, g_gateway.port, 10)) {
+    if (!websocket_server_init(&g_gateway.ws_server, g_gateway.port, 10, g_config.gateway.http_api_key)) {
         fprintf(stderr, "Failed to initialize WebSocket server\n");
         return false;
     }
