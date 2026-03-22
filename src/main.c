@@ -15,6 +15,7 @@
 #include "tool/skill.h"
 #include "common/log.h"
 #include "common/thread_pool.h"
+#include "gateway/http_api.h"
 #include "model/ai_model.h"
 
 // External reference to channels array
@@ -23,6 +24,9 @@ extern Channel channels[CHANNEL_MAX];
 // Gateway server thread
 static pthread_t gateway_thread;
 static bool gateway_thread_running = false;
+
+// HTTP API server
+static HttpServer* g_http_api_server = NULL;
 
 // Thread pool
 static ThreadPool *g_thread_pool = NULL;
@@ -188,8 +192,24 @@ int main(int argc, char *argv[]) {
         // Continue anyway
     }
 
+    // Start HTTP API server
+    int http_port = g_config.http_port > 0 ? g_config.http_port : 8080;
+    g_http_api_server = http_api_init(http_port);
+    if (g_http_api_server) {
+        if (http_api_start(g_http_api_server)) {
+            log_info("HTTP API server started on port %d", http_port);
+        } else {
+            log_error("Failed to start HTTP API server");
+        }
+    } else {
+        log_error("Failed to initialize HTTP API server");
+    }
+
     log_info("CatClaw initialized successfully!");
     log_info("WebSocket server running on port %d", g_config.gateway_port);
+    if (g_http_api_server) {
+        log_info("HTTP API server running on port %d", http_port);
+    }
     log_info("Use 'help' for available commands");
     printf("\n");
 
@@ -565,6 +585,14 @@ int main(int argc, char *argv[]) {
     // Cleanup
     stop_gateway_server();
     agent_stop_worker_thread();
+    
+    // Stop HTTP API server
+    if (g_http_api_server) {
+        http_api_stop(g_http_api_server);
+        http_api_cleanup(g_http_api_server);
+        g_http_api_server = NULL;
+    }
+    
     agent_cleanup();
     channels_cleanup();
     plugin_system_cleanup();

@@ -76,6 +76,7 @@ Config g_config = {
     .enable_compaction = 1,
     .compaction_threshold = 3000,
     .gateway_port = 18789,
+    .http_port = 8080,
     .browser_enabled = false,
     .debug = true
 };

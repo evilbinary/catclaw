@@ -87,6 +87,7 @@ typedef struct {
     int enable_compaction;
     int compaction_threshold;
     int gateway_port;
+    int http_port;            // HTTP API 端口
     bool browser_enabled;
     bool debug;
 } Config;
