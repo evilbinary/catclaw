@@ -1,6 +1,6 @@
 #include "http_server.h"
-#include "log.h"
-#include "cJSON.h"
+#include "../common/log.h"
+#include "../common/cJSON.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
