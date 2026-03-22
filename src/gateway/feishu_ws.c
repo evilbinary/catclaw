@@ -204,24 +204,26 @@ static bool pb_decode_frame(const uint8_t *buf, size_t buf_len, PbFrame *frame) 
                   field_num, wire_type, (unsigned long)tag, offset);
         
         if (wire_type == 2) {  // length-delimited
+            uint8_t *data;
+            size_t data_len;
+            if (!pb_read_bytes(buf, buf_len, &offset, &data, &data_len)) break;
+            
             if (field_num == 5) {  // headers (repeated)
-                uint8_t *header_data;
-                size_t header_len;
-                if (!pb_read_bytes(buf, buf_len, &offset, &header_data, &header_len)) break;
-                
                 if (header_count < 32) {
-                    if (pb_decode_header(header_data, header_len, &headers[header_count])) {
+                    if (pb_decode_header(data, data_len, &headers[header_count])) {
+                        log_debug("[FeishuWS] Header %d: %s=%s", header_count, 
+                                  headers[header_count].key, headers[header_count].value);
                         header_count++;
                     }
                 }
-                free(header_data);
-            } else if (field_num == 6) {  // payload
-                if (!pb_read_bytes(buf, buf_len, &offset, &frame->payload, &frame->payload_len)) break;
+                free(data);
+            } else if (field_num == 8) {  // actual payload (event data)
+                frame->payload = data;
+                frame->payload_len = data_len;
+                log_debug("[FeishuWS] Payload (field 8) len=%zu: %.*s", data_len, (int)(data_len > 200 ? 200 : data_len), data);
             } else {
-                // Skip unknown field
-                uint64_t len;
-                if (!pb_read_varint(buf, buf_len, &offset, &len)) break;
-                offset += len;
+                log_debug("[FeishuWS] Skipping field %d, len=%zu", field_num, data_len);
+                free(data);
             }
         } else if (wire_type == 0) {  // varint
             uint64_t val;
@@ -455,69 +457,64 @@ static bool feishu_ws_on_message(WsClient *ws, const char *data, size_t len, voi
     log_debug("[FeishuWS] Received frame: method=%d, header_count=%d, payload_len=%zu",
               frame.method, frame.header_count, frame.payload_len);
     
-    if (frame.method == FRAME_TYPE_CONTROL) {
-        // Control frame (PING/PONG)
-        char *type = pb_frame_get_header(&frame, "type");
-        if (type) {
-            if (strcmp(type, MSG_TYPE_PING) == 0) {
-                log_debug("[FeishuWS] Received PING");
-            } else if (strcmp(type, MSG_TYPE_PONG) == 0) {
-                log_debug("[FeishuWS] Received PONG");
-                // PONG 可能包含配置更新
-                if (frame.payload && frame.payload_len > 0) {
-                    log_info("[FeishuWS] PONG payload: %.*s", (int)frame.payload_len, frame.payload);
-                }
-            }
-        }
-    } else if (frame.method == FRAME_TYPE_DATA) {
-        // Data frame (event/card)
-        char *type = pb_frame_get_header(&frame, "type");
+    // Get type from headers to determine frame type
+    char *type = pb_frame_get_header(&frame, "type");
+    
+    if (type && strcmp(type, MSG_TYPE_EVENT) == 0 && frame.payload) {
+        // Event frame
         char *msg_id = pb_frame_get_header(&frame, "message_id");
         char *trace_id = pb_frame_get_header(&frame, "trace_id");
         
-        log_debug("[FeishuWS] Data frame: type=%s, msg_id=%s, trace_id=%s",
-                  type ? type : "unknown", 
+        log_debug("[FeishuWS] Event frame: msg_id=%s, trace_id=%s",
                   msg_id ? msg_id : "unknown",
                   trace_id ? trace_id : "unknown");
         
-        if (type && strcmp(type, MSG_TYPE_EVENT) == 0 && frame.payload) {
-            // 处理事件
-            log_info("[FeishuWS] Event payload: %.*s", (int)frame.payload_len, frame.payload);
+        // 处理事件
+        log_info("[FeishuWS] Event payload: %.*s", (int)frame.payload_len, frame.payload);
+        
+        // 解析事件并发送到 agent
+        FeishuMessage *msg = feishu_parse_message((const char *)frame.payload);
+        if (msg && msg->content) {
+            log_info("[FeishuWS] Message from %s: %s", 
+                     msg->sender_id ? msg->sender_id : "unknown",
+                     msg->content);
             
-            // 解析事件并发送到 agent
-            FeishuMessage *msg = feishu_parse_message((const char *)frame.payload);
-            if (msg && msg->content) {
-                log_info("[FeishuWS] Message from %s: %s", 
+            // 构建带有上下文的消息
+            char *context_msg = (char *)malloc(512 + strlen(msg->content));
+            if (context_msg) {
+                snprintf(context_msg, 512 + strlen(msg->content),
+                         "[feishu:%s:%s] %s",
                          msg->sender_id ? msg->sender_id : "unknown",
+                         msg->chat_id ? msg->chat_id : (msg->message_id ? msg->message_id : "unknown"),
                          msg->content);
                 
-                // 构建带有上下文的消息
-                char *context_msg = (char *)malloc(512 + strlen(msg->content));
-                if (context_msg) {
-                    snprintf(context_msg, 512 + strlen(msg->content),
-                             "[feishu:%s:%s] %s",
-                             msg->sender_id ? msg->sender_id : "unknown",
-                             msg->chat_id ? msg->chat_id : (msg->message_id ? msg->message_id : "unknown"),
-                             msg->content);
-                    
-                    // 发送到 agent
-                    if (agent_send_message(context_msg)) {
-                        log_info("[FeishuWS] Message sent to agent successfully");
-                    } else {
-                        log_error("[FeishuWS] Failed to send message to agent");
-                    }
-                    free(context_msg);
+                // 发送到 agent
+                if (agent_send_message(context_msg)) {
+                    log_info("[FeishuWS] Message sent to agent successfully");
+                } else {
+                    log_error("[FeishuWS] Failed to send message to agent");
                 }
-                
-                feishu_message_free(msg);
+                free(context_msg);
             }
             
-            // 发送响应
-            uint8_t resp_buf[4096];
-            size_t resp_len = pb_encode_response_frame(resp_buf, sizeof(resp_buf), 
-                                                        &frame, "{\"code\":0,\"msg\":\"success\"}");
-            ws_client_send_binary(ws, resp_buf, resp_len);
+            feishu_message_free(msg);
         }
+        
+        // 发送响应
+        uint8_t resp_buf[4096];
+        size_t resp_len = pb_encode_response_frame(resp_buf, sizeof(resp_buf), 
+                                                    &frame, "{\"code\":0,\"msg\":\"success\"}");
+        ws_client_send_binary(ws, resp_buf, resp_len);
+        log_debug("[FeishuWS] Sent response frame, len=%zu", resp_len);
+    } else if (type && strcmp(type, MSG_TYPE_PING) == 0) {
+        log_debug("[FeishuWS] Received PING");
+    } else if (type && strcmp(type, MSG_TYPE_PONG) == 0) {
+        log_debug("[FeishuWS] Received PONG");
+        if (frame.payload && frame.payload_len > 0) {
+            log_info("[FeishuWS] PONG payload: %.*s", (int)frame.payload_len, frame.payload);
+        }
+    } else {
+        log_debug("[FeishuWS] Unknown frame type: %s", type ? type : "null");
     }
     
     pb_frame_free(&frame);
