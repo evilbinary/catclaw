@@ -37,15 +37,6 @@ typedef struct {
     bool websocket_enabled;   // 是否启用 WebSocket 服务器
 } GatewayConfig;
 
-// Feishu WebSocket configuration
-typedef struct {
-    bool enabled;             // 是否启用飞书 WebSocket 订阅
-    char *domain;             // 飞书域名 (默认: https://open.feishu.cn)
-    int ping_interval_sec;    // 心跳间隔(秒)，默认 120
-    int reconnect_interval_sec; // 重连间隔(秒)，默认 120
-    int max_reconnect_count;  // 最大重连次数，-1 表示无限
-} FeishuWsConfig;
-
 // Workspace configuration
 typedef struct {
     char *path;               // 工作区路径
@@ -98,6 +89,11 @@ typedef struct {
     char *webhook_url;
     char *receive_id;            // 接收消息的用户/群组ID
     char *receive_id_type;       // 接收ID类型: open_id, user_id, union_id, chat_id
+    bool ws_enabled;             // 是否启用 WebSocket 事件订阅
+    char *ws_domain;             // WebSocket 连接域名 (可选)
+    int ws_ping_interval;        // WebSocket 心跳间隔(秒)，默认 120
+    int ws_reconnect_interval;   // WebSocket 重连间隔(秒)，默认 120
+    int ws_max_reconnect;        // WebSocket 最大重连次数，-1 表示无限
     
     // Telegram 专用
     char *chat_id;
@@ -128,7 +124,6 @@ typedef struct {
     CompactionConfig compaction;
     AgentConfig agent;
     ChannelsConfig channels;  // 多渠道配置
-    FeishuWsConfig feishu_ws; // 飞书 WebSocket 配置
     
     // Legacy fields for backward compatibility
     char *workspace_path;

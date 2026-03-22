@@ -219,36 +219,33 @@ int main(int argc, char *argv[]) {
         log_info("HTTP API server is disabled");
     }
     
-    // Start Feishu WebSocket client (if enabled)
-    if (g_config.feishu_ws.enabled) {
-        // Find first Feishu channel with app_id and app_secret
-        for (int i = 0; i < g_config.channels.count; i++) {
-            ChannelConfigEntry *ch = &g_config.channels.channels[i];
-            if (ch->type && strcmp(ch->type, "feishu") == 0 && 
-                ch->app_id && ch->app_secret) {
-                g_feishu_ws_client = feishu_ws_create(ch->app_id, ch->app_secret);
-                if (g_feishu_ws_client) {
-                    if (g_config.feishu_ws.domain) {
-                        feishu_ws_set_domain(g_feishu_ws_client, g_config.feishu_ws.domain);
-                    }
-                    feishu_ws_set_ping_interval(g_feishu_ws_client, g_config.feishu_ws.ping_interval_sec);
-                    feishu_ws_set_reconnect(g_feishu_ws_client, 
-                                           g_config.feishu_ws.reconnect_interval_sec,
-                                           g_config.feishu_ws.max_reconnect_count);
-                    
-                    if (feishu_ws_start(g_feishu_ws_client)) {
-                        log_info("Feishu WebSocket client started for channel: %s", ch->id);
-                    } else {
-                        log_error("Failed to start Feishu WebSocket client");
-                        feishu_ws_destroy(g_feishu_ws_client);
-                        g_feishu_ws_client = NULL;
-                    }
+    // Start Feishu WebSocket client (for channels with ws_enabled=true)
+    for (int i = 0; i < g_config.channels.count; i++) {
+        ChannelConfigEntry *ch = &g_config.channels.channels[i];
+        if (ch->type && strcmp(ch->type, "feishu") == 0 && 
+            ch->ws_enabled && ch->app_id && ch->app_secret) {
+            g_feishu_ws_client = feishu_ws_create(ch->app_id, ch->app_secret);
+            if (g_feishu_ws_client) {
+                if (ch->ws_domain) {
+                    feishu_ws_set_domain(g_feishu_ws_client, ch->ws_domain);
                 }
-                break;  // Only use first Feishu channel
+                if (ch->ws_ping_interval > 0) {
+                    feishu_ws_set_ping_interval(g_feishu_ws_client, ch->ws_ping_interval);
+                }
+                if (ch->ws_reconnect_interval > 0 || ch->ws_max_reconnect != 0) {
+                    feishu_ws_set_reconnect(g_feishu_ws_client, 
+                                           ch->ws_reconnect_interval > 0 ? ch->ws_reconnect_interval : 120,
+                                           ch->ws_max_reconnect);
+                }
+                
+                if (feishu_ws_start(g_feishu_ws_client)) {
+                    log_info("Feishu WebSocket client started for channel: %s", ch->id);
+                } else {
+                    log_error("Failed to start Feishu WebSocket client for channel: %s", ch->id);
+                    feishu_ws_destroy(g_feishu_ws_client);
+                    g_feishu_ws_client = NULL;
+                }
             }
-        }
-        if (!g_feishu_ws_client) {
-            log_warn("Feishu WebSocket enabled but no valid Feishu channel found");
         }
     }
 

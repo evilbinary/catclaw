@@ -78,14 +78,6 @@ Config g_config = {
         .default_index = 0,
         .default_channel = NULL
     },
-    // Feishu WebSocket config defaults
-    .feishu_ws = {
-        .enabled = false,
-        .domain = NULL,
-        .ping_interval_sec = 120,
-        .reconnect_interval_sec = 120,
-        .max_reconnect_count = -1
-    },
     // Legacy fields
     .workspace_path = NULL,
     .model_provider = NULL,
@@ -359,37 +351,6 @@ static void parse_gateway_config(cJSON *gateway) {
     }
 }
 
-// Parse Feishu WebSocket configuration
-static void parse_feishu_ws_config(cJSON *feishu_ws) {
-    if (!feishu_ws) return;
-    
-    cJSON *enabled = cJSON_GetObjectItem(feishu_ws, "enabled");
-    if (enabled && (cJSON_IsTrue(enabled) || cJSON_IsFalse(enabled))) {
-        g_config.feishu_ws.enabled = cJSON_IsTrue(enabled);
-    }
-    
-    cJSON *domain = cJSON_GetObjectItem(feishu_ws, "domain");
-    if (domain && cJSON_IsString(domain)) {
-        free(g_config.feishu_ws.domain);
-        g_config.feishu_ws.domain = strdup(domain->valuestring);
-    }
-    
-    cJSON *ping_interval = cJSON_GetObjectItem(feishu_ws, "ping_interval_sec");
-    if (ping_interval && cJSON_IsNumber(ping_interval)) {
-        g_config.feishu_ws.ping_interval_sec = (int)ping_interval->valuedouble;
-    }
-    
-    cJSON *reconnect_interval = cJSON_GetObjectItem(feishu_ws, "reconnect_interval_sec");
-    if (reconnect_interval && cJSON_IsNumber(reconnect_interval)) {
-        g_config.feishu_ws.reconnect_interval_sec = (int)reconnect_interval->valuedouble;
-    }
-    
-    cJSON *max_reconnect = cJSON_GetObjectItem(feishu_ws, "max_reconnect_count");
-    if (max_reconnect && cJSON_IsNumber(max_reconnect)) {
-        g_config.feishu_ws.max_reconnect_count = (int)max_reconnect->valuedouble;
-    }
-}
-
 // Parse workspace configuration
 static void parse_workspace_config(cJSON *workspace) {
     if (!workspace) return;
@@ -583,6 +544,32 @@ static void parse_single_channel(cJSON *channel_json, int index) {
     cJSON *receive_id_type = cJSON_GetObjectItem(channel_json, "receive_id_type");
     if (receive_id_type && cJSON_IsString(receive_id_type)) {
         channel->receive_id_type = strdup(receive_id_type->valuestring);
+    }
+    
+    // Parse Feishu WebSocket-specific config
+    cJSON *ws_enabled = cJSON_GetObjectItem(channel_json, "ws_enabled");
+    if (ws_enabled && (cJSON_IsTrue(ws_enabled) || cJSON_IsFalse(ws_enabled))) {
+        channel->ws_enabled = cJSON_IsTrue(ws_enabled);
+    }
+    
+    cJSON *ws_domain = cJSON_GetObjectItem(channel_json, "ws_domain");
+    if (ws_domain && cJSON_IsString(ws_domain)) {
+        channel->ws_domain = strdup(ws_domain->valuestring);
+    }
+    
+    cJSON *ws_ping_interval = cJSON_GetObjectItem(channel_json, "ws_ping_interval");
+    if (ws_ping_interval && cJSON_IsNumber(ws_ping_interval)) {
+        channel->ws_ping_interval = (int)ws_ping_interval->valuedouble;
+    }
+    
+    cJSON *ws_reconnect_interval = cJSON_GetObjectItem(channel_json, "ws_reconnect_interval");
+    if (ws_reconnect_interval && cJSON_IsNumber(ws_reconnect_interval)) {
+        channel->ws_reconnect_interval = (int)ws_reconnect_interval->valuedouble;
+    }
+    
+    cJSON *ws_max_reconnect = cJSON_GetObjectItem(channel_json, "ws_max_reconnect");
+    if (ws_max_reconnect && cJSON_IsNumber(ws_max_reconnect)) {
+        channel->ws_max_reconnect = (int)ws_max_reconnect->valuedouble;
     }
     
     // Parse Telegram-specific config
@@ -871,11 +858,6 @@ bool config_load(void) {
                 sync_default_channel();
             }
             
-            cJSON *feishu_ws = cJSON_GetObjectItem(root, "feishu_ws");
-            if (feishu_ws) {
-                parse_feishu_ws_config(feishu_ws);
-            }
-            
             // Parse legacy configuration for backward compatibility
             parse_legacy_config(root);
 
@@ -1068,15 +1050,11 @@ void config_cleanup(void) {
             free(ch->chat_id);
             free(ch->channel_id);
             free(ch->bot_token);
+            free(ch->ws_domain);
         }
         free(g_config.channels.channels);
     }
     free(g_config.channels.default_channel);
-    
-    // Cleanup feishu_ws config
-    free(g_config.feishu_ws.domain);
-    
-    // Cleanup legacy fields
     free(g_config.workspace_path);
     free(g_config.model_provider);
     free(g_config.model_name);
