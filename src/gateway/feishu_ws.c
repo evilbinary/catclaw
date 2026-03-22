@@ -14,7 +14,7 @@
 
 // 飞书默认域名
 #define FEISHU_DEFAULT_DOMAIN "https://open.feishu.cn"
-#define FEISHU_ENDPOINT_URI "/auth/v3/app/app_ticket/generate_endpoint"
+#define FEISHU_ENDPOINT_URI "/callback/ws/endpoint"
 
 // 消息类型
 #define MSG_TYPE_PING "ping"
@@ -331,6 +331,8 @@ char* feishu_ws_get_endpoint(const char *app_id, const char *app_secret, const c
     char url[512];
     snprintf(url, sizeof(url), "%s%s", base_domain, FEISHU_ENDPOINT_URI);
     
+    log_info("[FeishuWS] Getting endpoint from: %s", url);
+    
     // 构建请求体
     cJSON *body = cJSON_CreateObject();
     cJSON_AddStringToObject(body, "AppID", app_id);
@@ -351,9 +353,15 @@ char* feishu_ws_get_endpoint(const char *app_id, const char *app_secret, const c
     HttpResponse *resp = http_request(&req);
     free(body_str);
     
-    if (!resp || !resp->success) {
-        if (resp) http_response_free(resp);
-        log_error("[FeishuWS] Failed to get endpoint: request failed");
+    if (!resp) {
+        log_error("[FeishuWS] Failed to get endpoint: no response");
+        return NULL;
+    }
+    
+    if (!resp->success) {
+        log_error("[FeishuWS] Failed to get endpoint: HTTP %d, body: %s", 
+                  resp->status_code, resp->body ? resp->body : "(empty)");
+        http_response_free(resp);
         return NULL;
     }
     

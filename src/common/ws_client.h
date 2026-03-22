@@ -49,6 +49,8 @@ struct WsClient {
     char *path;
     int port;
     bool use_ssl;
+    void *ssl;        // SSL* (OpenSSL)
+    void *ssl_ctx;    // SSL_CTX* (OpenSSL)
     char *recv_buffer;
     size_t recv_buffer_size;
     size_t recv_buffer_len;

@@ -8,6 +8,12 @@
 #include <string.h>
 #include <time.h>
 
+// OpenSSL for SSL/TLS support
+#ifdef HAVE_OPENSSL
+#include <openssl/ssl.h>
+#include <openssl/err.h>
+#endif
+
 // Platform-specific includes
 #ifdef _WIN32
 #include <winsock2.h>
@@ -308,14 +314,31 @@ static bool ws_client_handshake(WsClient *client) {
     );
     
     // Send handshake request
-    if (send(client->socket, request, len, 0) != len) {
+    int sent;
+#ifdef HAVE_OPENSSL
+    if (client->ssl) {
+        sent = SSL_write((SSL*)client->ssl, request, len);
+    } else
+#endif
+    {
+        sent = send(client->socket, request, len, 0);
+    }
+    if (sent != len) {
         log_error("[WSClient] Failed to send handshake request");
         return false;
     }
     
     // Receive handshake response
     char response[4096];
-    int recv_len = recv(client->socket, response, sizeof(response) - 1, 0);
+    int recv_len;
+#ifdef HAVE_OPENSSL
+    if (client->ssl) {
+        recv_len = SSL_read((SSL*)client->ssl, response, sizeof(response) - 1);
+    } else
+#endif
+    {
+        recv_len = recv(client->socket, response, sizeof(response) - 1, 0);
+    }
     if (recv_len <= 0) {
         log_error("[WSClient] Failed to receive handshake response");
         return false;
@@ -345,10 +368,14 @@ static bool ws_client_handshake(WsClient *client) {
     }
     
     accept_start += 21;  // Skip header name
+    // Skip leading spaces
+    while (*accept_start == ' ') accept_start++;
     char *accept_end = strstr(accept_start, "\r\n");
     if (!accept_end) return false;
     
     *accept_end = '\0';
+    log_debug("[WSClient] Expected accept: %s", expected_accept);
+    log_debug("[WSClient] Got accept: %s", accept_start);
     if (strcmp(accept_start, expected_accept) != 0) {
         log_error("[WSClient] Invalid Sec-WebSocket-Accept");
         return false;
@@ -445,6 +472,55 @@ bool ws_client_connect(WsClient *client) {
     // Set blocking again for handshake
     set_socket_blocking(client->socket);
     
+#ifdef HAVE_OPENSSL
+    // Setup SSL if needed
+    if (client->use_ssl) {
+        SSL_library_init();
+        SSL_load_error_strings();
+        
+        SSL_CTX *ssl_ctx = SSL_CTX_new(TLS_client_method());
+        if (!ssl_ctx) {
+            log_error("[WSClient] Failed to create SSL context");
+            closesocket(client->socket);
+            client->socket = INVALID_SOCKET;
+            client->state = WS_CLIENT_ERROR;
+            return false;
+        }
+        
+        SSL *ssl = SSL_new(ssl_ctx);
+        if (!ssl) {
+            log_error("[WSClient] Failed to create SSL structure");
+            SSL_CTX_free(ssl_ctx);
+            closesocket(client->socket);
+            client->socket = INVALID_SOCKET;
+            client->state = WS_CLIENT_ERROR;
+            return false;
+        }
+        
+        SSL_set_fd(ssl, client->socket);
+        
+        // Set hostname for SNI
+        SSL_set_tlsext_host_name(ssl, client->host);
+        
+        // Perform SSL handshake
+        int ssl_ret = SSL_connect(ssl);
+        if (ssl_ret != 1) {
+            unsigned long err = ERR_get_error();
+            log_error("[WSClient] SSL handshake failed: %s", ERR_error_string(err, NULL));
+            SSL_free(ssl);
+            SSL_CTX_free(ssl_ctx);
+            closesocket(client->socket);
+            client->socket = INVALID_SOCKET;
+            client->state = WS_CLIENT_ERROR;
+            return false;
+        }
+        
+        client->ssl = ssl;
+        client->ssl_ctx = ssl_ctx;
+        log_info("[WSClient] SSL connection established");
+    }
+#endif
+    
     // Perform WebSocket handshake
     if (!ws_client_handshake(client)) {
         closesocket(client->socket);
@@ -474,6 +550,20 @@ void ws_client_disconnect(WsClient *client) {
     if (client->socket != INVALID_SOCKET) {
         // Send close frame
         ws_client_send_frame(client, WS_OPCODE_CLOSE, NULL, 0, true);
+        
+#ifdef HAVE_OPENSSL
+        // Cleanup SSL
+        if (client->ssl) {
+            SSL_shutdown((SSL*)client->ssl);
+            SSL_free((SSL*)client->ssl);
+            client->ssl = NULL;
+        }
+        if (client->ssl_ctx) {
+            SSL_CTX_free((SSL_CTX*)client->ssl_ctx);
+            client->ssl_ctx = NULL;
+        }
+#endif
+        
         closesocket(client->socket);
         client->socket = INVALID_SOCKET;
     }
@@ -540,7 +630,15 @@ static bool ws_client_send_frame(WsClient *client, uint8_t opcode, const void *d
     }
     
     // Send frame
-    ssize_t sent = send(client->socket, (char *)frame, offset, 0);
+    ssize_t sent;
+#ifdef HAVE_OPENSSL
+    if (client->ssl) {
+        sent = SSL_write((SSL*)client->ssl, frame, offset);
+    } else
+#endif
+    {
+        sent = send(client->socket, (char *)frame, offset, 0);
+    }
     return sent == (ssize_t)offset;
 }
 
@@ -551,9 +649,19 @@ static int ws_client_recv_frame(WsClient *client, uint8_t *opcode, char **payloa
     // Try to receive more data
     size_t space = client->recv_buffer_size - client->recv_buffer_len;
     if (space > 0) {
-        ssize_t recv_len = recv(client->socket, 
-                                 client->recv_buffer + client->recv_buffer_len, 
-                                 space, 0);
+        ssize_t recv_len;
+#ifdef HAVE_OPENSSL
+        if (client->ssl) {
+            recv_len = SSL_read((SSL*)client->ssl, 
+                               client->recv_buffer + client->recv_buffer_len, 
+                               space);
+        } else
+#endif
+        {
+            recv_len = recv(client->socket, 
+                           client->recv_buffer + client->recv_buffer_len, 
+                           space, 0);
+        }
         if (recv_len > 0) {
             client->recv_buffer_len += recv_len;
         } else if (recv_len == 0) {
