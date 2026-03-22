@@ -759,11 +759,11 @@ void* agent_node_worker_thread(void* arg) {
                         ai_model_free_response(response);
                         continue;
                     } else {
-                        // No tool calls, send response to user
+                        // No tool calls, send response to all connected channels
                         if (g_config.debug) {
-                            log_debug("Sending message to WebChat\n");
+                            log_debug("Sending message to all connected channels\n");
                         }
-                        channel_send_message_to_type(CHANNEL_WEBCHAT, response->content);
+                        channel_send_message_to_all(response->content);
                         
                         ai_model_free_response(response);
                         break;
