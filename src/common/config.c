@@ -38,7 +38,9 @@ Config g_config = {
         .port = 18789,
         .browser_enabled = false,
         .http_api_key = NULL,
-        .http_auth_enabled = false
+        .http_auth_enabled = false,
+        .http_server_enabled = false,
+        .websocket_enabled = false
     },
     // Workspace config defaults
     .workspace = {
@@ -336,6 +338,16 @@ static void parse_gateway_config(cJSON *gateway) {
     cJSON *http_auth = cJSON_GetObjectItem(gateway, "http_auth_enabled");
     if (http_auth && (cJSON_IsTrue(http_auth) || cJSON_IsFalse(http_auth))) {
         g_config.gateway.http_auth_enabled = cJSON_IsTrue(http_auth);
+    }
+    
+    cJSON *http_server = cJSON_GetObjectItem(gateway, "http_server_enabled");
+    if (http_server && (cJSON_IsTrue(http_server) || cJSON_IsFalse(http_server))) {
+        g_config.gateway.http_server_enabled = cJSON_IsTrue(http_server);
+    }
+    
+    cJSON *websocket = cJSON_GetObjectItem(gateway, "websocket_enabled");
+    if (websocket && (cJSON_IsTrue(websocket) || cJSON_IsFalse(websocket))) {
+        g_config.gateway.websocket_enabled = cJSON_IsTrue(websocket);
     }
 }
 
@@ -1039,6 +1051,8 @@ void config_print(void) {
     printf("  Gateway:\n");
     printf("    Port: %d\n", g_config.gateway.port);
     printf("    Browser Enabled: %s\n", g_config.gateway.browser_enabled ? "true" : "false");
+    printf("    HTTP Server Enabled: %s\n", g_config.gateway.http_server_enabled ? "true" : "false");
+    printf("    WebSocket Enabled: %s\n", g_config.gateway.websocket_enabled ? "true" : "false");
     printf("  Workspace:\n");
     printf("    Path: %s\n", g_config.workspace.path ? g_config.workspace.path : "(default)");
     printf("  Session:\n");

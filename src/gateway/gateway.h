@@ -8,6 +8,7 @@
 typedef struct {
     int port;
     bool running;
+    bool ws_initialized;
     WebSocketServer ws_server;
 } Gateway;
 

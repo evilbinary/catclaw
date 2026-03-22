@@ -272,17 +272,23 @@
     "port": 18789,
     "browser_enabled": false,
     "http_api_key": "your-api-key",
-    "http_auth_enabled": true
+    "http_auth_enabled": true,
+    "http_server_enabled": true,
+    "websocket_enabled": true
   }
 }
 ```
 
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `port` | int | WebSocket 网关端口，默认 18789 |
-| `browser_enabled` | bool | 是否启用浏览器界面 |
-| `http_api_key` | string | API 授权密钥 |
-| `http_auth_enabled` | bool | 是否启用 HTTP 授权 |
+| 字段 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `port` | int | 18789 | WebSocket/HTTP 网关端口 |
+| `browser_enabled` | bool | false | 是否启用浏览器界面 |
+| `http_api_key` | string | - | API 授权密钥 |
+| `http_auth_enabled` | bool | false | 是否启用 HTTP 授权 |
+| `http_server_enabled` | bool | false | 是否启用 HTTP API 服务器 |
+| `websocket_enabled` | bool | false | 是否启用 WebSocket 服务器 |
+
+> **注意**: `http_server_enabled` 和 `websocket_enabled` 默认为 `false`，需要显式配置 `true` 才会启用相应服务。
 
 ---
 
@@ -407,7 +413,9 @@
   "gateway": {
     "port": 18789,
     "http_api_key": "secure-api-key-here",
-    "http_auth_enabled": true
+    "http_auth_enabled": true,
+    "http_server_enabled": true,
+    "websocket_enabled": true
   },
   
   "session": {

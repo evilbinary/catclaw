@@ -33,6 +33,8 @@ typedef struct {
     bool browser_enabled;     // 是否启用浏览器
     char *http_api_key;       // HTTP API 授权密钥 (可选)
     bool http_auth_enabled;   // 是否启用 HTTP 授权
+    bool http_server_enabled; // 是否启用 HTTP API 服务器
+    bool websocket_enabled;   // 是否启用 WebSocket 服务器
 } GatewayConfig;
 
 // Workspace configuration

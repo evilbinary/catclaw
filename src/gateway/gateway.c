@@ -13,14 +13,19 @@ Gateway g_gateway = {
 bool gateway_init(void) {
     g_gateway.port = g_config.gateway_port;
     g_gateway.running = false;
+    g_gateway.ws_initialized = false;
 
-    // Initialize WebSocket server
-    if (!websocket_server_init(&g_gateway.ws_server, g_gateway.port, 10, g_config.gateway.http_api_key)) {
-        fprintf(stderr, "Failed to initialize WebSocket server\n");
-        return false;
+    // Initialize WebSocket server only if enabled
+    if (g_config.gateway.websocket_enabled) {
+        if (!websocket_server_init(&g_gateway.ws_server, g_gateway.port, 10, g_config.gateway.http_api_key)) {
+            fprintf(stderr, "Failed to initialize WebSocket server\n");
+            return false;
+        }
+        g_gateway.ws_initialized = true;
+        printf("WebSocket server initialized on port %d\n", g_gateway.port);
     }
 
-    printf("Gateway initialized on port %d\n", g_gateway.port);
+    printf("Gateway initialized\n");
     return true;
 }
 
@@ -30,10 +35,12 @@ bool gateway_start(void) {
         return true;
     }
 
-    // Start WebSocket server
-    if (!websocket_server_start(&g_gateway.ws_server)) {
-        fprintf(stderr, "Failed to start WebSocket server\n");
-        return false;
+    // Start WebSocket server only if enabled and initialized
+    if (g_config.gateway.websocket_enabled && g_gateway.ws_initialized) {
+        if (!websocket_server_start(&g_gateway.ws_server)) {
+            fprintf(stderr, "Failed to start WebSocket server\n");
+            return false;
+        }
     }
 
     g_gateway.running = true;
@@ -47,8 +54,10 @@ void gateway_stop(void) {
         return;
     }
 
-    // Stop WebSocket server
-    websocket_server_stop(&g_gateway.ws_server);
+    // Stop WebSocket server only if initialized
+    if (g_gateway.ws_initialized) {
+        websocket_server_stop(&g_gateway.ws_server);
+    }
     g_gateway.running = false;
     printf("Gateway stopped\n");
 }
@@ -58,8 +67,10 @@ void gateway_cleanup(void) {
         gateway_stop();
     }
 
-    // Cleanup WebSocket server
-    websocket_server_cleanup(&g_gateway.ws_server);
+    // Cleanup WebSocket server only if initialized
+    if (g_gateway.ws_initialized) {
+        websocket_server_cleanup(&g_gateway.ws_server);
+    }
     printf("Gateway cleaned up\n");
 }
 
@@ -67,11 +78,18 @@ void gateway_status(void) {
     printf("Gateway:\n");
     printf("  Status: %s\n", g_gateway.running ? "running" : "stopped");
     printf("  Port: %d\n", g_gateway.port);
+    printf("  HTTP Server: %s\n", g_config.gateway.http_server_enabled ? "enabled" : "disabled");
+    printf("  WebSocket: %s\n", g_config.gateway.websocket_enabled ? "enabled" : "disabled");
     printf("  Bind: 127.0.0.1\n");
 }
 
 // Broadcast a message to all connected WebSocket clients
 bool gateway_broadcast_to_webchat(const char *message) {
+    // Skip if websocket is not enabled or not initialized
+    if (!g_config.gateway.websocket_enabled || !g_gateway.ws_initialized) {
+        return true;
+    }
+    
     if (!message || strlen(message) == 0) return true;
 
     WebSocketServer *server = &g_gateway.ws_server;
