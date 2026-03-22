@@ -7,6 +7,25 @@ ifeq ($(OS),Windows_NT)
 else
     LDFLAGS = -lpthread
 endif
+
+# OpenSSL support
+OPENSSL_AVAILABLE := $(shell pkg-config --exists openssl 2>/dev/null && echo yes || echo no)
+ifeq ($(OPENSSL_AVAILABLE), yes)
+    CFLAGS += $(shell pkg-config --cflags openssl) -DHAVE_OPENSSL
+    LDFLAGS += $(shell pkg-config --libs openssl)
+else
+    # Try homebrew OpenSSL paths (macOS)
+    ifneq ($(wildcard /usr/local/opt/openssl@3/lib/libssl.*),)
+        CFLAGS += -I/usr/local/opt/openssl@3/include -DHAVE_OPENSSL
+        LDFLAGS += -L/usr/local/opt/openssl@3/lib -lssl -lcrypto
+    else ifneq ($(wildcard /opt/homebrew/opt/openssl@3/lib/libssl.*),)
+        CFLAGS += -I/opt/homebrew/opt/openssl@3/include -DHAVE_OPENSSL
+        LDFLAGS += -L/opt/homebrew/opt/openssl@3/lib -lssl -lcrypto
+    else ifneq ($(wildcard /usr/local/opt/openssl@1.1/lib/libssl.*),)
+        CFLAGS += -I/usr/local/opt/openssl@1.1/include -DHAVE_OPENSSL
+        LDFLAGS += -L/usr/local/opt/openssl@1.1/lib -lssl -lcrypto
+    endif
+endif
 SRC_DIR = src
 OBJ_DIR = obj
 
