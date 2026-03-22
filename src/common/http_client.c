@@ -218,6 +218,9 @@ static HttpResponse* do_request(const HttpRequest* req, bool stream,
         log_error("curl_easy_perform failed: %s", curl_easy_strerror(res));
         resp->success = false;
         resp->status_code = 0;
+        // 释放缓冲区
+        free(body_buf.data);
+        free(header_buf.data);
     } else {
         long status = 0;
         curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);
@@ -243,8 +246,7 @@ static HttpResponse* do_request(const HttpRequest* req, bool stream,
                 }
             }
         }
-        
-        free(header_buf.data);
+        // 注意：不要释放 header_buf.data，因为 resp->headers 指向它
     }
     
     // 清理
