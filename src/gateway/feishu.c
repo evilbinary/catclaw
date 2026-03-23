@@ -145,6 +145,7 @@ static bool feishu_send_via_webhook(FeishuConfig *config, const char *message) {
     // 检测是否为 markdown 格式，使用 interactive 卡片发送
     if (is_markdown_message(message)) {
         log_info("[Feishu] Detected markdown, using interactive card with lark_md");
+        // webhook 模式：直接把 card 对象放在消息体中
         cJSON *card = cJSON_CreateObject();
         cJSON *elements = cJSON_CreateArray();
         cJSON *element = cJSON_CreateObject();
@@ -158,6 +159,8 @@ static bool feishu_send_via_webhook(FeishuConfig *config, const char *message) {
         cJSON_AddItemToArray(elements, element);
         
         cJSON_AddItemToObject(card, "elements", elements);
+        cJSON_AddBoolToObject(card, "wide_screen_mode", true);
+        
         cJSON_AddStringToObject(body, "msg_type", "interactive");
         cJSON_AddItemToObject(body, "card", card);
     } else {
@@ -216,6 +219,7 @@ static bool feishu_send_via_api(FeishuConfig *config, const char *message) {
     if (is_markdown_message(message)) {
         log_info("[Feishu] Detected markdown, using interactive card with lark_md");
         // 使用 interactive 卡片发送 markdown
+        // content 字段是卡片 JSON 字符串（不是 {"card": ...}）
         cJSON *card = cJSON_CreateObject();
         cJSON *elements = cJSON_CreateArray();
         cJSON *element = cJSON_CreateObject();
@@ -229,11 +233,10 @@ static bool feishu_send_via_api(FeishuConfig *config, const char *message) {
         cJSON_AddItemToArray(elements, element);
         
         cJSON_AddItemToObject(card, "elements", elements);
+        cJSON_AddBoolToObject(card, "wide_screen_mode", true);
         
-        cJSON *content = cJSON_CreateObject();
-        cJSON_AddItemToObject(content, "card", card);
-        content_str = cJSON_PrintUnformatted(content);
-        cJSON_Delete(content);
+        content_str = cJSON_PrintUnformatted(card);
+        cJSON_Delete(card);
         msg_type = "interactive";
     } else {
         log_info("[Feishu] Plain text message");
