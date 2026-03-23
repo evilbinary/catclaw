@@ -133,16 +133,22 @@ AIProviderResponse* ai_provider_response_create(const char* content, bool succes
     if (!resp) return NULL;
     
     if (content) {
-        resp->content = strdup(content);
-        if (!resp->content) {
-            log_error("[AIProvider] Failed to duplicate content");
+        size_t content_len = strlen(content);
+        resp->content = (char*)malloc(content_len + 1);
+        if (resp->content) {
+            memcpy(resp->content, content, content_len + 1);
+        } else {
+            log_error("[AIProvider] Failed to allocate content");
         }
     }
     resp->success = success;
     if (error) {
-        resp->error = strdup(error);
-        if (!resp->error) {
-            log_error("[AIProvider] Failed to duplicate error");
+        size_t error_len = strlen(error);
+        resp->error = (char*)malloc(error_len + 1);
+        if (resp->error) {
+            memcpy(resp->error, error, error_len + 1);
+        } else {
+            log_error("[AIProvider] Failed to allocate error");
         }
     }
     resp->tool_calls = NULL;
