@@ -9,7 +9,7 @@
 
 // Cross-platform strcasestr implementation (case-insensitive strstr)
 #ifndef HAVE_STRCASESTR
-static char* strcasestr(const char* haystack, const char* needle) {
+char* strcasestr(const char* haystack, const char* needle) {
     if (!haystack || !needle) return NULL;
     if (!*needle) return (char*)haystack;
     
