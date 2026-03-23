@@ -836,3 +836,83 @@ int tool_list_directory(ToolArgs* args, char** result, int* result_len) {
     
     return 0;
 }
+
+// Web fetch tool - fetch content from a URL
+int tool_web_fetch(ToolArgs* args, char** result, int* result_len) {
+    const char* url = tool_args_get(args, "url");
+    if (!url) url = tool_args_get(args, "arg");
+    
+    if (!url || strlen(url) == 0) {
+        *result = strdup("Error: No URL provided");
+        *result_len = strlen(*result);
+        return -1;
+    }
+    
+    // Validate URL scheme
+    if (strncmp(url, "http://", 7) != 0 && strncmp(url, "https://", 8) != 0) {
+        *result = strdup("Error: URL must start with http:// or https://");
+        *result_len = strlen(*result);
+        return -1;
+    }
+    
+    // Make HTTP request
+    HttpRequest req = {
+        .url = url,
+        .method = "GET",
+        .timeout_sec = 30,
+        .follow_redirects = true
+    };
+    
+    HttpResponse* resp = http_request(&req);
+    if (!resp || !resp->success) {
+        char* err_msg = (char*)malloc(256);
+        if (err_msg) {
+            snprintf(err_msg, 256, "Error: Failed to fetch URL (status: %d)", 
+                     resp ? resp->status_code : 0);
+        }
+        if (resp) http_response_free(resp);
+        *result = err_msg ? err_msg : strdup("Error: Failed to fetch URL");
+        *result_len = strlen(*result);
+        return -1;
+    }
+    
+    // Build result with metadata
+    size_t body_len = resp->body_len;
+    size_t header_size = 512;
+    size_t result_size = header_size + body_len + 1;
+    
+    *result = (char*)malloc(result_size);
+    if (!*result) {
+        http_response_free(resp);
+        *result = strdup("Error: Memory allocation failed");
+        *result_len = strlen(*result);
+        return -1;
+    }
+    
+    int offset = snprintf(*result, result_size,
+        "URL: %s\n"
+        "Status: %d\n"
+        "Content-Type: %s\n"
+        "Size: %zu bytes\n\n",
+        url, resp->status_code, 
+        resp->content_type ? resp->content_type : "unknown",
+        body_len);
+    
+    // Append body content (limit to reasonable size)
+    size_t max_body = 8192;
+    if (body_len > max_body) {
+        memcpy(*result + offset, resp->body, max_body);
+        offset += max_body;
+        offset += snprintf(*result + offset, result_size - offset,
+            "\n\n... (truncated, total %zu bytes)", body_len);
+    } else if (body_len > 0) {
+        memcpy(*result + offset, resp->body, body_len);
+        offset += body_len;
+    }
+    
+    (*result)[offset] = '\0';
+    *result_len = offset;
+    
+    http_response_free(resp);
+    return 0;
+}
