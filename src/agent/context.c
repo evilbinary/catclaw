@@ -13,6 +13,8 @@
 #include <string.h>
 #include <unistd.h>
 #include <errno.h>
+#include <time.h>
+#include <pthread.h>
 
 // Default system prompt for the agent
 static const char* DEFAULT_SYSTEM_PROMPT =
@@ -59,31 +61,85 @@ typedef struct {
     int count;
 } ToolCallList;
 
-// 流式消息状态
+// ==================== 流式消息系统 ====================
+
+// 全局流式状态
 static bool g_stream_active = false;
 
-// AI 流式回调函数
+// 节流控制
+static int g_last_sent_len = 0;
+static struct timespec g_last_update_time = {0, 0};
+
+#define STREAM_MIN_INTERVAL_MS  150  // 最小更新间隔
+#define STREAM_MIN_CHARS        5    // 最小新增字符数
+
+// 用于遍历 channel 时的数据传递
+typedef struct {
+    const char* content;
+} StreamCallbackData;
+
+// 启动流式消息的遍历回调
+static void stream_start_iterator(ChannelInstance* channel, void* user_data) {
+    StreamCallbackData* data = (StreamCallbackData*)user_data;
+    if (channel->stream_start && channel->stream_update) {
+        // 启动流式消息
+        channel->stream_start(channel, data->content);
+        log_debug("[Stream] Started stream for channel: %s", channel->name);
+    }
+}
+
+// 更新流式消息的遍历回调
+static void stream_update_iterator(ChannelInstance* channel, void* user_data) {
+    StreamCallbackData* data = (StreamCallbackData*)user_data;
+    if (channel->stream_update) {
+        channel_stream_submit_task(channel, STREAM_TASK_UPDATE, data->content);
+    }
+}
+
+// 结束流式消息的遍历回调
+static void stream_end_iterator(ChannelInstance* channel, void* user_data) {
+    (void)user_data;
+    if (channel->stream_end) {
+        channel_stream_submit_task(channel, STREAM_TASK_END, NULL);
+    }
+}
+
+// AI 流式回调函数：往所有支持流式的 channel 推送任务
 static void stream_callback(const char* chunk, const char* accumulated, void* user_data) {
-    (void)user_data;  // unused
+    (void)chunk;
+    (void)user_data;
     
-    // 查找支持流式的渠道（飞书 API 模式）
-    ChannelInstance *feishu = channel_first_of_type(CHANNEL_FEISHU);
-    if (!feishu || !feishu->stream_update) {
+    int current_len = accumulated ? strlen(accumulated) : 0;
+    
+    // 第一个 chunk：启动所有支持流式的 channel
+    if (!g_stream_active) {
+        g_stream_active = true;
+        g_last_sent_len = current_len;
+        clock_gettime(CLOCK_MONOTONIC, &g_last_update_time);
+        
+        StreamCallbackData data = { .content = accumulated };
+        channels_foreach(stream_start_iterator, &data);
         return;
     }
     
-    // 如果是第一个 chunk，启动流式消息
-    if (!g_stream_active) {
-        if (feishu->stream_start) {
-            feishu->stream_start(feishu, accumulated);
-            g_stream_active = true;
-            log_debug("[Stream] Started stream message");
-        }
-    } else {
-        // 更新流式消息
-        if (feishu->stream_update) {
-            feishu->stream_update(feishu, accumulated);
-        }
+    // 节流检查
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    
+    long elapsed_ms = (now.tv_sec - g_last_update_time.tv_sec) * 1000 +
+                       (now.tv_nsec - g_last_update_time.tv_nsec) / 1000000;
+    int chars_added = current_len - g_last_sent_len;
+    
+    // 判断是否需要更新
+    bool should_update = (elapsed_ms >= STREAM_MIN_INTERVAL_MS && chars_added > 0) ||
+                          (chars_added >= STREAM_MIN_CHARS);
+    
+    if (should_update) {
+        g_last_sent_len = current_len;
+        g_last_update_time = now;
+        
+        StreamCallbackData data = { .content = accumulated };
+        channels_foreach(stream_update_iterator, &data);
     }
 }
 
@@ -91,12 +147,14 @@ static void stream_callback(const char* chunk, const char* accumulated, void* us
 static void end_stream_message(void) {
     if (!g_stream_active) return;
     
-    ChannelInstance *feishu = channel_first_of_type(CHANNEL_FEISHU);
-    if (feishu && feishu->stream_end) {
-        feishu->stream_end(feishu);
-        log_debug("[Stream] Ended stream message");
-    }
+    channels_foreach(stream_end_iterator, NULL);
+    
     g_stream_active = false;
+    g_last_sent_len = 0;
+    g_last_update_time.tv_sec = 0;
+    g_last_update_time.tv_nsec = 0;
+    
+    log_debug("[Stream] Ended stream message");
 }
 
 // Global agent manager

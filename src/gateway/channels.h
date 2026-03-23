@@ -2,6 +2,8 @@
 #define CHANNELS_H
 
 #include <stdbool.h>
+#include <pthread.h>
+#include "common/thread_pool.h"
 
 // Channel types
 typedef enum {
@@ -21,6 +23,23 @@ extern const char *channel_type_names[];
 // Forward declaration
 typedef struct ChannelInstance ChannelInstance;
 
+// ==================== 流式消息任务 ====================
+
+// 流式任务类型
+typedef enum {
+    STREAM_TASK_UPDATE,   // 更新消息
+    STREAM_TASK_END       // 结束消息
+} StreamTaskType;
+
+// 流式任务参数（用于线程池）
+typedef struct {
+    ChannelInstance* channel;
+    StreamTaskType type;
+    char* content;
+} StreamTaskArg;
+
+// ==================== Channel 结构 ====================
+
 // Channel structure (single instance)
 struct ChannelInstance {
     char *id;                    // 唯一标识符
@@ -30,7 +49,7 @@ struct ChannelInstance {
     bool connected;              // 是否已连接
     void *config;                // 渠道特定配置
     void *user_data;             // 用户数据
-    void *stream_ctx;            // 流式消息上下文
+    void *stream_ctx;            // 流式消息上下文（渠道特定，如 FeishuStreamContext）
     
     // Callback functions
     void (*connect)(ChannelInstance *channel);
@@ -52,6 +71,7 @@ struct ChannelInstance {
 typedef struct {
     ChannelInstance *head;       // 渠道链表头
     int count;                   // 渠道数量
+    ThreadPool *pool;            // 线程池（用于流式消息任务）
 } ChannelManager;
 
 // Channel configuration structure (for loading from config)
@@ -119,6 +139,11 @@ bool channel_stream_start(ChannelInstance *channel, const char *initial_content)
 bool channel_stream_update(ChannelInstance *channel, const char *content);
 bool channel_stream_end(ChannelInstance *channel);
 void channel_stream_end_all(void);  // 结束所有渠道的流式消息
+
+// 流式任务操作（使用线程池）
+void channel_stream_submit_task(ChannelInstance *channel, StreamTaskType type, const char *content);
+StreamTaskArg* channel_stream_task_arg_create(ChannelInstance *channel, StreamTaskType type, const char *content);
+void channel_stream_task_arg_free(StreamTaskArg *arg);
 
 bool channel_enable(ChannelInstance *channel);
 bool channel_disable(ChannelInstance *channel);

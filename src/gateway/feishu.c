@@ -419,6 +419,7 @@ static bool feishu_stream_start_callback(ChannelInstance *channel, const char *i
         free(old_ctx->message_id);
         free(old_ctx->channel_id);
         free(old_ctx->access_token);
+        free(old_ctx->current_content);
         free(old_ctx);
         channel->stream_ctx = NULL;
     }
@@ -484,6 +485,7 @@ static bool feishu_stream_end_callback(ChannelInstance *channel) {
     free(ctx->message_id);
     free(ctx->channel_id);
     free(ctx->access_token);
+    free(ctx->current_content);
     free(ctx);
     channel->stream_ctx = NULL;
     
@@ -870,6 +872,13 @@ bool feishu_stream_update(const char *channel_id, const char *message_id, const 
     char *token = feishu_get_valid_token(config);
     if (!token) return false;
     
+    // 保存当前内容到 context（用于结束流式时发送）
+    if (channel->stream_ctx) {
+        FeishuStreamContext *ctx = (FeishuStreamContext *)channel->stream_ctx;
+        free(ctx->current_content);
+        ctx->current_content = strdup(content);
+    }
+    
     // 构建请求URL - 使用消息patch API
     char url[256];
     snprintf(url, sizeof(url), "%s/im/v1/messages/%s", FEISHU_API_BASE, message_id);
@@ -932,7 +941,7 @@ bool feishu_stream_update(const char *channel_id, const char *message_id, const 
     return success;
 }
 
-// 结束流式消息 - 取消stream属性
+// 结束流式消息 - 发送最终内容并取消stream属性
 bool feishu_stream_finish(const char *channel_id, const char *message_id) {
     if (!channel_id || !message_id) return false;
     
@@ -948,13 +957,40 @@ bool feishu_stream_finish(const char *channel_id, const char *message_id) {
     char *token = feishu_get_valid_token(config);
     if (!token) return false;
     
+    // 获取保存的当前内容
+    const char *final_content = " ";  // 默认空内容
+    if (channel->stream_ctx) {
+        FeishuStreamContext *ctx = (FeishuStreamContext *)channel->stream_ctx;
+        if (ctx->current_content) {
+            final_content = ctx->current_content;
+        }
+    }
+    
     // 构建请求URL - 使用消息patch API
     char url[256];
     snprintf(url, sizeof(url), "%s/im/v1/messages/%s", FEISHU_API_BASE, message_id);
     
-    // 构建请求体 - 设置stream为false来结束流式
+    // 构建卡片内容（最终内容）
+    cJSON *card = cJSON_CreateObject();
+    cJSON *elements = cJSON_CreateArray();
+    cJSON *element = cJSON_CreateObject();
+    cJSON *text = cJSON_CreateObject();
+    
+    cJSON_AddStringToObject(text, "tag", "lark_md");
+    cJSON_AddStringToObject(text, "content", final_content);
+    cJSON_AddStringToObject(element, "tag", "div");
+    cJSON_AddItemToObject(element, "text", text);
+    cJSON_AddItemToArray(elements, element);
+    cJSON_AddItemToObject(card, "elements", elements);
+    cJSON_AddBoolToObject(card, "stream", false);  // 结束流式
+    
+    char *content_str = cJSON_PrintUnformatted(card);
+    cJSON_Delete(card);
+    
+    // 构建请求体
     cJSON *body = cJSON_CreateObject();
-    cJSON_AddBoolToObject(body, "stream", false);
+    cJSON_AddStringToObject(body, "content", content_str);
+    free(content_str);
     
     char *body_str = cJSON_PrintUnformatted(body);
     cJSON_Delete(body);

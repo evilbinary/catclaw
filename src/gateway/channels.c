@@ -127,6 +127,13 @@ bool channels_init(void) {
     g_channel_manager.head = NULL;
     g_channel_manager.count = 0;
     
+    // 创建线程池（4个工作线程，128个任务队列）
+    g_channel_manager.pool = thread_pool_create(4, 128);
+    if (!g_channel_manager.pool) {
+        fprintf(stderr, "[Channel] Failed to create thread pool\n");
+        return false;
+    }
+    
     // Load channels from configuration if available
     if (g_config.channels.count > 0) {
         channels_load_from_config();
@@ -144,7 +151,7 @@ bool channels_init(void) {
         }
     }
     
-    printf("[Channel] Manager initialized\n");
+    printf("[Channel] Manager initialized with thread pool\n");
     return true;
 }
 
@@ -157,6 +164,13 @@ void channels_cleanup(void) {
     }
     g_channel_manager.head = NULL;
     g_channel_manager.count = 0;
+    
+    // 销毁线程池
+    if (g_channel_manager.pool) {
+        thread_pool_destroy(g_channel_manager.pool);
+        g_channel_manager.pool = NULL;
+    }
+    
     printf("[Channel] Manager cleaned up\n");
 }
 
@@ -533,4 +547,60 @@ bool channels_load_from_config(void) {
     
     printf("[Channel] Loaded %d channels from configuration\n", loaded);
     return loaded > 0 || g_config.channels.count == 0;
+}
+
+// ==================== 流式消息任务实现 ====================
+
+// 线程池任务函数：处理流式消息
+static void stream_task_execute(void *arg) {
+    StreamTaskArg *task = (StreamTaskArg *)arg;
+    if (!task || !task->channel) {
+        channel_stream_task_arg_free(task);
+        return;
+    }
+    
+    ChannelInstance *channel = task->channel;
+    
+    if (task->type == STREAM_TASK_END) {
+        // 结束流式消息
+        if (channel->stream_end) {
+            channel->stream_end(channel);
+        }
+    } else if (task->type == STREAM_TASK_UPDATE && task->content) {
+        // 更新消息
+        if (channel->stream_update) {
+            channel->stream_update(channel, task->content);
+        }
+    }
+    
+    channel_stream_task_arg_free(task);
+}
+
+// 创建任务参数
+StreamTaskArg* channel_stream_task_arg_create(ChannelInstance *channel, StreamTaskType type, const char *content) {
+    StreamTaskArg *arg = (StreamTaskArg *)calloc(1, sizeof(StreamTaskArg));
+    if (!arg) return NULL;
+    
+    arg->channel = channel;
+    arg->type = type;
+    arg->content = content ? strdup(content) : NULL;
+    return arg;
+}
+
+// 释放任务参数
+void channel_stream_task_arg_free(StreamTaskArg *arg) {
+    if (arg) {
+        free(arg->content);
+        free(arg);
+    }
+}
+
+// 提交流式任务到线程池
+void channel_stream_submit_task(ChannelInstance *channel, StreamTaskType type, const char *content) {
+    if (!g_channel_manager.pool) return;
+    
+    StreamTaskArg *arg = channel_stream_task_arg_create(channel, type, content);
+    if (!arg) return;
+    
+    thread_pool_add_task(g_channel_manager.pool, stream_task_execute, arg);
 }

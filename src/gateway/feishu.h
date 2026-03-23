@@ -40,6 +40,7 @@ typedef struct {
     char *message_id;      // 流式消息ID
     char *channel_id;      // 渠道ID
     char *access_token;    // 访问令牌
+    char *current_content; // 当前内容（用于结束流式时发送）
     bool active;           // 是否激活
 } FeishuStreamContext;
 
