@@ -16,6 +16,8 @@ typedef struct {
     char *webhook_url;      // 机器人webhook地址 (简单模式)
     char *receive_id;       // 接收消息的用户/群组ID
     char *receive_id_type;  // 接收ID类型: open_id, user_id, union_id, chat_id
+    bool stream_mode;       // 是否启用流式输出（打字机效果）
+    int stream_speed;       // 流式输出速度（字符/秒）
     char *access_token;     // 缓存的access_token
     time_t token_expire;    // token过期时间
 } FeishuConfig;
@@ -161,6 +163,12 @@ static bool feishu_send_via_webhook(FeishuConfig *config, const char *message) {
         cJSON_AddItemToObject(card, "elements", elements);
         cJSON_AddBoolToObject(card, "wide_screen_mode", true);
         
+        // 添加 stream 模式配置（打字机效果）
+        if (config->stream_mode) {
+            cJSON_AddBoolToObject(card, "stream", true);
+            log_info("[Feishu] Stream mode enabled for typewriter effect");
+        }
+        
         cJSON_AddStringToObject(body, "msg_type", "interactive");
         cJSON_AddItemToObject(body, "card", card);
     } else {
@@ -234,6 +242,12 @@ static bool feishu_send_via_api(FeishuConfig *config, const char *message) {
         
         cJSON_AddItemToObject(card, "elements", elements);
         cJSON_AddBoolToObject(card, "wide_screen_mode", true);
+        
+        // 添加 stream 模式配置（打字机效果）
+        if (config->stream_mode) {
+            cJSON_AddBoolToObject(card, "stream", true);
+            log_info("[Feishu] Stream mode enabled for typewriter effect");
+        }
         
         content_str = cJSON_PrintUnformatted(card);
         cJSON_Delete(card);
@@ -379,6 +393,11 @@ void feishu_channel_init(ChannelInstance *channel, ChannelConfig *base_config) {
         if (base_config->receive_id) config->receive_id = strdup(base_config->receive_id);
         if (base_config->receive_id_type) config->receive_id_type = strdup(base_config->receive_id_type);
         else config->receive_id_type = strdup("open_id");
+        // 流式输出配置
+        config->stream_mode = base_config->stream_mode;
+        config->stream_speed = base_config->stream_speed > 0 ? base_config->stream_speed : 20;
+    } else {
+        config->stream_speed = 20; // 默认速度
     }
     
     // 设置渠道属性
@@ -389,7 +408,10 @@ void feishu_channel_init(ChannelInstance *channel, ChannelConfig *base_config) {
     channel->receive_message = feishu_receive_message;
     channel->cleanup = feishu_cleanup;
     
-    printf("[Feishu] Channel '%s' initialized\n", channel->name);
+    printf("[Feishu] Channel '%s' initialized (stream_mode=%s, speed=%d)\n", 
+           channel->name, 
+           config->stream_mode ? "enabled" : "disabled",
+           config->stream_speed);
 }
 
 // 设置飞书接收ID

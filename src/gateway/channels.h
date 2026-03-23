@@ -66,6 +66,8 @@ typedef struct {
     char *webhook_url;
     char *receive_id;            // 接收消息的用户/群组ID
     char *receive_id_type;       // 接收ID类型: open_id, user_id, union_id, chat_id
+    bool stream_mode;            // 是否启用流式输出（打字机效果）
+    int stream_speed;            // 流式输出速度（字符/秒）
     
     // Telegram 专用
     char *chat_id;

@@ -546,6 +546,17 @@ static void parse_single_channel(cJSON *channel_json, int index) {
         channel->receive_id_type = strdup(receive_id_type->valuestring);
     }
     
+    // Parse Feishu stream mode config (typewriter effect)
+    cJSON *stream_mode = cJSON_GetObjectItem(channel_json, "stream_mode");
+    if (stream_mode && (cJSON_IsTrue(stream_mode) || cJSON_IsFalse(stream_mode))) {
+        channel->stream_mode = cJSON_IsTrue(stream_mode);
+    }
+    
+    cJSON *stream_speed = cJSON_GetObjectItem(channel_json, "stream_speed");
+    if (stream_speed && cJSON_IsNumber(stream_speed)) {
+        channel->stream_speed = (int)stream_speed->valuedouble;
+    }
+    
     // Parse Feishu WebSocket-specific config
     cJSON *ws_enabled = cJSON_GetObjectItem(channel_json, "ws_enabled");
     if (ws_enabled && (cJSON_IsTrue(ws_enabled) || cJSON_IsFalse(ws_enabled))) {

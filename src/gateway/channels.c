@@ -437,6 +437,8 @@ bool channels_load_from_config(void) {
             .webhook_url = entry->webhook_url,
             .receive_id = entry->receive_id,
             .receive_id_type = entry->receive_id_type,
+            .stream_mode = entry->stream_mode,
+            .stream_speed = entry->stream_speed,
             .chat_id = entry->chat_id,
             .channel_id = entry->channel_id,
             .bot_token = entry->bot_token
