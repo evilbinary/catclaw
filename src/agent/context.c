@@ -873,18 +873,19 @@ void* agent_node_worker_thread(void* arg) {
                         if (g_config.debug) {
                             log_debug("Sending message to all connected channels\n");
                         }
-                        
+
+                        // 检查是否使用了流式模式
+                        bool used_stream = g_stream_active;
+
                         // 结束流式消息（如果流式模式已启动）
                         end_stream_message();
-                        
-                        // 非流式渠道仍然需要发送完整消息
-                        // 流式渠道已经在回调中处理了
-                        ChannelInstance *current = channel_first_of_type(CHANNEL_FEISHU);
-                        if (!current || !current->stream_update || !g_stream_active) {
-                            // 如果没有流式渠道或流式未激活，发送到所有渠道
+
+                        // 只有非流式模式才发送完整消息
+                        // 流式模式下消息已经在回调中发送
+                        if (!used_stream) {
                             channel_send_message_to_all(response->content);
                         }
-                        
+
                         ai_model_free_response(response);
                         break;
                     }

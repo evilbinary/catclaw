@@ -150,15 +150,10 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    // Initialize channels
+    // Initialize channels (channels_init 内部已加载配置)
     if (!channels_init()) {
         log_fatal("Failed to initialize channels");
         return 1;
-    }
-    
-    // Load channels from configuration
-    if (!channels_load_from_config()) {
-        log_warn("No channels loaded from configuration");
     }
 
     // Initialize agent
