@@ -793,6 +793,7 @@ char* feishu_stream_create(const char *channel_id, const char *receive_id, const
     cJSON_AddItemToArray(elements, element);
     cJSON_AddItemToObject(card, "elements", elements);
     cJSON_AddBoolToObject(card, "stream", true);  // 启用流式输出
+    cJSON_AddBoolToObject(card, "scrollable", true);  // 启用滚动
     
     char *content_str = cJSON_PrintUnformatted(card);
     cJSON_Delete(card);
@@ -899,6 +900,7 @@ bool feishu_stream_update(const char *channel_id, const char *message_id, const 
     cJSON_AddItemToArray(elements, element);
     cJSON_AddItemToObject(card, "elements", elements);
     cJSON_AddBoolToObject(card, "stream", true);  // 保持流式状态
+    cJSON_AddBoolToObject(card, "scrollable", true);  // 启用滚动
     
     char *content_str = cJSON_PrintUnformatted(card);
     cJSON_Delete(card);
@@ -990,6 +992,7 @@ bool feishu_stream_finish(const char *channel_id, const char *message_id) {
     cJSON_AddItemToArray(elements, element);
     cJSON_AddItemToObject(card, "elements", elements);
     cJSON_AddBoolToObject(card, "stream", false);  // 结束流式
+    cJSON_AddBoolToObject(card, "scrollable", true);  // 启用滚动
     
     char *content_str = cJSON_PrintUnformatted(card);
     cJSON_Delete(card);
