@@ -262,6 +262,9 @@ static AIProviderResponse* openai_send_messages(AIProvider* self,
         if (strstr(self->config.base_url, "/chat/completions")) {
             // base_url 已经包含完整路径，直接使用
             strncpy(url, self->config.base_url, sizeof(url) - 1);
+        } else if (strstr(self->config.base_url, "/api/")) {
+            // base_url 包含 /api/ 路径（如 Ollama 的 /api/generate），直接使用
+            strncpy(url, self->config.base_url, sizeof(url) - 1);
         } else if (base_len >= 3 && strcmp(self->config.base_url + base_len - 3, "/v1") == 0) {
             // base_url 以 /v1 结尾，添加 /chat/completions
             snprintf(url, sizeof(url), "%s/chat/completions", self->config.base_url);

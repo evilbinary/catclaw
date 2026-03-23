@@ -142,6 +142,7 @@ char *agent_parse_command(const char *command) {
             if (config_switch_model(args)) {
                 // Update AI model config
                 AIModelConfig model_config = {0};
+                model_config.provider = g_config.model.provider;
                 model_config.model_name = g_config.model.model_name;
                 model_config.api_key = g_config.model.api_key;
                 model_config.base_url = g_config.model.base_url;
@@ -169,6 +170,7 @@ char *agent_parse_command(const char *command) {
                     if (config_switch_model_by_index(index)) {
                         // Update AI model config
                         AIModelConfig model_config = {0};
+                        model_config.provider = g_config.model.provider;
                         model_config.model_name = g_config.model.model_name;
                         model_config.api_key = g_config.model.api_key;
                         model_config.base_url = g_config.model.base_url;
@@ -451,6 +453,7 @@ bool agent_init(void) {
     
     printf("[DEBUG] ai_model_init: model_name=%s, base_url=%s\n", ai_model_name, base_url);
     
+    model_config.provider = (char*)provider;
     model_config.model_name = (char*)ai_model_name;
     model_config.api_key = (char*)(api_key ? api_key : (getenv("ANTHROPIC_API_KEY") ? getenv("ANTHROPIC_API_KEY") : getenv("OPENAI_API_KEY")));
     model_config.base_url = (char*)base_url;

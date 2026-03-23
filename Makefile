@@ -1,5 +1,5 @@
 CC = gcc
-CFLAGS = -Wall -Wextra -O2 -I. -I./src
+CFLAGS = -Wall -Wextra  -I. -I./src -g
 
 # Platform-specific flags
 ifeq ($(OS),Windows_NT)

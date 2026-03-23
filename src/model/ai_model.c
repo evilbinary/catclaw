@@ -21,8 +21,14 @@ bool ai_model_init(const AIModelConfig* config) {
     // 确定 Provider 类型
     AIProviderType type = AI_PROVIDER_OPENAI;
     
-    // 根据 base_url 或 model_name 推断类型
-    if (config->base_url) {
+    // 优先使用配置的 provider 字段
+    if (config->provider) {
+        if (strcasecmp(config->provider, "ollama") == 0) type = AI_PROVIDER_OLLAMA;
+        else if (strcasecmp(config->provider, "anthropic") == 0) type = AI_PROVIDER_ANTHROPIC;
+        else if (strcasecmp(config->provider, "gemini") == 0) type = AI_PROVIDER_GEMINI;
+        else if (strcasecmp(config->provider, "openai") == 0) type = AI_PROVIDER_OPENAI;
+    } else if (config->base_url) {
+        // 根据 base_url 推断类型（向后兼容）
         if (strstr(config->base_url, "anthropic")) {
             type = AI_PROVIDER_ANTHROPIC;
         } else if (strstr(config->base_url, "gemini") || strstr(config->base_url, "generativelanguage.googleapis")) {
@@ -82,12 +88,28 @@ bool ai_model_set_config(const AIModelConfig* config) {
     // 销毁旧 Provider，创建新 Provider
     ai_provider_destroy(g_provider);
     
+    // 根据 config->provider 或 base_url 确定 provider 类型
     AIProviderType type = AI_PROVIDER_OPENAI;
-    if (config->base_url) {
+    if (config->provider) {
+        // 优先使用配置的 provider 字段
+        if (strcasecmp(config->provider, "ollama") == 0) type = AI_PROVIDER_OLLAMA;
+        else if (strcasecmp(config->provider, "anthropic") == 0) type = AI_PROVIDER_ANTHROPIC;
+        else if (strcasecmp(config->provider, "gemini") == 0) type = AI_PROVIDER_GEMINI;
+        else if (strcasecmp(config->provider, "openai") == 0) type = AI_PROVIDER_OPENAI;
+    } else if (config->base_url) {
+        // 根据 base_url 推断（向后兼容）
         if (strstr(config->base_url, "anthropic")) type = AI_PROVIDER_ANTHROPIC;
         else if (strstr(config->base_url, "gemini")) type = AI_PROVIDER_GEMINI;
         else if (strstr(config->base_url, "11434")) type = AI_PROVIDER_OLLAMA;
+        else if (strstr(config->base_url, "/api/generate") || strstr(config->base_url, "/api/chat")) {
+            type = AI_PROVIDER_OLLAMA;
+        }
     }
+    
+    log_debug("ai_model_set_config: provider=%s, type=%d, base_url=%s", 
+              config->provider ? config->provider : "auto", 
+              type, 
+              config->base_url ? config->base_url : "default");
     
     g_provider = ai_provider_create(type, config);
     return g_provider != NULL;
@@ -126,11 +148,10 @@ AIModelResponse* ai_model_send_messages(MessageList* messages, const char* syste
 }
 
 void ai_model_free_response(AIModelResponse* response) {
-    if (g_provider && g_provider->free_response) {
-        g_provider->free_response(response);
-    } else {
-        ai_provider_response_destroy(response);
-    }
+    if (!response) return;
+    
+    // 直接使用 ai_provider_response_destroy，避免 g_provider 变化导致的问题
+    ai_provider_response_destroy(response);
 }
 
 AIProvider* ai_model_get_provider(void) {
