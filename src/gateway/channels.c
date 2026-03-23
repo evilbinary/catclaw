@@ -9,7 +9,6 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
-#include <stddef.h>
 
 // Channel type names
 const char *channel_type_names[] = {
@@ -68,18 +67,11 @@ static ChannelInstance* channel_create(const char *id, ChannelType type, Channel
     channel->user_data = NULL;
     channel->stream_ctx = NULL;
     
-    // 初始化流式队列（在 type-specific init 之前）
+    // 初始化流式队列
     channel->stream_queue_head = NULL;
     channel->stream_queue_tail = NULL;
     channel->stream_processing = false;
     pthread_mutex_init(&channel->stream_mutex, NULL);
-    
-    fprintf(stderr, "[DEBUG] channel_create: channel=%p, sizeof(ChannelInstance)=%zu\n",
-            (void*)channel, sizeof(ChannelInstance));
-    fprintf(stderr, "[DEBUG]   stream_queue_head at offset %zu = %p\n",
-            offsetof(ChannelInstance, stream_queue_head), (void*)channel->stream_queue_head);
-    fprintf(stderr, "[DEBUG]   stream_queue_tail at offset %zu = %p\n",
-            offsetof(ChannelInstance, stream_queue_tail), (void*)channel->stream_queue_tail);
     
     // Set default callbacks
     channel->connect = default_connect;
@@ -113,9 +105,6 @@ static ChannelInstance* channel_create(const char *id, ChannelType type, Channel
             }
             break;
     }
-    
-    fprintf(stderr, "[DEBUG] after type-init: stream_queue_head=%p, stream_queue_tail=%p\n",
-            (void*)channel->stream_queue_head, (void*)channel->stream_queue_tail);
     
     return channel;
 }
@@ -583,7 +572,12 @@ bool channels_load_from_config(void) {
 
 // 处理单个流式任务
 static void process_stream_task(ChannelInstance *channel, StreamTaskType type, const char *content) {
-    if (type == STREAM_TASK_END) {
+    if (type == STREAM_TASK_START) {
+        // 开始流式消息
+        if (channel->stream_start) {
+            channel->stream_start(channel, content);
+        }
+    } else if (type == STREAM_TASK_END) {
         // 结束流式消息
         if (channel->stream_end) {
             channel->stream_end(channel);
@@ -654,11 +648,6 @@ void channel_stream_submit_task(ChannelInstance *channel, StreamTaskType type, c
     
     // 在 mutex 内加入队列并检查处理状态
     pthread_mutex_lock(&channel->stream_mutex);
-    
-    // DEBUG: 打印 tail 的值
-    fprintf(stderr, "[DEBUG] push: channel=%p, tail=%p, head=%p, node=%p\n",
-            (void*)channel, (void*)channel->stream_queue_tail,
-            (void*)channel->stream_queue_head, (void*)node);
     
     // 加入队列
     if (channel->stream_queue_tail) {

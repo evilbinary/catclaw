@@ -27,6 +27,7 @@ typedef struct ChannelInstance ChannelInstance;
 
 // 流式任务类型
 typedef enum {
+    STREAM_TASK_START,    // 开始消息
     STREAM_TASK_UPDATE,   // 更新消息
     STREAM_TASK_END       // 结束消息
 } StreamTaskType;

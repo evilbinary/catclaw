@@ -82,8 +82,8 @@ typedef struct {
 static void stream_start_iterator(ChannelInstance* channel, void* user_data) {
     StreamCallbackData* data = (StreamCallbackData*)user_data;
     if (channel->stream_start && channel->stream_update) {
-        // 启动流式消息
-        channel->stream_start(channel, data->content);
+        // 通过线程池串行队列启动流式消息
+        channel_stream_submit_task(channel, STREAM_TASK_START, data->content);
         log_debug("[Stream] Started stream for channel: %s", channel->name);
     }
 }
