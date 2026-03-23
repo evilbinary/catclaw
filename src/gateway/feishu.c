@@ -16,6 +16,8 @@ typedef struct {
     char *webhook_url;      // 机器人webhook地址 (简单模式)
     char *receive_id;       // 接收消息的用户/群组ID
     char *receive_id_type;  // 接收ID类型: open_id, user_id, union_id, chat_id
+    bool stream_mode;       // 是否启用流式输出（打字机效果）
+    int stream_speed;       // 流式输出速度（字符/秒）
     char *access_token;     // 缓存的access_token
     time_t token_expire;    // token过期时间
 } FeishuConfig;
@@ -105,25 +107,97 @@ static char* feishu_get_valid_token(FeishuConfig *config) {
     return config->access_token;
 }
 
+// 判断消息是否包含 markdown 格式
+static bool is_markdown_message(const char *message) {
+    if (!message) return false;
+    // 检查常见的 markdown 标记
+    const char *md_patterns[] = {
+        "**",        // 粗体
+        "__",        // 粗体
+        "*",         // 斜体
+        "_",         // 斜体
+        "~~",        // 删除线
+        "`",         // 代码
+        "```",       // 代码块
+        "#",         // 标题
+        "- ",        // 列表
+        "* ",        // 列表
+        "1. ",       // 有序列表
+        "> ",        // 引用
+        "[",         // 链接
+        "!["         // 图片
+    };
+    for (int i = 0; i < sizeof(md_patterns) / sizeof(md_patterns[0]); i++) {
+        if (strstr(message, md_patterns[i])) {
+            return true;
+        }
+    }
+    return false;
+}
+
 // 通过 webhook 发送消息
 static bool feishu_send_via_webhook(FeishuConfig *config, const char *message) {
     if (!config->webhook_url) return false;
     
-    // 构建消息体
+    // 打印原始消息
+    log_info("[Feishu] Webhook sending message:\n%s", message);
+    
     cJSON *body = cJSON_CreateObject();
-    cJSON *content = cJSON_CreateObject();
-    cJSON_AddStringToObject(content, "text", message);
-    cJSON_AddStringToObject(body, "msg_type", "text");
-    cJSON_AddItemToObject(body, "content", content);
+    
+    // 检测是否为 markdown 格式，使用 interactive 卡片发送
+    if (is_markdown_message(message)) {
+        log_info("[Feishu] Detected markdown, using interactive card with lark_md");
+        // webhook 模式：直接把 card 对象放在消息体中
+        cJSON *card = cJSON_CreateObject();
+        cJSON *elements = cJSON_CreateArray();
+        cJSON *element = cJSON_CreateObject();
+        cJSON *text = cJSON_CreateObject();
+        
+        cJSON_AddStringToObject(text, "tag", "lark_md");
+        cJSON_AddStringToObject(text, "content", message);
+        
+        cJSON_AddStringToObject(element, "tag", "div");
+        cJSON_AddItemToObject(element, "text", text);
+        cJSON_AddItemToArray(elements, element);
+        
+        cJSON_AddItemToObject(card, "elements", elements);
+        cJSON_AddBoolToObject(card, "wide_screen_mode", true);
+        
+        // 添加 stream 模式配置（打字机效果）
+        if (config->stream_mode) {
+            cJSON_AddBoolToObject(card, "stream", true);
+            log_info("[Feishu] Stream mode enabled for typewriter effect");
+        }
+        
+        cJSON_AddStringToObject(body, "msg_type", "interactive");
+        cJSON_AddItemToObject(body, "card", card);
+    } else {
+        log_info("[Feishu] Plain text message");
+        // 普通文本消息
+        cJSON *content = cJSON_CreateObject();
+        cJSON_AddStringToObject(content, "text", message);
+        cJSON_AddStringToObject(body, "msg_type", "text");
+        cJSON_AddItemToObject(body, "content", content);
+    }
     
     char *body_str = cJSON_PrintUnformatted(body);
     cJSON_Delete(body);
+    
+    // 打印发送的 JSON
+    log_info("[Feishu] Webhook request body:\n%s", body_str);
     
     // 发送请求
     HttpResponse *resp = http_post(config->webhook_url, body_str);
     free(body_str);
     
-    if (!resp) return false;
+    if (!resp) {
+        log_error("[Feishu] Webhook request failed: no response");
+        return false;
+    }
+    
+    // 打印响应内容
+    log_info("[Feishu] Webhook response: status=%d, body=%s", 
+             resp->status_code, resp->body ? resp->body : "(null)");
     
     bool success = resp->success && resp->status_code == 200;
     http_response_free(resp);
@@ -136,6 +210,9 @@ static bool feishu_send_via_api(FeishuConfig *config, const char *message) {
     char *token = feishu_get_valid_token(config);
     if (!token) return false;
     
+    // 打印原始消息
+    log_info("[Feishu] API sending message:\n%s", message);
+    
     // 构建请求URL
     char url[256];
     snprintf(url, sizeof(url), "%s/im/v1/messages?receive_id_type=%s",
@@ -143,18 +220,57 @@ static bool feishu_send_via_api(FeishuConfig *config, const char *message) {
     
     // 构建请求体
     cJSON *body = cJSON_CreateObject();
-    cJSON *content = cJSON_CreateObject();
-    cJSON_AddStringToObject(content, "text", message);
-    char *content_str = cJSON_PrintUnformatted(content);
-    cJSON_Delete(content);
+    char *content_str = NULL;
+    const char *msg_type = "text";
+    
+    // 检测是否为 markdown 格式
+    if (is_markdown_message(message)) {
+        log_info("[Feishu] Detected markdown, using interactive card with lark_md");
+        // 使用 interactive 卡片发送 markdown
+        // content 字段是卡片 JSON 字符串（不是 {"card": ...}）
+        cJSON *card = cJSON_CreateObject();
+        cJSON *elements = cJSON_CreateArray();
+        cJSON *element = cJSON_CreateObject();
+        cJSON *text = cJSON_CreateObject();
+        
+        cJSON_AddStringToObject(text, "tag", "lark_md");
+        cJSON_AddStringToObject(text, "content", message);
+        
+        cJSON_AddStringToObject(element, "tag", "div");
+        cJSON_AddItemToObject(element, "text", text);
+        cJSON_AddItemToArray(elements, element);
+        
+        cJSON_AddItemToObject(card, "elements", elements);
+        cJSON_AddBoolToObject(card, "wide_screen_mode", true);
+        
+        // 添加 stream 模式配置（打字机效果）
+        if (config->stream_mode) {
+            cJSON_AddBoolToObject(card, "stream", true);
+            log_info("[Feishu] Stream mode enabled for typewriter effect");
+        }
+        
+        content_str = cJSON_PrintUnformatted(card);
+        cJSON_Delete(card);
+        msg_type = "interactive";
+    } else {
+        log_info("[Feishu] Plain text message");
+        // 普通文本消息
+        cJSON *content = cJSON_CreateObject();
+        cJSON_AddStringToObject(content, "text", message);
+        content_str = cJSON_PrintUnformatted(content);
+        cJSON_Delete(content);
+    }
     
     cJSON_AddStringToObject(body, "receive_id", config->receive_id);
-    cJSON_AddStringToObject(body, "msg_type", "text");
+    cJSON_AddStringToObject(body, "msg_type", msg_type);
     cJSON_AddStringToObject(body, "content", content_str);
     free(content_str);
     
     char *body_str = cJSON_PrintUnformatted(body);
     cJSON_Delete(body);
+    
+    // 打印发送的 JSON
+    log_info("[Feishu] API request body:\n%s", body_str);
     
     // 构建请求头
     char auth_header[512];
@@ -174,7 +290,14 @@ static bool feishu_send_via_api(FeishuConfig *config, const char *message) {
     HttpResponse *resp = http_request(&req);
     free(body_str);
     
-    if (!resp) return false;
+    if (!resp) {
+        log_error("[Feishu] API request failed: no response");
+        return false;
+    }
+    
+    // 打印响应内容
+    log_info("[Feishu] API response: status=%d, body=%s", 
+             resp->status_code, resp->body ? resp->body : "(null)");
     
     bool success = resp->success && resp->status_code == 200;
     http_response_free(resp);
@@ -237,6 +360,12 @@ static bool feishu_send_message(ChannelInstance *channel, const char *message) {
         return false;
     }
     
+    // 流式发送模式（仅支持 API 模式）
+    if (config->stream_mode && config->app_id && config->app_secret && config->receive_id) {
+        log_info("[Feishu] Using stream mode for typewriter effect");
+        return feishu_stream_send(channel->id, message, config->stream_speed);
+    }
+    
     // 优先使用 webhook 模式
     if (config->webhook_url) {
         return feishu_send_via_webhook(config, message);
@@ -251,6 +380,116 @@ static bool feishu_receive_message(ChannelInstance *channel, const char *message
     (void)channel;  // unused
     printf("[Feishu] Receiving message: %s\n", message);
     return true;
+}
+
+// 流式发送消息 (打字机效果) - 完整消息一次性发送
+static bool feishu_stream_send_callback(ChannelInstance *channel, const char *message) {
+    FeishuConfig *config = (FeishuConfig *)channel->config;
+    if (!config) {
+        log_error("[Feishu] No config for stream send");
+        return false;
+    }
+    
+    // 流式发送需要 API 模式
+    if (!config->app_id || !config->app_secret || !config->receive_id) {
+        log_error("[Feishu] Stream mode requires API mode (app_id, app_secret, receive_id)");
+        return false;
+    }
+    
+    int speed = config->stream_speed > 0 ? config->stream_speed : 20;
+    return feishu_stream_send(channel->id, message, speed);
+}
+
+// ==================== 实时流式消息回调 (配合 AI 流式输出) ====================
+
+// 开始流式消息
+static bool feishu_stream_start_callback(ChannelInstance *channel, const char *initial_content) {
+    FeishuConfig *config = (FeishuConfig *)channel->config;
+    if (!config || !config->app_id || !config->app_secret || !config->receive_id) {
+        log_error("[Feishu] Stream start requires API mode");
+        return false;
+    }
+    
+    // 先结束之前的流式消息（如果有）
+    if (channel->stream_ctx) {
+        FeishuStreamContext *old_ctx = (FeishuStreamContext *)channel->stream_ctx;
+        if (old_ctx->active && old_ctx->message_id) {
+            feishu_stream_finish(channel->id, old_ctx->message_id);
+        }
+        free(old_ctx->message_id);
+        free(old_ctx->channel_id);
+        free(old_ctx->access_token);
+        free(old_ctx->current_content);
+        free(old_ctx);
+        channel->stream_ctx = NULL;
+    }
+    
+    // 创建新的流式消息
+    char *message_id = feishu_stream_create(channel->id, config->receive_id, config->receive_id_type);
+    if (!message_id) {
+        log_error("[Feishu] Failed to create stream message");
+        return false;
+    }
+    
+    // 保存上下文
+    FeishuStreamContext *ctx = (FeishuStreamContext *)calloc(1, sizeof(FeishuStreamContext));
+    ctx->message_id = message_id;
+    ctx->channel_id = strdup(channel->id);
+    ctx->active = true;
+    channel->stream_ctx = ctx;
+    
+    log_info("[Feishu] Stream started: message_id=%s", message_id);
+    
+    // 发送初始内容
+    if (initial_content && strlen(initial_content) > 0) {
+        if (!feishu_stream_update(channel->id, message_id, initial_content)) {
+            log_error("[Feishu] Failed to send initial content");
+            // 不返回 false，因为消息已创建，后续可以继续更新
+        }
+    }
+    
+    return true;
+}
+
+// 更新流式消息
+static bool feishu_stream_update_callback(ChannelInstance *channel, const char *content) {
+    if (!channel->stream_ctx) {
+        log_error("[Feishu] No active stream context");
+        return false;
+    }
+    
+    FeishuStreamContext *ctx = (FeishuStreamContext *)channel->stream_ctx;
+    if (!ctx->active || !ctx->message_id) {
+        log_error("[Feishu] Stream not active");
+        return false;
+    }
+    
+    return feishu_stream_update(channel->id, ctx->message_id, content);
+}
+
+// 结束流式消息
+static bool feishu_stream_end_callback(ChannelInstance *channel) {
+    if (!channel->stream_ctx) {
+        return true;  // 没有活跃的流式消息
+    }
+    
+    FeishuStreamContext *ctx = (FeishuStreamContext *)channel->stream_ctx;
+    bool success = true;
+    
+    if (ctx->active && ctx->message_id) {
+        success = feishu_stream_finish(channel->id, ctx->message_id);
+        log_info("[Feishu] Stream ended: message_id=%s", ctx->message_id);
+    }
+    
+    // 清理上下文
+    free(ctx->message_id);
+    free(ctx->channel_id);
+    free(ctx->access_token);
+    free(ctx->current_content);
+    free(ctx);
+    channel->stream_ctx = NULL;
+    
+    return success;
 }
 
 // 初始化飞书渠道
@@ -270,6 +509,11 @@ void feishu_channel_init(ChannelInstance *channel, ChannelConfig *base_config) {
         if (base_config->receive_id) config->receive_id = strdup(base_config->receive_id);
         if (base_config->receive_id_type) config->receive_id_type = strdup(base_config->receive_id_type);
         else config->receive_id_type = strdup("open_id");
+        // 流式输出配置
+        config->stream_mode = base_config->stream_mode;
+        config->stream_speed = base_config->stream_speed > 0 ? base_config->stream_speed : 20;
+    } else {
+        config->stream_speed = 20; // 默认速度
     }
     
     // 设置渠道属性
@@ -279,8 +523,25 @@ void feishu_channel_init(ChannelInstance *channel, ChannelConfig *base_config) {
     channel->send_message = feishu_send_message;
     channel->receive_message = feishu_receive_message;
     channel->cleanup = feishu_cleanup;
+    channel->stream_ctx = NULL;
     
-    printf("[Feishu] Channel '%s' initialized\n", channel->name);
+    // 流式消息回调（API 模式下始终可用）
+    if (config->app_id && config->app_secret && config->receive_id) {
+        channel->stream_send = feishu_stream_send_callback;
+        channel->stream_start = feishu_stream_start_callback;
+        channel->stream_update = feishu_stream_update_callback;
+        channel->stream_end = feishu_stream_end_callback;
+    } else {
+        channel->stream_send = NULL;
+        channel->stream_start = NULL;
+        channel->stream_update = NULL;
+        channel->stream_end = NULL;
+    }
+    
+    printf("[Feishu] Channel '%s' initialized (stream_mode=%s, speed=%d)\n", 
+           channel->name, 
+           config->stream_mode ? "enabled" : "disabled",
+           config->stream_speed);
 }
 
 // 设置飞书接收ID
@@ -490,4 +751,347 @@ char* feishu_handle_event(const char *body) {
     
     // 返回成功响应
     return strdup("{\"code\":0,\"msg\":\"success\"}");
+}
+
+// ==================== 流式消息 API (打字机效果) ====================
+
+// 创建流式消息 - 通过发送带stream属性的普通消息实现
+char* feishu_stream_create(const char *channel_id, const char *receive_id, const char *receive_id_type) {
+    if (!channel_id || !receive_id) return NULL;
+    
+    // 查找对应的飞书渠道实例
+    ChannelInstance *channel = channel_find(channel_id);
+    if (!channel || channel->type != CHANNEL_FEISHU) {
+        log_error("[Feishu] Channel not found or not a Feishu channel: %s", channel_id);
+        return NULL;
+    }
+    
+    FeishuConfig *config = (FeishuConfig *)channel->config;
+    if (!config) return NULL;
+    
+    char *token = feishu_get_valid_token(config);
+    if (!token) {
+        log_error("[Feishu] Failed to get access token for stream message");
+        return NULL;
+    }
+    
+    // 构建请求URL - 使用普通消息发送API
+    char url[256];
+    snprintf(url, sizeof(url), "%s/im/v1/messages?receive_id_type=%s",
+             FEISHU_API_BASE, receive_id_type ? receive_id_type : "open_id");
+    
+    // 构建卡片 - 带stream属性实现流式输出
+    cJSON *card = cJSON_CreateObject();
+    cJSON *elements = cJSON_CreateArray();
+    cJSON *element = cJSON_CreateObject();
+    cJSON *text = cJSON_CreateObject();
+    
+    cJSON_AddStringToObject(text, "tag", "lark_md");
+    cJSON_AddStringToObject(text, "content", " "); // 初始空内容
+    cJSON_AddStringToObject(element, "tag", "div");
+    cJSON_AddItemToObject(element, "text", text);
+    cJSON_AddItemToArray(elements, element);
+    cJSON_AddItemToObject(card, "elements", elements);
+    cJSON_AddBoolToObject(card, "stream", true);  // 启用流式输出
+    cJSON_AddBoolToObject(card, "scrollable", true);  // 启用滚动
+    
+    char *content_str = cJSON_PrintUnformatted(card);
+    cJSON_Delete(card);
+    
+    // 构建请求体
+    cJSON *body = cJSON_CreateObject();
+    cJSON_AddStringToObject(body, "receive_id", receive_id);
+    cJSON_AddStringToObject(body, "msg_type", "interactive");
+    cJSON_AddStringToObject(body, "content", content_str);
+    free(content_str);
+    
+    char *body_str = cJSON_PrintUnformatted(body);
+    cJSON_Delete(body);
+    
+    log_info("[Feishu] Creating stream message with body: %s", body_str);
+    
+    // 构建请求头
+    char auth_header[512];
+    snprintf(auth_header, sizeof(auth_header), "Authorization: Bearer %s", token);
+    const char *headers[] = {auth_header, "Content-Type: application/json", NULL};
+    
+    // 发送请求
+    HttpRequest req = {
+        .url = url,
+        .method = "POST",
+        .body = body_str,
+        .content_type = "application/json",
+        .headers = headers,
+        .timeout_sec = 30
+    };
+    
+    HttpResponse *resp = http_request(&req);
+    free(body_str);
+    
+    if (!resp) {
+        log_error("[Feishu] Stream create request failed: no response");
+        return NULL;
+    }
+    
+    log_info("[Feishu] Stream create response: status=%d, body=%s", 
+             resp->status_code, resp->body ? resp->body : "(null)");
+    
+    // 解析响应获取 message_id
+    char *message_id = NULL;
+    if (resp->success && resp->body) {
+        cJSON *root = cJSON_Parse(resp->body);
+        if (root) {
+            cJSON *data = cJSON_GetObjectItem(root, "data");
+            if (data) {
+                cJSON *msg_id = cJSON_GetObjectItem(data, "message_id");
+                if (msg_id && cJSON_IsString(msg_id)) {
+                    message_id = strdup(msg_id->valuestring);
+                    log_info("[Feishu] Stream message created: %s", message_id);
+                }
+            }
+            cJSON_Delete(root);
+        }
+    }
+    
+    http_response_free(resp);
+    return message_id;
+}
+
+// 更新流式消息内容 - 使用消息patch API
+bool feishu_stream_update(const char *channel_id, const char *message_id, const char *content) {
+    struct timespec start, end;
+    clock_gettime(CLOCK_MONOTONIC, &start);
+
+    if (!channel_id || !message_id || !content) return false;
+    
+    // 查找对应的飞书渠道实例
+    ChannelInstance *channel = channel_find(channel_id);
+    if (!channel || channel->type != CHANNEL_FEISHU) {
+        return false;
+    }
+    
+    FeishuConfig *config = (FeishuConfig *)channel->config;
+    if (!config) return false;
+    
+    char *token = feishu_get_valid_token(config);
+    if (!token) return false;
+    
+    // 保存当前内容到 context（用于结束流式时发送）
+    if (channel->stream_ctx) {
+        FeishuStreamContext *ctx = (FeishuStreamContext *)channel->stream_ctx;
+        free(ctx->current_content);
+        ctx->current_content = strdup(content);
+    }
+    
+    // 构建请求URL - 使用消息patch API
+    char url[256];
+    snprintf(url, sizeof(url), "%s/im/v1/messages/%s", FEISHU_API_BASE, message_id);
+    
+    // 构建卡片内容
+    cJSON *card = cJSON_CreateObject();
+    cJSON *elements = cJSON_CreateArray();
+    cJSON *element = cJSON_CreateObject();
+    cJSON *text = cJSON_CreateObject();
+    
+    cJSON_AddStringToObject(text, "tag", "lark_md");
+    cJSON_AddStringToObject(text, "content", content);
+    cJSON_AddStringToObject(element, "tag", "div");
+    cJSON_AddItemToObject(element, "text", text);
+    cJSON_AddItemToArray(elements, element);
+    cJSON_AddItemToObject(card, "elements", elements);
+    cJSON_AddBoolToObject(card, "stream", true);  // 保持流式状态
+    cJSON_AddBoolToObject(card, "scrollable", true);  // 启用滚动
+    
+    char *content_str = cJSON_PrintUnformatted(card);
+    cJSON_Delete(card);
+    
+    // 构建请求体
+    cJSON *body = cJSON_CreateObject();
+    cJSON_AddStringToObject(body, "content", content_str);
+    free(content_str);
+    
+    char *body_str = cJSON_PrintUnformatted(body);
+    cJSON_Delete(body);
+    
+    // 构建请求头
+    char auth_header[512];
+    snprintf(auth_header, sizeof(auth_header), "Authorization: Bearer %s", token);
+    const char *headers[] = {auth_header, "Content-Type: application/json", NULL};
+    
+    // 发送PATCH请求
+    HttpRequest req = {
+        .url = url,
+        .method = "PATCH",
+        .body = body_str,
+        .content_type = "application/json",
+        .headers = headers,
+        .timeout_sec = 30
+    };
+    
+    HttpResponse *resp = http_request(&req);
+    free(body_str);
+
+    clock_gettime(CLOCK_MONOTONIC, &end);
+    long cost_ms = (end.tv_sec - start.tv_sec) * 1000 + (end.tv_nsec - start.tv_nsec) / 1000000;
+    log_debug("[TIMING] feishu HTTP: cost=%ldms, len=%zu", cost_ms, strlen(content));
+    
+    if (!resp) {
+        log_error("[Feishu] Stream update request failed: no response");
+        return false;
+    }
+    
+    bool success = resp->success && resp->status_code == 200;
+    if (!success) {
+        log_error("[Feishu] Stream update failed: status=%d, body=%s", 
+                  resp->status_code, resp->body ? resp->body : "(null)");
+    }
+    http_response_free(resp);
+    
+    return success;
+}
+
+// 结束流式消息 - 发送最终内容并取消stream属性
+bool feishu_stream_finish(const char *channel_id, const char *message_id) {
+    if (!channel_id || !message_id) return false;
+    
+    // 查找对应的飞书渠道实例
+    ChannelInstance *channel = channel_find(channel_id);
+    if (!channel || channel->type != CHANNEL_FEISHU) {
+        return false;
+    }
+    
+    FeishuConfig *config = (FeishuConfig *)channel->config;
+    if (!config) return false;
+    
+    char *token = feishu_get_valid_token(config);
+    if (!token) return false;
+    
+    // 获取保存的当前内容
+    const char *final_content = " ";  // 默认空内容
+    if (channel->stream_ctx) {
+        FeishuStreamContext *ctx = (FeishuStreamContext *)channel->stream_ctx;
+        if (ctx->current_content) {
+            final_content = ctx->current_content;
+        }
+    }
+    
+    // 构建请求URL - 使用消息patch API
+    char url[256];
+    snprintf(url, sizeof(url), "%s/im/v1/messages/%s", FEISHU_API_BASE, message_id);
+    
+    // 构建卡片内容（最终内容）
+    cJSON *card = cJSON_CreateObject();
+    cJSON *elements = cJSON_CreateArray();
+    cJSON *element = cJSON_CreateObject();
+    cJSON *text = cJSON_CreateObject();
+    
+    cJSON_AddStringToObject(text, "tag", "lark_md");
+    cJSON_AddStringToObject(text, "content", final_content);
+    cJSON_AddStringToObject(element, "tag", "div");
+    cJSON_AddItemToObject(element, "text", text);
+    cJSON_AddItemToArray(elements, element);
+    cJSON_AddItemToObject(card, "elements", elements);
+    cJSON_AddBoolToObject(card, "stream", false);  // 结束流式
+    cJSON_AddBoolToObject(card, "scrollable", true);  // 启用滚动
+    
+    char *content_str = cJSON_PrintUnformatted(card);
+    cJSON_Delete(card);
+    
+    // 构建请求体
+    cJSON *body = cJSON_CreateObject();
+    cJSON_AddStringToObject(body, "content", content_str);
+    free(content_str);
+    
+    char *body_str = cJSON_PrintUnformatted(body);
+    cJSON_Delete(body);
+    
+    // 构建请求头
+    char auth_header[512];
+    snprintf(auth_header, sizeof(auth_header), "Authorization: Bearer %s", token);
+    const char *headers[] = {auth_header, "Content-Type: application/json", NULL};
+    
+    // 发送PATCH请求
+    HttpRequest req = {
+        .url = url,
+        .method = "PATCH",
+        .body = body_str,
+        .content_type = "application/json",
+        .headers = headers,
+        .timeout_sec = 30
+    };
+    
+    HttpResponse *resp = http_request(&req);
+    free(body_str);
+    
+    if (!resp) {
+        log_error("[Feishu] Stream finish request failed: no response");
+        return false;
+    }
+    
+    log_info("[Feishu] Stream finished: message_id=%s, status=%d", message_id, resp->status_code);
+    
+    bool success = resp->success && resp->status_code == 200;
+    if (!success) {
+        log_error("[Feishu] Stream finish failed: body=%s", resp->body ? resp->body : "(null)");
+    }
+    http_response_free(resp);
+    
+    return success;
+}
+
+// 流式发送完整消息 (模拟打字机效果)
+#include <unistd.h>  // for usleep
+
+bool feishu_stream_send(const char *channel_id, const char *message, int speed_chars_per_sec) {
+    if (!channel_id || !message) return false;
+    
+    // 查找对应的飞书渠道实例
+    ChannelInstance *channel = channel_find(channel_id);
+    if (!channel || channel->type != CHANNEL_FEISHU) {
+        return false;
+    }
+    
+    FeishuConfig *config = (FeishuConfig *)channel->config;
+    if (!config) return false;
+    
+    // 创建流式消息
+    char *message_id = feishu_stream_create(channel_id, config->receive_id, config->receive_id_type);
+    if (!message_id) {
+        log_error("[Feishu] Failed to create stream message");
+        return false;
+    }
+    
+    // 计算更新间隔 (微秒)
+    int interval_us = 1000000 / (speed_chars_per_sec > 0 ? speed_chars_per_sec : 20);
+    
+    // 逐字更新内容
+    int len = strlen(message);
+    char *partial = (char *)malloc(len + 1);
+    if (!partial) {
+        free(message_id);
+        return false;
+    }
+    
+    // 分批更新，每10个字符更新一次
+    int batch_size = 10;
+    for (int i = 0; i < len; i += batch_size) {
+        int end = (i + batch_size < len) ? i + batch_size : len;
+        strncpy(partial, message, end);
+        partial[end] = '\0';
+        
+        if (!feishu_stream_update(channel_id, message_id, partial)) {
+            log_error("[Feishu] Failed to update stream message at position %d", i);
+            // 继续尝试
+        }
+        
+        // 等待间隔
+        usleep(interval_us * batch_size);
+    }
+    
+    // 结束流式消息
+    bool result = feishu_stream_finish(channel_id, message_id);
+    free(message_id);
+    free(partial);
+    
+    return result;
 }

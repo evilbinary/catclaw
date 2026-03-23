@@ -1,6 +1,7 @@
 #include "channels.h"
 #include "agent/agent.h"
 #include "common/config.h"
+#include "common/log.h"
 #include "telegram.h"
 #include "discord.h"
 #include "feishu.h"
@@ -8,6 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
 
 // Channel type names
 const char *channel_type_names[] = {
@@ -21,7 +23,7 @@ const char *channel_type_names[] = {
 };
 
 // Global channel manager
-static ChannelManager g_channel_manager = {NULL, 0};
+static ChannelManager g_channel_manager = {NULL, 0, NULL};
 
 // Default channel callback functions
 static void default_connect(ChannelInstance *channel) {
@@ -64,7 +66,13 @@ static ChannelInstance* channel_create(const char *id, ChannelType type, Channel
     channel->connected = false;
     channel->config = NULL;
     channel->user_data = NULL;
-    channel->next = NULL;
+    channel->stream_ctx = NULL;
+    
+    // 初始化流式队列
+    channel->stream_queue_head = NULL;
+    channel->stream_queue_tail = NULL;
+    channel->stream_processing = false;
+    pthread_mutex_init(&channel->stream_mutex, NULL);
     
     // Set default callbacks
     channel->connect = default_connect;
@@ -120,12 +128,29 @@ static void channel_free(ChannelInstance *channel) {
         free(channel->config);
     }
     
+    // 清理流式队列
+    pthread_mutex_destroy(&channel->stream_mutex);
+    StreamTaskNode* curr = channel->stream_queue_head;
+    while (curr) {
+        StreamTaskNode* next = curr->next;
+        free(curr->content);
+        free(curr);
+        curr = next;
+    }
+    
     free(channel);
 }
 
 bool channels_init(void) {
     g_channel_manager.head = NULL;
     g_channel_manager.count = 0;
+    
+    // 创建线程池（4个工作线程，128个任务队列）
+    g_channel_manager.pool = thread_pool_create(4, 128);
+    if (!g_channel_manager.pool) {
+        fprintf(stderr, "[Channel] Failed to create thread pool\n");
+        return false;
+    }
     
     // Load channels from configuration if available
     if (g_config.channels.count > 0) {
@@ -144,7 +169,7 @@ bool channels_init(void) {
         }
     }
     
-    printf("[Channel] Manager initialized\n");
+    printf("[Channel] Manager initialized with thread pool\n");
     return true;
 }
 
@@ -157,6 +182,13 @@ void channels_cleanup(void) {
     }
     g_channel_manager.head = NULL;
     g_channel_manager.count = 0;
+    
+    // 销毁线程池
+    if (g_channel_manager.pool) {
+        thread_pool_destroy(g_channel_manager.pool);
+        g_channel_manager.pool = NULL;
+    }
+    
     printf("[Channel] Manager cleaned up\n");
 }
 
@@ -264,6 +296,12 @@ bool channel_send_message(ChannelInstance *channel, const char *message) {
         return false;
     }
     
+    // 如果渠道实现了流式发送回调，优先使用流式发送
+    // 具体渠道（如飞书）会根据配置决定是否真正使用流式模式
+    if (channel->stream_send) {
+        return channel->stream_send(channel, message);
+    }
+    
     return channel->send_message(channel, message);
 }
 
@@ -298,6 +336,76 @@ bool channel_send_message_to_type(ChannelType type, const char *message) {
         current = current->next;
     }
     return success;
+}
+
+// 流式发送消息 (打字机效果)
+bool channel_stream_send(ChannelInstance *channel, const char *message) {
+    if (!channel) {
+        fprintf(stderr, "[Channel] Invalid channel\n");
+        return false;
+    }
+    
+    if (!channel->enabled) {
+        fprintf(stderr, "[Channel] '%s' is disabled\n", channel->name);
+        return false;
+    }
+    
+    if (!channel->connected) {
+        fprintf(stderr, "[Channel] '%s' is not connected\n", channel->name);
+        return false;
+    }
+    
+    // 如果渠道实现了流式发送回调，使用它
+    if (channel->stream_send) {
+        return channel->stream_send(channel, message);
+    }
+    
+    // 否则回退到普通发送
+    fprintf(stderr, "[Channel] '%s' does not support stream mode, falling back to normal send\n", channel->name);
+    return channel->send_message(channel, message);
+}
+
+bool channel_stream_send_by_id(const char *id, const char *message) {
+    ChannelInstance *channel = channel_find(id);
+    return channel_stream_send(channel, message);
+}
+
+// 开始流式消息
+bool channel_stream_start(ChannelInstance *channel, const char *initial_content) {
+    if (!channel || !channel->enabled || !channel->connected) return false;
+    if (channel->stream_start) {
+        return channel->stream_start(channel, initial_content);
+    }
+    return false;
+}
+
+// 更新流式消息
+bool channel_stream_update(ChannelInstance *channel, const char *content) {
+    if (!channel || !channel->enabled || !channel->connected) return false;
+    if (channel->stream_update) {
+        return channel->stream_update(channel, content);
+    }
+    return false;
+}
+
+// 结束流式消息
+bool channel_stream_end(ChannelInstance *channel) {
+    if (!channel) return false;
+    if (channel->stream_end) {
+        return channel->stream_end(channel);
+    }
+    return false;
+}
+
+// 结束所有渠道的流式消息
+void channel_stream_end_all(void) {
+    ChannelInstance *current = g_channel_manager.head;
+    while (current) {
+        if (current->stream_end) {
+            current->stream_end(current);
+        }
+        current = current->next;
+    }
 }
 
 bool channel_enable(ChannelInstance *channel) {
@@ -437,6 +545,8 @@ bool channels_load_from_config(void) {
             .webhook_url = entry->webhook_url,
             .receive_id = entry->receive_id,
             .receive_id_type = entry->receive_id_type,
+            .stream_mode = entry->stream_mode,
+            .stream_speed = entry->stream_speed,
             .chat_id = entry->chat_id,
             .channel_id = entry->channel_id,
             .bot_token = entry->bot_token
@@ -455,4 +565,116 @@ bool channels_load_from_config(void) {
     
     printf("[Channel] Loaded %d channels from configuration\n", loaded);
     return loaded > 0 || g_config.channels.count == 0;
+}
+
+// ==================== 流式消息任务实现 ====================
+
+#define STREAM_MIN_INTERVAL_MS 50  // 流式消息最小间隔（毫秒）
+
+// 处理单个流式任务
+static void process_stream_task(ChannelInstance *channel, StreamTaskType type, const char *content) {
+    struct timespec start, end;
+    clock_gettime(CLOCK_MONOTONIC, &start);
+
+    if (type == STREAM_TASK_START) {
+        // 开始流式消息
+        if (channel->stream_start) {
+            channel->stream_start(channel, content);
+        }
+    } else if (type == STREAM_TASK_END) {
+        // 结束流式消息
+        if (channel->stream_end) {
+            channel->stream_end(channel);
+        }
+    } else if (type == STREAM_TASK_UPDATE && content) {
+        // 更新消息
+        if (channel->stream_update) {
+            channel->stream_update(channel, content);
+        }
+        // 飞书 API 已经很慢(300-800ms)，不需要额外延迟
+    }
+
+    clock_gettime(CLOCK_MONOTONIC, &end);
+    long cost_ms = (end.tv_sec - start.tv_sec) * 1000 + (end.tv_nsec - start.tv_nsec) / 1000000;
+    if (type == STREAM_TASK_UPDATE) {
+        log_debug("[TIMING] process_task UPDATE: cost=%ldms, len=%zu", cost_ms, content ? strlen(content) : 0);
+    }
+}
+
+// 处理 channel 串行队列的任务（在线程池中执行）
+static void stream_process_queue(void *arg) {
+    ChannelInstance *channel = (ChannelInstance *)arg;
+    if (!channel) return;
+    
+    while (1) {
+        // 在 mutex 内取出任务
+        pthread_mutex_lock(&channel->stream_mutex);
+        StreamTaskNode *node = channel->stream_queue_head;
+        if (node) {
+            channel->stream_queue_head = node->next;
+            if (!channel->stream_queue_head) {
+                channel->stream_queue_tail = NULL;
+            }
+        }
+        
+        // 如果队列为空，标记处理完成并退出
+        if (!node) {
+            channel->stream_processing = false;
+            pthread_mutex_unlock(&channel->stream_mutex);
+            break;
+        }
+        pthread_mutex_unlock(&channel->stream_mutex);
+        
+        // 在 mutex 外处理任务
+        process_stream_task(channel, node->type, node->content);
+        
+        // END 任务后退出
+        if (node->type == STREAM_TASK_END) {
+            free(node->content);
+            free(node);
+            // 重新标记处理完成
+            pthread_mutex_lock(&channel->stream_mutex);
+            channel->stream_processing = false;
+            pthread_mutex_unlock(&channel->stream_mutex);
+            break;
+        }
+        
+        free(node->content);
+        free(node);
+    }
+}
+
+// 提交流式任务到串行队列
+void channel_stream_submit_task(ChannelInstance *channel, StreamTaskType type, const char *content) {
+    if (!channel || !g_channel_manager.pool) return;
+    
+    // 创建任务节点
+    StreamTaskNode *node = (StreamTaskNode *)calloc(1, sizeof(StreamTaskNode));
+    if (!node) return;
+    node->type = type;
+    node->content = content ? strdup(content) : NULL;
+    node->next = NULL;
+    
+    // 在 mutex 内加入队列并检查处理状态
+    pthread_mutex_lock(&channel->stream_mutex);
+    
+    // 加入队列
+    if (channel->stream_queue_tail) {
+        channel->stream_queue_tail->next = node;
+    } else {
+        channel->stream_queue_head = node;
+    }
+    channel->stream_queue_tail = node;
+    
+    // 检查是否需要提交处理任务
+    bool should_submit = !channel->stream_processing;
+    if (should_submit) {
+        channel->stream_processing = true;
+    }
+    
+    pthread_mutex_unlock(&channel->stream_mutex);
+    
+    if (should_submit) {
+        thread_pool_add_task(g_channel_manager.pool, stream_process_queue, channel);
+    }
 }

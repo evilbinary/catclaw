@@ -130,7 +130,7 @@ static bool create_directory_recursive(const char* path) {
 
     while ((p = strchr(p, '\\')) != NULL) {
 #else
-    p = temp_path;
+    char *p = temp_path;
     // Skip any leading slashes
     while (*p == '/') {
         p++;

@@ -2,6 +2,8 @@
 #define CHANNELS_H
 
 #include <stdbool.h>
+#include <pthread.h>
+#include "common/thread_pool.h"
 
 // Channel types
 typedef enum {
@@ -21,6 +23,24 @@ extern const char *channel_type_names[];
 // Forward declaration
 typedef struct ChannelInstance ChannelInstance;
 
+// ==================== 流式消息任务 ====================
+
+// 流式任务类型
+typedef enum {
+    STREAM_TASK_START,    // 开始消息
+    STREAM_TASK_UPDATE,   // 更新消息
+    STREAM_TASK_END       // 结束消息
+} StreamTaskType;
+
+// 流式任务节点（用于串行队列）
+typedef struct StreamTaskNode {
+    StreamTaskType type;
+    char* content;
+    struct StreamTaskNode* next;
+} StreamTaskNode;
+
+// ==================== Channel 结构 ====================
+
 // Channel structure (single instance)
 struct ChannelInstance {
     char *id;                    // 唯一标识符
@@ -30,6 +50,13 @@ struct ChannelInstance {
     bool connected;              // 是否已连接
     void *config;                // 渠道特定配置
     void *user_data;             // 用户数据
+    void *stream_ctx;            // 流式消息上下文（渠道特定，如 FeishuStreamContext）
+    
+    // 流式消息串行队列
+    StreamTaskNode* stream_queue_head;
+    StreamTaskNode* stream_queue_tail;
+    pthread_mutex_t stream_mutex;
+    bool stream_processing;      // 是否正在处理队列
     
     // Callback functions
     void (*connect)(ChannelInstance *channel);
@@ -38,6 +65,12 @@ struct ChannelInstance {
     bool (*receive_message)(ChannelInstance *channel, const char *message);
     void (*cleanup)(ChannelInstance *channel);
     
+    // 流式发送回调 (可选，用于打字机效果)
+    bool (*stream_send)(ChannelInstance *channel, const char *message);
+    bool (*stream_start)(ChannelInstance *channel, const char *initial_content);
+    bool (*stream_update)(ChannelInstance *channel, const char *content);
+    bool (*stream_end)(ChannelInstance *channel);
+    
     ChannelInstance *next;       // 链表下一个节点
 };
 
@@ -45,6 +78,7 @@ struct ChannelInstance {
 typedef struct {
     ChannelInstance *head;       // 渠道链表头
     int count;                   // 渠道数量
+    ThreadPool *pool;            // 线程池（用于流式消息任务）
 } ChannelManager;
 
 // Channel configuration structure (for loading from config)
@@ -66,6 +100,8 @@ typedef struct {
     char *webhook_url;
     char *receive_id;            // 接收消息的用户/群组ID
     char *receive_id_type;       // 接收ID类型: open_id, user_id, union_id, chat_id
+    bool stream_mode;            // 是否启用流式输出（打字机效果）
+    int stream_speed;            // 流式输出速度（字符/秒）
     
     // Telegram 专用
     char *chat_id;
@@ -102,6 +138,18 @@ bool channel_send_message(ChannelInstance *channel, const char *message);
 bool channel_send_message_by_id(const char *id, const char *message);
 bool channel_send_message_to_all(const char *message);
 bool channel_send_message_to_type(ChannelType type, const char *message);
+bool channel_stream_send(ChannelInstance *channel, const char *message);
+bool channel_stream_send_by_id(const char *id, const char *message);
+
+// 流式消息操作 (用于实时更新消息内容)
+bool channel_stream_start(ChannelInstance *channel, const char *initial_content);
+bool channel_stream_update(ChannelInstance *channel, const char *content);
+bool channel_stream_end(ChannelInstance *channel);
+void channel_stream_end_all(void);  // 结束所有渠道的流式消息
+
+// 流式任务操作（使用线程池，每个 channel 串行处理）
+void channel_stream_submit_task(ChannelInstance *channel, StreamTaskType type, const char *content);
+
 bool channel_enable(ChannelInstance *channel);
 bool channel_disable(ChannelInstance *channel);
 bool channel_connect(ChannelInstance *channel);

@@ -1,32 +1,10 @@
 #include "websocket.h"
 #include "channels.h"
+#include "../common/utils.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
-
-// Cross-platform strcasestr implementation (case-insensitive strstr)
-#ifndef HAVE_STRCASESTR
-static char* strcasestr(const char* haystack, const char* needle) {
-    if (!haystack || !needle) return NULL;
-    if (!*needle) return (char*)haystack;
-    
-    char* h = (char*)haystack;
-    while (*h) {
-        if (tolower((unsigned char)*h) == tolower((unsigned char)*needle)) {
-            char* h2 = h + 1;
-            char* n2 = (char*)needle + 1;
-            while (*n2 && tolower((unsigned char)*h2) == tolower((unsigned char)*n2)) {
-                h2++;
-                n2++;
-            }
-            if (!*n2) return h;
-        }
-        h++;
-    }
-    return NULL;
-}
-#endif
 
 // Platform-specific includes
 #ifdef _WIN32
@@ -485,7 +463,7 @@ static bool websocket_handshake(WebSocketConnection *conn, WebSocketServer *serv
         
         // 方式2: 从 Authorization header 获取
         if (!authorized) {
-            char *auth_header = strcasestr(conn->buffer, "Authorization:");
+            char *auth_header = http_strcasestr(conn->buffer, "Authorization:");
             if (auth_header) {
                 auth_header += 14;
                 while (*auth_header == ' ') auth_header++;
@@ -508,7 +486,7 @@ static bool websocket_handshake(WebSocketConnection *conn, WebSocketServer *serv
         
         // 方式3: 从 X-API-Key header 获取
         if (!authorized) {
-            char *key_header = strcasestr(conn->buffer, "X-API-Key:");
+            char *key_header = http_strcasestr(conn->buffer, "X-API-Key:");
             if (key_header) {
                 key_header += 10;
                 while (*key_header == ' ') key_header++;

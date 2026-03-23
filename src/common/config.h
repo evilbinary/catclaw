@@ -89,6 +89,8 @@ typedef struct {
     char *webhook_url;
     char *receive_id;            // 接收消息的用户/群组ID
     char *receive_id_type;       // 接收ID类型: open_id, user_id, union_id, chat_id
+    bool stream_mode;            // 是否启用流式输出（打字机效果）
+    int stream_speed;            // 流式输出速度（字符/秒），默认 20
     bool ws_enabled;             // 是否启用 WebSocket 事件订阅
     char *ws_domain;             // WebSocket 连接域名 (可选)
     int ws_ping_interval;        // WebSocket 心跳间隔(秒)，默认 120

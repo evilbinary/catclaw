@@ -21,6 +21,8 @@ typedef struct {
     char* tool_call_names[MAX_STREAMING_TOOL_CALLS];
     char* tool_call_arguments[MAX_STREAMING_TOOL_CALLS];
     int tool_call_count;
+    char* accumulated_content;  // 累积的内容
+    AIProvider* provider;       // provider 指针，用于访问流式回调
 } StreamContext;
 
 static StreamContext* g_stream_ctx = NULL;
@@ -99,6 +101,25 @@ static void process_openai_sse_chunk(const char* data) {
                 printf("%s", content->valuestring);
                 fflush(stdout);
                 gateway_broadcast_to_webchat(content->valuestring);
+                
+                // 累积内容并调用流式回调
+                if (g_stream_ctx && g_stream_ctx->accumulated_content) {
+                    size_t old_len = strlen(g_stream_ctx->accumulated_content);
+                    size_t chunk_len = strlen(content->valuestring);
+                    char* new_content = (char*)realloc(g_stream_ctx->accumulated_content, old_len + chunk_len + 1);
+                    if (new_content) {
+                        strcat(new_content, content->valuestring);
+                        g_stream_ctx->accumulated_content = new_content;
+                        
+                        // 调用流式回调（从 provider config 获取）
+                        if (g_stream_ctx->provider && g_stream_ctx->provider->config.stream_callback) {
+                            g_stream_ctx->provider->config.stream_callback(
+                                content->valuestring, 
+                                g_stream_ctx->accumulated_content, 
+                                g_stream_ctx->provider->config.stream_user_data);
+                        }
+                    }
+                }
             }
         }
     }
@@ -252,6 +273,8 @@ static AIProviderResponse* openai_send_messages(AIProvider* self,
     memset(&stream_ctx, 0, sizeof(stream_ctx));
     stream_ctx.buffer = &response_buffer;
     stream_ctx.streaming = self->config.stream;
+    stream_ctx.accumulated_content = (char*)calloc(1, 1);  // 初始化累积内容
+    stream_ctx.provider = self;  // 保存 provider 指针
     g_stream_ctx = &stream_ctx;
 
     // 构建 URL
@@ -444,6 +467,7 @@ static AIProviderResponse* openai_send_messages(AIProvider* self,
 
     // 清理
     reset_tool_calls(&stream_ctx);
+    free(stream_ctx.accumulated_content);
     curl_slist_free_all(headers);
     curl_easy_cleanup(curl);
     free(payload);

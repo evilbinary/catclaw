@@ -194,12 +194,16 @@
   "app_secret": "xxx",
   "receive_id": "ou_xxx",
   "receive_id_type": "open_id",
+  "stream_mode": true,
+  "stream_speed": 30,
   "ws_enabled": true,
   "ws_ping_interval": 120,
   "ws_reconnect_interval": 120,
   "ws_max_reconnect": -1
 }
 ```
+
+**流式输出（打字机效果）**：启用 `stream_mode` 后，发送的 markdown 卡片消息将以打字机效果逐字显示，`stream_speed` 控制显示速度（字符/秒）。
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
@@ -208,6 +212,8 @@
 | `receive_id` | string | 接收消息的用户/群组 ID |
 | `receive_id_type` | string | ID 类型: `open_id`, `user_id`, `union_id`, `chat_id` |
 | `webhook_url` | string | 自定义机器人 Webhook 地址 |
+| `stream_mode` | bool | 是否启用流式输出（打字机效果），默认 false。**仅支持 API 模式** |
+| `stream_speed` | int | 流式输出速度（字符/秒），默认 20 |
 | `ws_enabled` | bool | 是否启用 WebSocket 事件订阅 (默认 false) |
 | `ws_domain` | string | WebSocket 连接域名 (可选，默认 `wss://open.feishu.cn`) |
 | `ws_ping_interval` | int | 心跳间隔(秒)，默认 120 |

@@ -4,6 +4,7 @@
 #include "http_client.h"
 #include "log.h"
 #include "cJSON.h"
+#include "utils.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

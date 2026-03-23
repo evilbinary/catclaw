@@ -13,6 +13,8 @@
 #include <string.h>
 #include <unistd.h>
 #include <errno.h>
+#include <time.h>
+#include <pthread.h>
 
 // Default system prompt for the agent
 static const char* DEFAULT_SYSTEM_PROMPT =
@@ -58,6 +60,105 @@ typedef struct {
     ToolCall* calls;
     int count;
 } ToolCallList;
+
+// ==================== 流式消息系统 ====================
+
+// 全局流式状态
+static bool g_stream_active = false;
+
+// 节流控制
+static int g_last_sent_len = 0;
+static struct timespec g_last_update_time = {0, 0};
+
+#define STREAM_MIN_INTERVAL_MS  300  // 最小更新间隔（配合飞书API延迟）
+#define STREAM_MIN_CHARS        50   // 最小新增字符数
+
+// 用于遍历 channel 时的数据传递
+typedef struct {
+    const char* content;
+} StreamCallbackData;
+
+// 启动流式消息的遍历回调
+static void stream_start_iterator(ChannelInstance* channel, void* user_data) {
+    StreamCallbackData* data = (StreamCallbackData*)user_data;
+    if (channel->stream_start && channel->stream_update) {
+        // 通过线程池串行队列启动流式消息
+        channel_stream_submit_task(channel, STREAM_TASK_START, data->content);
+        log_debug("[Stream] Started stream for channel: %s", channel->name);
+    }
+}
+
+// 更新流式消息的遍历回调
+static void stream_update_iterator(ChannelInstance* channel, void* user_data) {
+    StreamCallbackData* data = (StreamCallbackData*)user_data;
+    if (channel->stream_update) {
+        channel_stream_submit_task(channel, STREAM_TASK_UPDATE, data->content);
+    }
+}
+
+// 结束流式消息的遍历回调
+static void stream_end_iterator(ChannelInstance* channel, void* user_data) {
+    (void)user_data;
+    if (channel->stream_end) {
+        channel_stream_submit_task(channel, STREAM_TASK_END, NULL);
+    }
+}
+
+// AI 流式回调函数：往所有支持流式的 channel 推送任务
+static void stream_callback(const char* chunk, const char* accumulated, void* user_data) {
+    (void)chunk;
+    (void)user_data;
+    
+    int current_len = accumulated ? strlen(accumulated) : 0;
+    
+    // 第一个 chunk：启动所有支持流式的 channel
+    if (!g_stream_active) {
+        g_stream_active = true;
+        g_last_sent_len = current_len;
+        clock_gettime(CLOCK_MONOTONIC, &g_last_update_time);
+        
+        StreamCallbackData data = { .content = accumulated };
+        channels_foreach(stream_start_iterator, &data);
+        return;
+    }
+    
+    // 节流检查
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    
+    long elapsed_ms = (now.tv_sec - g_last_update_time.tv_sec) * 1000 +
+                       (now.tv_nsec - g_last_update_time.tv_nsec) / 1000000;
+    int chars_added = current_len - g_last_sent_len;
+    
+    // 判断是否需要更新
+    bool should_update = (elapsed_ms >= STREAM_MIN_INTERVAL_MS && chars_added > 0) ||
+                          (chars_added >= STREAM_MIN_CHARS);
+    
+    if (should_update) {
+        g_last_sent_len = current_len;
+        g_last_update_time = now;
+        
+        log_debug("[TIMING] AI callback: elapsed=%ldms, chars_added=%d, len=%d", 
+                  elapsed_ms, chars_added, current_len);
+        
+        StreamCallbackData data = { .content = accumulated };
+        channels_foreach(stream_update_iterator, &data);
+    }
+}
+
+// 结束流式消息
+static void end_stream_message(void) {
+    if (!g_stream_active) return;
+    
+    channels_foreach(stream_end_iterator, NULL);
+    
+    g_stream_active = false;
+    g_last_sent_len = 0;
+    g_last_update_time.tv_sec = 0;
+    g_last_update_time.tv_nsec = 0;
+    
+    log_debug("[Stream] Ended stream message");
+}
 
 // Global agent manager
 AgentNode* g_agent_node_list = NULL;
@@ -652,6 +753,13 @@ void* agent_node_worker_thread(void* arg) {
                     log_debug("Calling AI model with %d messages in context\n", context->count);
                 }
                 
+                // 设置流式回调（如果 AI 配置了 stream 模式）
+                AIProvider* provider = ai_model_get_provider();
+                if (provider && provider->config.stream) {
+                    ai_model_set_stream_callback(stream_callback, NULL);
+                    g_stream_active = false;  // 重置流式状态
+                }
+                
                 // Use configured system prompt or default
                 // TODO: Fix g_config.agent.system_prompt corruption issue
                 // For now, always use default system prompt
@@ -659,10 +767,15 @@ void* agent_node_worker_thread(void* arg) {
                 const char* system_prompt = DEFAULT_SYSTEM_PROMPT;
                 log_debug("Using DEFAULT_SYSTEM_PROMPT: %p", (void*)system_prompt);
                 AIModelResponse* response = ai_model_send_messages(context, system_prompt);
+                
+                // AI 调用结束后清理流式回调
+                ai_model_set_stream_callback(NULL, NULL);
+                
                 if (!response) {
                     if (g_config.debug) {
                         log_debug("No response from AI model\n");
                     }
+                    end_stream_message();  // 结束流式消息
                     break;
                 }
                 
@@ -763,13 +876,25 @@ void* agent_node_worker_thread(void* arg) {
                         if (g_config.debug) {
                             log_debug("Sending message to all connected channels\n");
                         }
-                        channel_send_message_to_all(response->content);
-                        
+
+                        // 检查是否使用了流式模式
+                        bool used_stream = g_stream_active;
+
+                        // 结束流式消息（如果流式模式已启动）
+                        end_stream_message();
+
+                        // 只有非流式模式才发送完整消息
+                        // 流式模式下消息已经在回调中发送
+                        if (!used_stream) {
+                            channel_send_message_to_all(response->content);
+                        }
+
                         ai_model_free_response(response);
                         break;
                     }
                 } else {
                     printf("\n[AI Error]: %s\n\n", response->error);
+                    end_stream_message();  // 结束流式消息
                     ai_model_free_response(response);
                     break;
                 }

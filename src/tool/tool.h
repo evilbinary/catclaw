@@ -60,5 +60,7 @@ int tool_save_memory(ToolArgs* args, char** result, int* result_len);
 int tool_read_memory(ToolArgs* args, char** result, int* result_len);
 int tool_get_weather(ToolArgs* args, char** result, int* result_len);
 int tool_list_directory(ToolArgs* args, char** result, int* result_len);
+int tool_web_fetch(ToolArgs* args, char** result, int* result_len);
+int tool_shell_execute(ToolArgs* args, char** result, int* result_len);
 
 #endif // TOOL_H

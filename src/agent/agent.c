@@ -552,6 +552,8 @@ bool agent_init(void) {
     agent_register_tool("memory_load", "Load a value from memory by key", NULL, tool_read_memory);
     agent_register_tool("get_weather", "Get weather information for a location", NULL, tool_get_weather);
     agent_register_tool("list_directory", "List files and directories in a given path", NULL, tool_list_directory);
+    agent_register_tool("web_fetch", "Fetch content from a URL", NULL, tool_web_fetch);
+    agent_register_tool("shell", "Execute shell commands", NULL, tool_shell_execute);
 
     g_agent.running = true;
     
