@@ -31,12 +31,12 @@ typedef enum {
     STREAM_TASK_END       // 结束消息
 } StreamTaskType;
 
-// 流式任务参数（用于线程池）
-typedef struct {
-    ChannelInstance* channel;
+// 流式任务节点（用于串行队列）
+typedef struct StreamTaskNode {
     StreamTaskType type;
     char* content;
-} StreamTaskArg;
+    struct StreamTaskNode* next;
+} StreamTaskNode;
 
 // ==================== Channel 结构 ====================
 
@@ -50,6 +50,12 @@ struct ChannelInstance {
     void *config;                // 渠道特定配置
     void *user_data;             // 用户数据
     void *stream_ctx;            // 流式消息上下文（渠道特定，如 FeishuStreamContext）
+    
+    // 流式消息串行队列
+    StreamTaskNode* stream_queue_head;
+    StreamTaskNode* stream_queue_tail;
+    pthread_mutex_t stream_mutex;
+    bool stream_processing;      // 是否正在处理队列
     
     // Callback functions
     void (*connect)(ChannelInstance *channel);
@@ -140,10 +146,8 @@ bool channel_stream_update(ChannelInstance *channel, const char *content);
 bool channel_stream_end(ChannelInstance *channel);
 void channel_stream_end_all(void);  // 结束所有渠道的流式消息
 
-// 流式任务操作（使用线程池）
+// 流式任务操作（使用线程池，每个 channel 串行处理）
 void channel_stream_submit_task(ChannelInstance *channel, StreamTaskType type, const char *content);
-StreamTaskArg* channel_stream_task_arg_create(ChannelInstance *channel, StreamTaskType type, const char *content);
-void channel_stream_task_arg_free(StreamTaskArg *arg);
 
 bool channel_enable(ChannelInstance *channel);
 bool channel_disable(ChannelInstance *channel);

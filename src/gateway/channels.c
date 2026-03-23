@@ -8,6 +8,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
+#include <stddef.h>
 
 // Channel type names
 const char *channel_type_names[] = {
@@ -21,7 +23,7 @@ const char *channel_type_names[] = {
 };
 
 // Global channel manager
-static ChannelManager g_channel_manager = {NULL, 0};
+static ChannelManager g_channel_manager = {NULL, 0, NULL};
 
 // Default channel callback functions
 static void default_connect(ChannelInstance *channel) {
@@ -64,7 +66,20 @@ static ChannelInstance* channel_create(const char *id, ChannelType type, Channel
     channel->connected = false;
     channel->config = NULL;
     channel->user_data = NULL;
-    channel->next = NULL;
+    channel->stream_ctx = NULL;
+    
+    // 初始化流式队列（在 type-specific init 之前）
+    channel->stream_queue_head = NULL;
+    channel->stream_queue_tail = NULL;
+    channel->stream_processing = false;
+    pthread_mutex_init(&channel->stream_mutex, NULL);
+    
+    fprintf(stderr, "[DEBUG] channel_create: channel=%p, sizeof(ChannelInstance)=%zu\n",
+            (void*)channel, sizeof(ChannelInstance));
+    fprintf(stderr, "[DEBUG]   stream_queue_head at offset %zu = %p\n",
+            offsetof(ChannelInstance, stream_queue_head), (void*)channel->stream_queue_head);
+    fprintf(stderr, "[DEBUG]   stream_queue_tail at offset %zu = %p\n",
+            offsetof(ChannelInstance, stream_queue_tail), (void*)channel->stream_queue_tail);
     
     // Set default callbacks
     channel->connect = default_connect;
@@ -99,6 +114,9 @@ static ChannelInstance* channel_create(const char *id, ChannelType type, Channel
             break;
     }
     
+    fprintf(stderr, "[DEBUG] after type-init: stream_queue_head=%p, stream_queue_tail=%p\n",
+            (void*)channel->stream_queue_head, (void*)channel->stream_queue_tail);
+    
     return channel;
 }
 
@@ -118,6 +136,16 @@ static void channel_free(ChannelInstance *channel) {
     // Free config (if not handled by type-specific cleanup)
     if (channel->config) {
         free(channel->config);
+    }
+    
+    // 清理流式队列
+    pthread_mutex_destroy(&channel->stream_mutex);
+    StreamTaskNode* curr = channel->stream_queue_head;
+    while (curr) {
+        StreamTaskNode* next = curr->next;
+        free(curr->content);
+        free(curr);
+        curr = next;
     }
     
     free(channel);
@@ -551,56 +579,104 @@ bool channels_load_from_config(void) {
 
 // ==================== 流式消息任务实现 ====================
 
-// 线程池任务函数：处理流式消息
-static void stream_task_execute(void *arg) {
-    StreamTaskArg *task = (StreamTaskArg *)arg;
-    if (!task || !task->channel) {
-        channel_stream_task_arg_free(task);
-        return;
-    }
-    
-    ChannelInstance *channel = task->channel;
-    
-    if (task->type == STREAM_TASK_END) {
+#define STREAM_MIN_INTERVAL_MS 100  // 流式消息最小间隔（毫秒）
+
+// 处理单个流式任务
+static void process_stream_task(ChannelInstance *channel, StreamTaskType type, const char *content) {
+    if (type == STREAM_TASK_END) {
         // 结束流式消息
         if (channel->stream_end) {
             channel->stream_end(channel);
         }
-    } else if (task->type == STREAM_TASK_UPDATE && task->content) {
+    } else if (type == STREAM_TASK_UPDATE && content) {
         // 更新消息
         if (channel->stream_update) {
-            channel->stream_update(channel, task->content);
+            channel->stream_update(channel, content);
         }
-    }
-    
-    channel_stream_task_arg_free(task);
-}
-
-// 创建任务参数
-StreamTaskArg* channel_stream_task_arg_create(ChannelInstance *channel, StreamTaskType type, const char *content) {
-    StreamTaskArg *arg = (StreamTaskArg *)calloc(1, sizeof(StreamTaskArg));
-    if (!arg) return NULL;
-    
-    arg->channel = channel;
-    arg->type = type;
-    arg->content = content ? strdup(content) : NULL;
-    return arg;
-}
-
-// 释放任务参数
-void channel_stream_task_arg_free(StreamTaskArg *arg) {
-    if (arg) {
-        free(arg->content);
-        free(arg);
+        // 延迟，避免频率限制
+        usleep(STREAM_MIN_INTERVAL_MS * 1000);
     }
 }
 
-// 提交流式任务到线程池
+// 处理 channel 串行队列的任务（在线程池中执行）
+static void stream_process_queue(void *arg) {
+    ChannelInstance *channel = (ChannelInstance *)arg;
+    if (!channel) return;
+    
+    while (1) {
+        // 在 mutex 内取出任务
+        pthread_mutex_lock(&channel->stream_mutex);
+        StreamTaskNode *node = channel->stream_queue_head;
+        if (node) {
+            channel->stream_queue_head = node->next;
+            if (!channel->stream_queue_head) {
+                channel->stream_queue_tail = NULL;
+            }
+        }
+        
+        // 如果队列为空，标记处理完成并退出
+        if (!node) {
+            channel->stream_processing = false;
+            pthread_mutex_unlock(&channel->stream_mutex);
+            break;
+        }
+        pthread_mutex_unlock(&channel->stream_mutex);
+        
+        // 在 mutex 外处理任务
+        process_stream_task(channel, node->type, node->content);
+        
+        // END 任务后退出
+        if (node->type == STREAM_TASK_END) {
+            free(node->content);
+            free(node);
+            // 重新标记处理完成
+            pthread_mutex_lock(&channel->stream_mutex);
+            channel->stream_processing = false;
+            pthread_mutex_unlock(&channel->stream_mutex);
+            break;
+        }
+        
+        free(node->content);
+        free(node);
+    }
+}
+
+// 提交流式任务到串行队列
 void channel_stream_submit_task(ChannelInstance *channel, StreamTaskType type, const char *content) {
-    if (!g_channel_manager.pool) return;
+    if (!channel || !g_channel_manager.pool) return;
     
-    StreamTaskArg *arg = channel_stream_task_arg_create(channel, type, content);
-    if (!arg) return;
+    // 创建任务节点
+    StreamTaskNode *node = (StreamTaskNode *)calloc(1, sizeof(StreamTaskNode));
+    if (!node) return;
+    node->type = type;
+    node->content = content ? strdup(content) : NULL;
+    node->next = NULL;
     
-    thread_pool_add_task(g_channel_manager.pool, stream_task_execute, arg);
+    // 在 mutex 内加入队列并检查处理状态
+    pthread_mutex_lock(&channel->stream_mutex);
+    
+    // DEBUG: 打印 tail 的值
+    fprintf(stderr, "[DEBUG] push: channel=%p, tail=%p, head=%p, node=%p\n",
+            (void*)channel, (void*)channel->stream_queue_tail,
+            (void*)channel->stream_queue_head, (void*)node);
+    
+    // 加入队列
+    if (channel->stream_queue_tail) {
+        channel->stream_queue_tail->next = node;
+    } else {
+        channel->stream_queue_head = node;
+    }
+    channel->stream_queue_tail = node;
+    
+    // 检查是否需要提交处理任务
+    bool should_submit = !channel->stream_processing;
+    if (should_submit) {
+        channel->stream_processing = true;
+    }
+    
+    pthread_mutex_unlock(&channel->stream_mutex);
+    
+    if (should_submit) {
+        thread_pool_add_task(g_channel_manager.pool, stream_process_queue, channel);
+    }
 }
