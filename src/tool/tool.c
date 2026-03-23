@@ -429,23 +429,148 @@ int tool_write_file(ToolArgs* args, char** result, int* result_len) {
     return 0;
 }
 
-// Search web tool (mock)
+// Search web tool - using DuckDuckGo Instant Answer API
 int tool_search_web(ToolArgs* args, char** result, int* result_len) {
     const char* query = tool_args_get(args, "query");
     if (!query) query = tool_args_get(args, "arg");
-    
+
     if (!query) {
         *result = strdup("Error: No search query provided");
         *result_len = strlen(*result);
         return -1;
     }
-    
-    *result = (char*)malloc(200);
-    if (*result) {
-        snprintf(*result, 200, "Search results for '%s':\n1. Result 1\n2. Result 2\n3. Result 3", query);
+
+    // URL encode the query
+    char* encoded_query = http_url_encode(query);
+    if (!encoded_query) {
+        *result = strdup("Error: Failed to encode query");
         *result_len = strlen(*result);
+        return -1;
     }
-    
+
+    // Build DuckDuckGo API URL
+    char url[512];
+    snprintf(url, sizeof(url),
+             "https://api.duckduckgo.com/?q=%s&format=json&no_html=1&skip_disambig=1",
+             encoded_query);
+    free(encoded_query);
+
+    // Make HTTP request
+    HttpRequest req = {
+        .url = url,
+        .method = "GET",
+        .timeout_sec = 15,
+        .follow_redirects = true
+    };
+
+    HttpResponse* resp = http_request(&req);
+    if (!resp || !resp->success) {
+        if (resp) http_response_free(resp);
+        *result = strdup("Error: Failed to connect to search API");
+        *result_len = strlen(*result);
+        return -1;
+    }
+
+    // Parse JSON response
+    cJSON* json = cJSON_Parse(resp->body);
+    http_response_free(resp);
+
+    if (!json) {
+        *result = strdup("Error: Failed to parse search response");
+        *result_len = strlen(*result);
+        return -1;
+    }
+
+    // Build result string
+    size_t buffer_size = 4096;
+    *result = (char*)malloc(buffer_size);
+    if (!*result) {
+        cJSON_Delete(json);
+        return -1;
+    }
+
+    int offset = snprintf(*result, buffer_size, "🔍 搜索结果: %s\n\n", query);
+
+    // Get abstract (main answer)
+    cJSON* abstract = cJSON_GetObjectItem(json, "Abstract");
+    cJSON* abstract_url = cJSON_GetObjectItem(json, "AbstractURL");
+    cJSON* abstract_source = cJSON_GetObjectItem(json, "AbstractSource");
+
+    if (abstract && strlen(abstract->valuestring) > 0) {
+        offset += snprintf(*result + offset, buffer_size - offset,
+                          "📌 摘要:\n%s\n", abstract->valuestring);
+        if (abstract_url && strlen(abstract_url->valuestring) > 0) {
+            offset += snprintf(*result + offset, buffer_size - offset,
+                              "🔗 来源: %s", abstract_url->valuestring);
+            if (abstract_source && strlen(abstract_source->valuestring) > 0) {
+                offset += snprintf(*result + offset, buffer_size - offset,
+                                  " (%s)", abstract_source->valuestring);
+            }
+            offset += snprintf(*result + offset, buffer_size - offset, "\n");
+        }
+        offset += snprintf(*result + offset, buffer_size - offset, "\n");
+    }
+
+    // Get related topics
+    cJSON* related_topics = cJSON_GetObjectItem(json, "RelatedTopics");
+    if (related_topics && cJSON_IsArray(related_topics)) {
+        int topic_count = cJSON_GetArraySize(related_topics);
+        int shown = 0;
+
+        offset += snprintf(*result + offset, buffer_size - offset, "📚 相关主题:\n");
+
+        for (int i = 0; i < topic_count && shown < 5; i++) {
+            cJSON* topic = cJSON_GetArrayItem(related_topics, i);
+            cJSON* text = cJSON_GetObjectItem(topic, "Text");
+            cJSON* first_url = cJSON_GetObjectItem(topic, "FirstURL");
+
+            // Skip if this is a nested Topics array
+            if (!text && cJSON_GetObjectItem(topic, "Topics")) {
+                cJSON* nested_topics = cJSON_GetObjectItem(topic, "Topics");
+                if (nested_topics && cJSON_IsArray(nested_topics)) {
+                    int nested_count = cJSON_GetArraySize(nested_topics);
+                    for (int j = 0; j < nested_count && shown < 5; j++) {
+                        cJSON* nested = cJSON_GetArrayItem(nested_topics, j);
+                        cJSON* n_text = cJSON_GetObjectItem(nested, "Text");
+                        cJSON* n_url = cJSON_GetObjectItem(nested, "FirstURL");
+
+                        if (n_text && strlen(n_text->valuestring) > 0) {
+                            offset += snprintf(*result + offset, buffer_size - offset,
+                                             "%d. %s\n", shown + 1, n_text->valuestring);
+                            if (n_url && strlen(n_url->valuestring) > 0) {
+                                offset += snprintf(*result + offset, buffer_size - offset,
+                                                 "   %s\n", n_url->valuestring);
+                            }
+                            shown++;
+                        }
+                    }
+                }
+                continue;
+            }
+
+            if (text && strlen(text->valuestring) > 0) {
+                offset += snprintf(*result + offset, buffer_size - offset,
+                                 "%d. %s\n", shown + 1, text->valuestring);
+                if (first_url && strlen(first_url->valuestring) > 0) {
+                    offset += snprintf(*result + offset, buffer_size - offset,
+                                     "   %s\n", first_url->valuestring);
+                }
+                shown++;
+            }
+        }
+    }
+
+    // Check if we got any results
+    if (offset <= (int)strlen(query) + 20) {
+        offset = snprintf(*result, buffer_size,
+                         "🔍 搜索结果: %s\n\n"
+                         "未找到相关结果。\n"
+                         "建议尝试其他关键词或检查网络连接。",
+                         query);
+    }
+
+    cJSON_Delete(json);
+    *result_len = offset;
     return 0;
 }
 
@@ -504,7 +629,6 @@ int tool_get_weather(ToolArgs* args, char** result, int* result_len) {
         return -1;
     }
     
-#ifdef HAVE_CURL
     // Build URL for wttr.in API (format=j1 for JSON)
     char url[512];
     char* encoded_location = http_url_encode(location);
@@ -619,15 +743,6 @@ int tool_get_weather(ToolArgs* args, char** result, int* result_len) {
     free(area_name);
     
     return 0;
-#else
-    // Fallback when curl is not available
-    *result = (char*)malloc(256);
-    if (*result) {
-        snprintf(*result, 256, "%s天气：20°C，局部多云，湿度：50%% (未启用HTTP)", location);
-        *result_len = strlen(*result);
-    }
-    return 0;
-#endif
 }
 
 // List directory tool
