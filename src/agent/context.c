@@ -59,6 +59,46 @@ typedef struct {
     int count;
 } ToolCallList;
 
+// 流式消息状态
+static bool g_stream_active = false;
+
+// AI 流式回调函数
+static void stream_callback(const char* chunk, const char* accumulated, void* user_data) {
+    (void)user_data;  // unused
+    
+    // 查找支持流式的渠道（飞书 API 模式）
+    ChannelInstance *feishu = channel_first_of_type(CHANNEL_FEISHU);
+    if (!feishu || !feishu->stream_update) {
+        return;
+    }
+    
+    // 如果是第一个 chunk，启动流式消息
+    if (!g_stream_active) {
+        if (feishu->stream_start) {
+            feishu->stream_start(feishu, accumulated);
+            g_stream_active = true;
+            log_debug("[Stream] Started stream message");
+        }
+    } else {
+        // 更新流式消息
+        if (feishu->stream_update) {
+            feishu->stream_update(feishu, accumulated);
+        }
+    }
+}
+
+// 结束流式消息
+static void end_stream_message(void) {
+    if (!g_stream_active) return;
+    
+    ChannelInstance *feishu = channel_first_of_type(CHANNEL_FEISHU);
+    if (feishu && feishu->stream_end) {
+        feishu->stream_end(feishu);
+        log_debug("[Stream] Ended stream message");
+    }
+    g_stream_active = false;
+}
+
 // Global agent manager
 AgentNode* g_agent_node_list = NULL;
 pthread_mutex_t g_agent_node_list_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -652,6 +692,13 @@ void* agent_node_worker_thread(void* arg) {
                     log_debug("Calling AI model with %d messages in context\n", context->count);
                 }
                 
+                // 设置流式回调（如果 AI 配置了 stream 模式）
+                AIProvider* provider = ai_model_get_provider();
+                if (provider && provider->config.stream) {
+                    ai_model_set_stream_callback(stream_callback, NULL);
+                    g_stream_active = false;  // 重置流式状态
+                }
+                
                 // Use configured system prompt or default
                 // TODO: Fix g_config.agent.system_prompt corruption issue
                 // For now, always use default system prompt
@@ -659,10 +706,15 @@ void* agent_node_worker_thread(void* arg) {
                 const char* system_prompt = DEFAULT_SYSTEM_PROMPT;
                 log_debug("Using DEFAULT_SYSTEM_PROMPT: %p", (void*)system_prompt);
                 AIModelResponse* response = ai_model_send_messages(context, system_prompt);
+                
+                // AI 调用结束后清理流式回调
+                ai_model_set_stream_callback(NULL, NULL);
+                
                 if (!response) {
                     if (g_config.debug) {
                         log_debug("No response from AI model\n");
                     }
+                    end_stream_message();  // 结束流式消息
                     break;
                 }
                 
@@ -763,13 +815,24 @@ void* agent_node_worker_thread(void* arg) {
                         if (g_config.debug) {
                             log_debug("Sending message to all connected channels\n");
                         }
-                        channel_send_message_to_all(response->content);
+                        
+                        // 结束流式消息（如果流式模式已启动）
+                        end_stream_message();
+                        
+                        // 非流式渠道仍然需要发送完整消息
+                        // 流式渠道已经在回调中处理了
+                        ChannelInstance *current = channel_first_of_type(CHANNEL_FEISHU);
+                        if (!current || !current->stream_update || !g_stream_active) {
+                            // 如果没有流式渠道或流式未激活，发送到所有渠道
+                            channel_send_message_to_all(response->content);
+                        }
                         
                         ai_model_free_response(response);
                         break;
                     }
                 } else {
                     printf("\n[AI Error]: %s\n\n", response->error);
+                    end_stream_message();  // 结束流式消息
                     ai_model_free_response(response);
                     break;
                 }

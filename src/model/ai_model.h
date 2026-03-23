@@ -21,6 +21,14 @@ typedef AIProviderConfig AIModelConfig;
 // 响应（复用 Provider 响应）
 typedef AIProviderResponse AIModelResponse;
 
+// ==================== 流式回调 ====================
+
+// 流式输出回调函数类型 (chunk: 当前片段, accumulated: 累积内容)
+typedef void (*AIStreamCallback)(const char* chunk, const char* accumulated, void* user_data);
+
+// 设置当前 provider 的流式回调
+void ai_model_set_stream_callback(AIStreamCallback callback, void* user_data);
+
 // ==================== 统一入口 API ====================
 
 // 初始化/清理

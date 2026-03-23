@@ -30,6 +30,7 @@ struct ChannelInstance {
     bool connected;              // 是否已连接
     void *config;                // 渠道特定配置
     void *user_data;             // 用户数据
+    void *stream_ctx;            // 流式消息上下文
     
     // Callback functions
     void (*connect)(ChannelInstance *channel);
@@ -37,6 +38,12 @@ struct ChannelInstance {
     bool (*send_message)(ChannelInstance *channel, const char *message);
     bool (*receive_message)(ChannelInstance *channel, const char *message);
     void (*cleanup)(ChannelInstance *channel);
+    
+    // 流式发送回调 (可选，用于打字机效果)
+    bool (*stream_send)(ChannelInstance *channel, const char *message);
+    bool (*stream_start)(ChannelInstance *channel, const char *initial_content);
+    bool (*stream_update)(ChannelInstance *channel, const char *content);
+    bool (*stream_end)(ChannelInstance *channel);
     
     ChannelInstance *next;       // 链表下一个节点
 };
@@ -104,6 +111,15 @@ bool channel_send_message(ChannelInstance *channel, const char *message);
 bool channel_send_message_by_id(const char *id, const char *message);
 bool channel_send_message_to_all(const char *message);
 bool channel_send_message_to_type(ChannelType type, const char *message);
+bool channel_stream_send(ChannelInstance *channel, const char *message);
+bool channel_stream_send_by_id(const char *id, const char *message);
+
+// 流式消息操作 (用于实时更新消息内容)
+bool channel_stream_start(ChannelInstance *channel, const char *initial_content);
+bool channel_stream_update(ChannelInstance *channel, const char *content);
+bool channel_stream_end(ChannelInstance *channel);
+void channel_stream_end_all(void);  // 结束所有渠道的流式消息
+
 bool channel_enable(ChannelInstance *channel);
 bool channel_disable(ChannelInstance *channel);
 bool channel_connect(ChannelInstance *channel);

@@ -7,6 +7,14 @@
 static AIProvider* g_provider = NULL;
 static AIProviderConfig g_default_config = {0};
 
+// 设置流式回调（存储在当前 provider 的配置中）
+void ai_model_set_stream_callback(AIStreamCallback callback, void* user_data) {
+    if (g_provider) {
+        g_provider->config.stream_callback = callback;
+        g_provider->config.stream_user_data = user_data;
+    }
+}
+
 bool ai_model_init(const AIModelConfig* config) {
     if (g_provider) {
         log_debug("AI model already initialized");

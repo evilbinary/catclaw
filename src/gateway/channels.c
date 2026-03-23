@@ -264,6 +264,12 @@ bool channel_send_message(ChannelInstance *channel, const char *message) {
         return false;
     }
     
+    // 如果渠道实现了流式发送回调，优先使用流式发送
+    // 具体渠道（如飞书）会根据配置决定是否真正使用流式模式
+    if (channel->stream_send) {
+        return channel->stream_send(channel, message);
+    }
+    
     return channel->send_message(channel, message);
 }
 
@@ -298,6 +304,76 @@ bool channel_send_message_to_type(ChannelType type, const char *message) {
         current = current->next;
     }
     return success;
+}
+
+// 流式发送消息 (打字机效果)
+bool channel_stream_send(ChannelInstance *channel, const char *message) {
+    if (!channel) {
+        fprintf(stderr, "[Channel] Invalid channel\n");
+        return false;
+    }
+    
+    if (!channel->enabled) {
+        fprintf(stderr, "[Channel] '%s' is disabled\n", channel->name);
+        return false;
+    }
+    
+    if (!channel->connected) {
+        fprintf(stderr, "[Channel] '%s' is not connected\n", channel->name);
+        return false;
+    }
+    
+    // 如果渠道实现了流式发送回调，使用它
+    if (channel->stream_send) {
+        return channel->stream_send(channel, message);
+    }
+    
+    // 否则回退到普通发送
+    fprintf(stderr, "[Channel] '%s' does not support stream mode, falling back to normal send\n", channel->name);
+    return channel->send_message(channel, message);
+}
+
+bool channel_stream_send_by_id(const char *id, const char *message) {
+    ChannelInstance *channel = channel_find(id);
+    return channel_stream_send(channel, message);
+}
+
+// 开始流式消息
+bool channel_stream_start(ChannelInstance *channel, const char *initial_content) {
+    if (!channel || !channel->enabled || !channel->connected) return false;
+    if (channel->stream_start) {
+        return channel->stream_start(channel, initial_content);
+    }
+    return false;
+}
+
+// 更新流式消息
+bool channel_stream_update(ChannelInstance *channel, const char *content) {
+    if (!channel || !channel->enabled || !channel->connected) return false;
+    if (channel->stream_update) {
+        return channel->stream_update(channel, content);
+    }
+    return false;
+}
+
+// 结束流式消息
+bool channel_stream_end(ChannelInstance *channel) {
+    if (!channel) return false;
+    if (channel->stream_end) {
+        return channel->stream_end(channel);
+    }
+    return false;
+}
+
+// 结束所有渠道的流式消息
+void channel_stream_end_all(void) {
+    ChannelInstance *current = g_channel_manager.head;
+    while (current) {
+        if (current->stream_end) {
+            current->stream_end(current);
+        }
+        current = current->next;
+    }
 }
 
 bool channel_enable(ChannelInstance *channel) {

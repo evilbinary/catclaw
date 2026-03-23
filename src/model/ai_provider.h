@@ -5,6 +5,9 @@
 #include <stddef.h>
 #include "session/message.h"
 
+// 流式回调函数类型 (chunk: 当前片段, accumulated: 累积内容)
+typedef void (*AIStreamCallback)(const char* chunk, const char* accumulated, void* user_data);
+
 // Provider 配置
 typedef struct {
     char* api_key;
@@ -14,6 +17,8 @@ typedef struct {
     float temperature;
     int max_tokens;
     bool stream;
+    AIStreamCallback stream_callback;  // 流式回调
+    void* stream_user_data;            // 流式回调用户数据
 } AIProviderConfig;
 
 // 响应结构

@@ -33,4 +33,26 @@ void feishu_message_free(FeishuMessage *msg);
 // 回复飞书消息
 bool feishu_reply_message(const char *channel_id, const char *message_id, const char *content);
 
+// ==================== 流式消息 API (打字机效果) ====================
+
+// 流式消息上下文
+typedef struct {
+    char *message_id;      // 流式消息ID
+    char *channel_id;      // 渠道ID
+    char *access_token;    // 访问令牌
+    bool active;           // 是否激活
+} FeishuStreamContext;
+
+// 创建流式消息 (返回 message_id，需调用者释放)
+char* feishu_stream_create(const char *channel_id, const char *receive_id, const char *receive_id_type);
+
+// 更新流式消息内容
+bool feishu_stream_update(const char *channel_id, const char *message_id, const char *content);
+
+// 结束流式消息
+bool feishu_stream_finish(const char *channel_id, const char *message_id);
+
+// 流式发送完整消息 (模拟打字机效果，按 stream_speed 更新内容)
+bool feishu_stream_send(const char *channel_id, const char *message, int speed_chars_per_sec);
+
 #endif // FEISHU_H
