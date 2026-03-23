@@ -866,9 +866,14 @@ bool ws_client_start(WsClient *client) {
     }
     client->thread = (void *)(uintptr_t)thread;
 #else
-    // Windows: For simplicity, use a blocking approach
-    // In production, use CreateThread
-    ws_client_event_loop(client);
+    // Windows: Create a thread for the event loop
+    HANDLE thread = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)ws_client_event_loop, client, 0, NULL);
+    if (thread == NULL) {
+        log_error("[WSClient] Failed to create event loop thread");
+        client->running = false;
+        return false;
+    }
+    client->thread = thread;
 #endif
     
     log_info("[WSClient] Event loop started");
@@ -885,6 +890,12 @@ void ws_client_stop(WsClient *client) {
     if (client->thread) {
         pthread_t thread = (pthread_t)(uintptr_t)client->thread;
         pthread_join(thread, NULL);
+        client->thread = NULL;
+    }
+#else
+    if (client->thread) {
+        WaitForSingleObject((HANDLE)client->thread, INFINITE);
+        CloseHandle((HANDLE)client->thread);
         client->thread = NULL;
     }
 #endif
