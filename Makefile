@@ -1,4 +1,4 @@
-CC = gcc-13
+CC = gcc
 CFLAGS = -Wall -Wextra -O2 -I. -I./src
 
 # Platform-specific flags
