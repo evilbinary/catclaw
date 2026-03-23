@@ -105,25 +105,88 @@ static char* feishu_get_valid_token(FeishuConfig *config) {
     return config->access_token;
 }
 
+// 判断消息是否包含 markdown 格式
+static bool is_markdown_message(const char *message) {
+    if (!message) return false;
+    // 检查常见的 markdown 标记
+    const char *md_patterns[] = {
+        "**",        // 粗体
+        "__",        // 粗体
+        "*",         // 斜体
+        "_",         // 斜体
+        "~~",        // 删除线
+        "`",         // 代码
+        "```",       // 代码块
+        "#",         // 标题
+        "- ",        // 列表
+        "* ",        // 列表
+        "1. ",       // 有序列表
+        "> ",        // 引用
+        "[",         // 链接
+        "!["         // 图片
+    };
+    for (int i = 0; i < sizeof(md_patterns) / sizeof(md_patterns[0]); i++) {
+        if (strstr(message, md_patterns[i])) {
+            return true;
+        }
+    }
+    return false;
+}
+
 // 通过 webhook 发送消息
 static bool feishu_send_via_webhook(FeishuConfig *config, const char *message) {
     if (!config->webhook_url) return false;
     
-    // 构建消息体
+    // 打印原始消息
+    log_info("[Feishu] Webhook sending message:\n%s", message);
+    
     cJSON *body = cJSON_CreateObject();
-    cJSON *content = cJSON_CreateObject();
-    cJSON_AddStringToObject(content, "text", message);
-    cJSON_AddStringToObject(body, "msg_type", "text");
-    cJSON_AddItemToObject(body, "content", content);
+    
+    // 检测是否为 markdown 格式，使用 interactive 卡片发送
+    if (is_markdown_message(message)) {
+        log_info("[Feishu] Detected markdown, using interactive card with lark_md");
+        cJSON *card = cJSON_CreateObject();
+        cJSON *elements = cJSON_CreateArray();
+        cJSON *element = cJSON_CreateObject();
+        cJSON *text = cJSON_CreateObject();
+        
+        cJSON_AddStringToObject(text, "tag", "lark_md");
+        cJSON_AddStringToObject(text, "content", message);
+        
+        cJSON_AddStringToObject(element, "tag", "div");
+        cJSON_AddItemToObject(element, "text", text);
+        cJSON_AddItemToArray(elements, element);
+        
+        cJSON_AddItemToObject(card, "elements", elements);
+        cJSON_AddStringToObject(body, "msg_type", "interactive");
+        cJSON_AddItemToObject(body, "card", card);
+    } else {
+        log_info("[Feishu] Plain text message");
+        // 普通文本消息
+        cJSON *content = cJSON_CreateObject();
+        cJSON_AddStringToObject(content, "text", message);
+        cJSON_AddStringToObject(body, "msg_type", "text");
+        cJSON_AddItemToObject(body, "content", content);
+    }
     
     char *body_str = cJSON_PrintUnformatted(body);
     cJSON_Delete(body);
+    
+    // 打印发送的 JSON
+    log_info("[Feishu] Webhook request body:\n%s", body_str);
     
     // 发送请求
     HttpResponse *resp = http_post(config->webhook_url, body_str);
     free(body_str);
     
-    if (!resp) return false;
+    if (!resp) {
+        log_error("[Feishu] Webhook request failed: no response");
+        return false;
+    }
+    
+    // 打印响应内容
+    log_info("[Feishu] Webhook response: status=%d, body=%s", 
+             resp->status_code, resp->body ? resp->body : "(null)");
     
     bool success = resp->success && resp->status_code == 200;
     http_response_free(resp);
@@ -136,6 +199,9 @@ static bool feishu_send_via_api(FeishuConfig *config, const char *message) {
     char *token = feishu_get_valid_token(config);
     if (!token) return false;
     
+    // 打印原始消息
+    log_info("[Feishu] API sending message:\n%s", message);
+    
     // 构建请求URL
     char url[256];
     snprintf(url, sizeof(url), "%s/im/v1/messages?receive_id_type=%s",
@@ -143,18 +209,51 @@ static bool feishu_send_via_api(FeishuConfig *config, const char *message) {
     
     // 构建请求体
     cJSON *body = cJSON_CreateObject();
-    cJSON *content = cJSON_CreateObject();
-    cJSON_AddStringToObject(content, "text", message);
-    char *content_str = cJSON_PrintUnformatted(content);
-    cJSON_Delete(content);
+    char *content_str = NULL;
+    const char *msg_type = "text";
+    
+    // 检测是否为 markdown 格式
+    if (is_markdown_message(message)) {
+        log_info("[Feishu] Detected markdown, using interactive card with lark_md");
+        // 使用 interactive 卡片发送 markdown
+        cJSON *card = cJSON_CreateObject();
+        cJSON *elements = cJSON_CreateArray();
+        cJSON *element = cJSON_CreateObject();
+        cJSON *text = cJSON_CreateObject();
+        
+        cJSON_AddStringToObject(text, "tag", "lark_md");
+        cJSON_AddStringToObject(text, "content", message);
+        
+        cJSON_AddStringToObject(element, "tag", "div");
+        cJSON_AddItemToObject(element, "text", text);
+        cJSON_AddItemToArray(elements, element);
+        
+        cJSON_AddItemToObject(card, "elements", elements);
+        
+        cJSON *content = cJSON_CreateObject();
+        cJSON_AddItemToObject(content, "card", card);
+        content_str = cJSON_PrintUnformatted(content);
+        cJSON_Delete(content);
+        msg_type = "interactive";
+    } else {
+        log_info("[Feishu] Plain text message");
+        // 普通文本消息
+        cJSON *content = cJSON_CreateObject();
+        cJSON_AddStringToObject(content, "text", message);
+        content_str = cJSON_PrintUnformatted(content);
+        cJSON_Delete(content);
+    }
     
     cJSON_AddStringToObject(body, "receive_id", config->receive_id);
-    cJSON_AddStringToObject(body, "msg_type", "text");
+    cJSON_AddStringToObject(body, "msg_type", msg_type);
     cJSON_AddStringToObject(body, "content", content_str);
     free(content_str);
     
     char *body_str = cJSON_PrintUnformatted(body);
     cJSON_Delete(body);
+    
+    // 打印发送的 JSON
+    log_info("[Feishu] API request body:\n%s", body_str);
     
     // 构建请求头
     char auth_header[512];
@@ -174,7 +273,14 @@ static bool feishu_send_via_api(FeishuConfig *config, const char *message) {
     HttpResponse *resp = http_request(&req);
     free(body_str);
     
-    if (!resp) return false;
+    if (!resp) {
+        log_error("[Feishu] API request failed: no response");
+        return false;
+    }
+    
+    // 打印响应内容
+    log_info("[Feishu] API response: status=%d, body=%s", 
+             resp->status_code, resp->body ? resp->body : "(null)");
     
     bool success = resp->success && resp->status_code == 200;
     http_response_free(resp);
