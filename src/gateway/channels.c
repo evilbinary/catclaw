@@ -1,6 +1,7 @@
 #include "channels.h"
 #include "agent/agent.h"
 #include "common/config.h"
+#include "common/log.h"
 #include "telegram.h"
 #include "discord.h"
 #include "feishu.h"
@@ -568,10 +569,13 @@ bool channels_load_from_config(void) {
 
 // ==================== 流式消息任务实现 ====================
 
-#define STREAM_MIN_INTERVAL_MS 100  // 流式消息最小间隔（毫秒）
+#define STREAM_MIN_INTERVAL_MS 50  // 流式消息最小间隔（毫秒）
 
 // 处理单个流式任务
 static void process_stream_task(ChannelInstance *channel, StreamTaskType type, const char *content) {
+    struct timespec start, end;
+    clock_gettime(CLOCK_MONOTONIC, &start);
+
     if (type == STREAM_TASK_START) {
         // 开始流式消息
         if (channel->stream_start) {
@@ -587,8 +591,13 @@ static void process_stream_task(ChannelInstance *channel, StreamTaskType type, c
         if (channel->stream_update) {
             channel->stream_update(channel, content);
         }
-        // 延迟，避免频率限制
-        usleep(STREAM_MIN_INTERVAL_MS * 1000);
+        // 飞书 API 已经很慢(300-800ms)，不需要额外延迟
+    }
+
+    clock_gettime(CLOCK_MONOTONIC, &end);
+    long cost_ms = (end.tv_sec - start.tv_sec) * 1000 + (end.tv_nsec - start.tv_nsec) / 1000000;
+    if (type == STREAM_TASK_UPDATE) {
+        log_debug("[TIMING] process_task UPDATE: cost=%ldms, len=%zu", cost_ms, content ? strlen(content) : 0);
     }
 }
 

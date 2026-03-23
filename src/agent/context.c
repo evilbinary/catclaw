@@ -70,8 +70,8 @@ static bool g_stream_active = false;
 static int g_last_sent_len = 0;
 static struct timespec g_last_update_time = {0, 0};
 
-#define STREAM_MIN_INTERVAL_MS  150  // 最小更新间隔
-#define STREAM_MIN_CHARS        5    // 最小新增字符数
+#define STREAM_MIN_INTERVAL_MS  300  // 最小更新间隔（配合飞书API延迟）
+#define STREAM_MIN_CHARS        50   // 最小新增字符数
 
 // 用于遍历 channel 时的数据传递
 typedef struct {
@@ -137,6 +137,9 @@ static void stream_callback(const char* chunk, const char* accumulated, void* us
     if (should_update) {
         g_last_sent_len = current_len;
         g_last_update_time = now;
+        
+        log_debug("[TIMING] AI callback: elapsed=%ldms, chars_added=%d, len=%d", 
+                  elapsed_ms, chars_added, current_len);
         
         StreamCallbackData data = { .content = accumulated };
         channels_foreach(stream_update_iterator, &data);

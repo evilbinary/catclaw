@@ -858,6 +858,9 @@ char* feishu_stream_create(const char *channel_id, const char *receive_id, const
 
 // 更新流式消息内容 - 使用消息patch API
 bool feishu_stream_update(const char *channel_id, const char *message_id, const char *content) {
+    struct timespec start, end;
+    clock_gettime(CLOCK_MONOTONIC, &start);
+
     if (!channel_id || !message_id || !content) return false;
     
     // 查找对应的飞书渠道实例
@@ -925,6 +928,10 @@ bool feishu_stream_update(const char *channel_id, const char *message_id, const 
     
     HttpResponse *resp = http_request(&req);
     free(body_str);
+
+    clock_gettime(CLOCK_MONOTONIC, &end);
+    long cost_ms = (end.tv_sec - start.tv_sec) * 1000 + (end.tv_nsec - start.tv_nsec) / 1000000;
+    log_debug("[TIMING] feishu HTTP: cost=%ldms, len=%zu", cost_ms, strlen(content));
     
     if (!resp) {
         log_error("[Feishu] Stream update request failed: no response");
