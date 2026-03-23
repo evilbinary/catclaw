@@ -115,7 +115,6 @@ static bool create_directory_recursive(const char* path) {
     // Create directories recursively
     char temp_path[512];
     strcpy(temp_path, dir);
-    char* p;
 
 #ifdef _WIN32
     p = temp_path;

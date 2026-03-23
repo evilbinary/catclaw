@@ -255,8 +255,32 @@ static AIProviderResponse* openai_send_messages(AIProvider* self,
     g_stream_ctx = &stream_ctx;
 
     // 构建 URL
-    const char* url = self->config.base_url ? self->config.base_url :
-                      "https://api.openai.com/v1/chat/completions";
+    char url[512];
+    if (self->config.base_url) {
+        size_t base_len = strlen(self->config.base_url);
+        // 检查 base_url 是否已经包含完整路径
+        if (strstr(self->config.base_url, "/chat/completions")) {
+            // base_url 已经包含完整路径，直接使用
+            strncpy(url, self->config.base_url, sizeof(url) - 1);
+        } else if (strstr(self->config.base_url, "/api/")) {
+            // base_url 包含 /api/ 路径（如 Ollama 的 /api/generate），直接使用
+            strncpy(url, self->config.base_url, sizeof(url) - 1);
+        } else if (base_len >= 3 && strcmp(self->config.base_url + base_len - 3, "/v1") == 0) {
+            // base_url 以 /v1 结尾，添加 /chat/completions
+            snprintf(url, sizeof(url), "%s/chat/completions", self->config.base_url);
+        } else if (strstr(self->config.base_url, "/v1/")) {
+            // base_url 包含 /v1/ 但没有 /chat/completions，可能是其他路径
+            strncpy(url, self->config.base_url, sizeof(url) - 1);
+        } else {
+            // base_url 只包含主机地址，添加 /v1/chat/completions
+            snprintf(url, sizeof(url), "%s/v1/chat/completions", self->config.base_url);
+        }
+        url[sizeof(url) - 1] = '\0';
+    } else {
+        strncpy(url, "https://api.openai.com/v1/chat/completions", sizeof(url) - 1);
+        url[sizeof(url) - 1] = '\0';
+    }
+    log_debug("[OpenAI] Request URL: %s", url);
 
     // 构建请求头
     struct curl_slist* headers = NULL;

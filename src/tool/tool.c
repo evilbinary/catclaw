@@ -6,7 +6,9 @@
 #include <errno.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#ifndef _WIN32
 #include <pwd.h>
+#endif
 
 #include "tool.h"
 #include "common/cJSON.h"
@@ -27,10 +29,16 @@ static char* resolve_path(const char* path) {
     // Home directory expansion
     if (path[0] == '~') {
         const char* home = getenv("HOME");
+#ifdef _WIN32
+        if (!home) {
+            home = getenv("USERPROFILE");
+        }
+#else
         if (!home) {
             struct passwd* pw = getpwuid(getuid());
             if (pw) home = pw->pw_dir;
         }
+#endif
         if (home) {
             size_t home_len = strlen(home);
             size_t path_len = strlen(path);

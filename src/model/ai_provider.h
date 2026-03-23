@@ -10,6 +10,7 @@ typedef struct {
     char* api_key;
     char* model_name;
     char* base_url;
+    char* provider;  // 提供商类型 (openai/ollama/anthropic/gemini)
     float temperature;
     int max_tokens;
     bool stream;

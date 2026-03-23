@@ -18,7 +18,10 @@
 #ifdef _WIN32
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#include <windows.h>
 #pragma comment(lib, "ws2_32.lib")
+// Define sleep macro for Windows
+#define sleep(seconds) Sleep((seconds) * 1000)
 #else
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -392,6 +395,22 @@ bool ws_client_connect(WsClient *client) {
     if (client->state == WS_CLIENT_CONNECTED) {
         return true;
     }
+    
+#ifdef _WIN32
+    // Initialize Windows Sockets
+    static bool ws_initialized = false;
+    if (!ws_initialized) {
+        WSADATA wsaData;
+        int result = WSAStartup(MAKEWORD(2, 2), &wsaData);
+        if (result != 0) {
+            log_error("[WSClient] WSAStartup failed: %d", result);
+            client->state = WS_CLIENT_ERROR;
+            return false;
+        }
+        ws_initialized = true;
+        log_debug("[WSClient] Windows Sockets initialized");
+    }
+#endif
     
     client->state = WS_CLIENT_CONNECTING;
     if (client->on_state_change) {
@@ -863,9 +882,14 @@ bool ws_client_start(WsClient *client) {
     }
     client->thread = (void *)(uintptr_t)thread;
 #else
-    // Windows: For simplicity, use a blocking approach
-    // In production, use CreateThread
-    ws_client_event_loop(client);
+    // Windows: Create a thread for the event loop
+    HANDLE thread = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)ws_client_event_loop, client, 0, NULL);
+    if (thread == NULL) {
+        log_error("[WSClient] Failed to create event loop thread");
+        client->running = false;
+        return false;
+    }
+    client->thread = thread;
 #endif
     
     log_info("[WSClient] Event loop started");
@@ -882,6 +906,12 @@ void ws_client_stop(WsClient *client) {
     if (client->thread) {
         pthread_t thread = (pthread_t)(uintptr_t)client->thread;
         pthread_join(thread, NULL);
+        client->thread = NULL;
+    }
+#else
+    if (client->thread) {
+        WaitForSingleObject((HANDLE)client->thread, INFINITE);
+        CloseHandle((HANDLE)client->thread);
         client->thread = NULL;
     }
 #endif

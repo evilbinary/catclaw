@@ -266,36 +266,11 @@ int main(int argc, char *argv[]) {
         printf("catclaw> ");
         fflush(stdout);
         
-#ifdef _WIN32
-        // Use Windows API to read UTF-8 input
-        wchar_t wcommand[1024];
-        DWORD read;
-        HANDLE hStdin = GetStdHandle(STD_INPUT_HANDLE);
-        if (ReadConsoleW(hStdin, wcommand, 1024, &read, NULL)) {
-            // Remove carriage return and newline
-            while (read > 0 && (wcommand[read-1] == L'\r' || wcommand[read-1] == L'\n')) {
-                wcommand[--read] = L'\0';
-            }
-            // Convert UTF-16 to UTF-8
-            int len = WideCharToMultiByte(CP_UTF8, 0, wcommand, -1, command, sizeof(command), NULL, NULL);
-            if (len > 0) {
-                command[len-1] = '\0';  // Remove null terminator
-            } else {
-                command[0] = '\0';
-            }
-        } else {
-            // Fallback to fgets
-            if (fgets(command, sizeof(command), stdin) == NULL) {
-                break;
-            }
-            command[strcspn(command, "\n")] = 0;
-        }
-#else
+        // Use standard fgets for all platforms
         if (fgets(command, sizeof(command), stdin) == NULL) {
             break;
         }
         command[strcspn(command, "\n")] = 0;
-#endif
         
         // Debug: print raw input
         // log_debug("Raw input length: %zu, content: ", strlen(command));

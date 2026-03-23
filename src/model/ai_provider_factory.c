@@ -132,18 +132,59 @@ AIProviderResponse* ai_provider_response_create(const char* content, bool succes
     AIProviderResponse* resp = (AIProviderResponse*)calloc(1, sizeof(AIProviderResponse));
     if (!resp) return NULL;
     
-    resp->content = content ? strdup(content) : NULL;
+    if (content) {
+        size_t content_len = strlen(content);
+        resp->content = (char*)malloc(content_len + 1);
+        if (resp->content) {
+            memcpy(resp->content, content, content_len + 1);
+        } else {
+            log_error("[AIProvider] Failed to allocate content");
+        }
+    }
     resp->success = success;
-    resp->error = error ? strdup(error) : NULL;
+    if (error) {
+        size_t error_len = strlen(error);
+        resp->error = (char*)malloc(error_len + 1);
+        if (resp->error) {
+            memcpy(resp->error, error, error_len + 1);
+        } else {
+            log_error("[AIProvider] Failed to allocate error");
+        }
+    }
     resp->tool_calls = NULL;
+    
+    log_debug("[AIProvider] Response created: %p, content=%p (\"%.50s...\"), error=%p", 
+              (void*)resp, (void*)resp->content, 
+              resp->content ? resp->content : "(null)",
+              (void*)resp->error);
     
     return resp;
 }
 
 void ai_provider_response_destroy(AIProviderResponse* response) {
     if (!response) return;
-    free(response->content);
-    free(response->error);
-    free(response->tool_calls);
+    
+    log_debug("[AIProvider] Response destroy: %p, content=%p (\"%.50s...\"), error=%p", 
+              (void*)response, (void*)response->content,
+              response->content ? response->content : "(null)",
+              (void*)response->error);
+    
+    // 防御性检查：确保指针不是野指针
+    if (response->content) {
+        log_debug("[AIProvider] Freeing content at %p", (void*)response->content);
+        free(response->content);
+        response->content = NULL;
+    }
+    if (response->error) {
+        log_debug("[AIProvider] Freeing error at %p", (void*)response->error);
+        free(response->error);
+        response->error = NULL;
+    }
+    if (response->tool_calls) {
+        log_debug("[AIProvider] Freeing tool_calls at %p", (void*)response->tool_calls);
+        free(response->tool_calls);
+        response->tool_calls = NULL;
+    }
+    log_debug("[AIProvider] Freeing response at %p", (void*)response);
     free(response);
 }
