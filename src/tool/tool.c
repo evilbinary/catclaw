@@ -916,3 +916,65 @@ int tool_web_fetch(ToolArgs* args, char** result, int* result_len) {
     http_response_free(resp);
     return 0;
 }
+
+// Shell execute tool - run shell commands
+int tool_shell_execute(ToolArgs* args, char** result, int* result_len) {
+    const char* cmd = tool_args_get(args, "command");
+    if (!cmd) cmd = tool_args_get(args, "cmd");
+    if (!cmd) cmd = tool_args_get(args, "arg");
+    
+    if (!cmd || strlen(cmd) == 0) {
+        *result = strdup("Error: No command provided");
+        *result_len = strlen(*result);
+        return -1;
+    }
+    
+    // Security check: block dangerous commands
+    const char* dangerous[] = {
+        "rm -rf /", "mkfs", "dd if=", ":(){:|:&};:",
+        "chmod -R 777 /", "chown -R", "> /dev/", NULL
+    };
+    for (int i = 0; dangerous[i]; i++) {
+        if (strstr(cmd, dangerous[i])) {
+            *result = strdup("Error: Command blocked for security");
+            *result_len = strlen(*result);
+            return -1;
+        }
+    }
+    
+    // Execute command
+    FILE* fp = popen(cmd, "r");
+    if (!fp) {
+        *result = strdup("Error: Failed to execute command");
+        *result_len = strlen(*result);
+        return -1;
+    }
+    
+    // Read output
+    size_t buf_size = 8192;
+    *result = (char*)malloc(buf_size);
+    if (!*result) {
+        pclose(fp);
+        *result = strdup("Error: Memory allocation failed");
+        *result_len = strlen(*result);
+        return -1;
+    }
+    
+    int offset = snprintf(*result, buf_size, "Command: %s\n\n", cmd);
+    
+    char line[1024];
+    while (fgets(line, sizeof(line), fp) && offset < (int)(buf_size - 1024)) {
+        offset += snprintf(*result + offset, buf_size - offset, "%s", line);
+    }
+    
+    int exit_code = pclose(fp);
+    
+    if (offset == (int)strlen(cmd) + 11) {
+        offset += snprintf(*result + offset, buf_size - offset, "(no output)\n");
+    }
+    
+    offset += snprintf(*result + offset, buf_size - offset, "\nExit code: %d", exit_code);
+    
+    *result_len = offset;
+    return 0;
+}
