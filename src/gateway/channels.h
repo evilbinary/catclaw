@@ -39,6 +39,17 @@ typedef struct StreamTaskNode {
     struct StreamTaskNode* next;
 } StreamTaskNode;
 
+// ==================== 消息结构 ====================
+
+// Incoming message structure (for unified handling)
+typedef struct {
+    const char* content;         // 消息内容
+    const char* sender_id;       // 发送者ID
+    const char* chat_id;         // 会话/聊天ID
+    const char* message_id;      // 消息ID
+    void* extra;                 // 渠道特定额外数据
+} ChannelIncomingMessage;
+
 // ==================== Channel 结构 ====================
 
 // Channel structure (single instance)
@@ -62,14 +73,17 @@ struct ChannelInstance {
     void (*connect)(ChannelInstance *channel);
     void (*disconnect)(ChannelInstance *channel);
     bool (*send_message)(ChannelInstance *channel, const char *message);
-    bool (*receive_message)(ChannelInstance *channel, const char *message);
     void (*cleanup)(ChannelInstance *channel);
-    
+
     // 流式发送回调 (可选，用于打字机效果)
     bool (*stream_send)(ChannelInstance *channel, const char *message);
     bool (*stream_start)(ChannelInstance *channel, const char *initial_content);
     bool (*stream_update)(ChannelInstance *channel, const char *content);
     bool (*stream_end)(ChannelInstance *channel);
+
+    // 消息接收回调 (可选，用于自定义处理逻辑)
+    // 返回: true=已处理并设置response, false=未处理(走默认流程)
+    bool (*receive_message)(ChannelInstance *channel, ChannelIncomingMessage *msg, char **response);
     
     ChannelInstance *next;       // 链表下一个节点
 };
@@ -124,6 +138,7 @@ typedef struct {
 bool channels_init(void);
 void channels_cleanup(void);
 void channels_status(void);
+char* channels_status_string(void);  // 返回状态字符串(需要调用者free)
 bool channels_load_from_config(void);
 
 // Functions - Channel Instance Management
@@ -158,6 +173,16 @@ bool channel_disconnect(ChannelInstance *channel);
 // Functions - Message Processing
 void channels_handle_websocket_message(const char *message);
 void channels_process_message(ChannelMessage *message);
+
+// 统一消息处理入口
+// 处理流程: 命令检查 -> on_incoming_message回调 -> agent处理
+// 返回: true=已处理(命令或回调处理), false=发送到agent
+// out_response: 如果已处理，返回响应内容(需要调用者free)
+bool channel_handle_incoming_message(ChannelInstance *channel, ChannelIncomingMessage *msg, char **out_response);
+
+// 构建带上下文的消息 (用于发送到agent)
+// 格式: [channel_type:sender_id:chat_id] content
+char* channel_build_context_message(ChannelInstance *channel, ChannelIncomingMessage *msg);
 
 // Functions - Utilities
 ChannelType channel_name_to_type(const char *name);

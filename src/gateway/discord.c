@@ -166,12 +166,6 @@ static bool discord_send_message(ChannelInstance *channel, const char *message) 
     return discord_send_via_api(config, message);
 }
 
-// 接收消息
-static bool discord_receive_message(ChannelInstance *channel, const char *message) {
-    printf("[Discord] Receiving message: %s\n", message);
-    return true;
-}
-
 // 初始化 Discord 渠道
 void discord_channel_init(ChannelInstance *channel, ChannelConfig *base_config) {
     // 创建 Discord 特定配置
@@ -194,7 +188,7 @@ void discord_channel_init(ChannelInstance *channel, ChannelConfig *base_config) 
     channel->connect = discord_connect;
     channel->disconnect = discord_disconnect;
     channel->send_message = discord_send_message;
-    channel->receive_message = discord_receive_message;
+    channel->receive_message = NULL;  // 使用默认消息处理流程
     channel->cleanup = discord_cleanup;
     
     printf("[Discord] Channel '%s' initialized\n", channel->name);

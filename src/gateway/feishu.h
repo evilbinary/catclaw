@@ -33,6 +33,9 @@ void feishu_message_free(FeishuMessage *msg);
 // 回复飞书消息
 bool feishu_reply_message(const char *channel_id, const char *message_id, const char *content);
 
+// 回复飞书消息（通过 chat_id/open_id）
+bool feishu_reply_to_chat(const char *chat_id, const char *content);
+
 // ==================== 流式消息 API (打字机效果) ====================
 
 // 流式消息上下文

@@ -1,5 +1,6 @@
 #include "channels.h"
 #include "agent/agent.h"
+#include "agent/command.h"
 #include "common/config.h"
 #include "common/log.h"
 #include "telegram.h"
@@ -41,13 +42,9 @@ static bool default_send_message(ChannelInstance *channel, const char *message) 
     return true;
 }
 
-static bool default_receive_message(ChannelInstance *channel, const char *message) {
-    printf("[Channel] Receiving message from %s: %s\n", channel->name, message);
-    return true;
-}
-
 static void default_cleanup(ChannelInstance *channel) {
     // Default cleanup does nothing
+    (void)channel;  // suppress unused parameter warning
 }
 
 // Create a new channel instance
@@ -78,8 +75,8 @@ static ChannelInstance* channel_create(const char *id, ChannelType type, Channel
     channel->connect = default_connect;
     channel->disconnect = default_disconnect;
     channel->send_message = default_send_message;
-    channel->receive_message = default_receive_message;
     channel->cleanup = default_cleanup;
+    channel->receive_message = NULL;  // 默认无自定义处理
     
     // Initialize type-specific implementation
     switch (type) {
@@ -204,6 +201,28 @@ void channels_status(void) {
                current->connected ? "connected" : "disconnected");
         current = current->next;
     }
+}
+
+char* channels_status_string(void) {
+    size_t size = 1024;
+    char* buf = (char*)malloc(size);
+    if (!buf) return NULL;
+
+    int offset = snprintf(buf, size, "Channels (%d):\n", g_channel_manager.count);
+    ChannelInstance* current = g_channel_manager.head;
+
+    while (current && offset < (int)(size - 128)) {
+        offset += snprintf(buf + offset, size - offset,
+            "  [%s] %s (%s): %s, %s\n",
+            current->id,
+            current->name,
+            channel_type_names[current->type],
+            current->enabled ? "启用" : "禁用",
+            current->connected ? "已连接" : "未连接");
+        current = current->next;
+    }
+
+    return buf;
 }
 
 ChannelInstance* channel_add(const char *id, ChannelType type, ChannelConfig *config) {
@@ -475,14 +494,72 @@ void channels_handle_websocket_message(const char *message) {
 
 void channels_process_message(ChannelMessage *message) {
     if (!message) return;
-    
+
     printf("[Channel] Processing message from %s (%s): %s\n",
            message->source ? message->source->name : "unknown",
            channel_type_names[message->source_type],
            message->content);
-    
+
     // Forward message to agent
     agent_send_message(message->content);
+}
+
+// 构建带上下文的消息
+char* channel_build_context_message(ChannelInstance *channel, ChannelIncomingMessage *msg) {
+    if (!channel || !msg || !msg->content) return NULL;
+
+    size_t size = 256 + strlen(msg->content);
+    char* buf = (char*)malloc(size);
+    if (!buf) return NULL;
+
+    snprintf(buf, size, "[%s:%s:%s] %s",
+             channel_type_names[channel->type],
+             msg->sender_id ? msg->sender_id : "unknown",
+             msg->chat_id ? msg->chat_id : (msg->message_id ? msg->message_id : "unknown"),
+             msg->content);
+
+    return buf;
+}
+
+// 统一消息处理入口
+bool channel_handle_incoming_message(ChannelInstance *channel, ChannelIncomingMessage *msg, char **out_response) {
+    if (!channel || !msg || !msg->content) {
+        return false;
+    }
+
+    // 1. 首先检查是否是命令
+    if (msg->content[0] == '/') {
+        char* cmd_response = command_handle(msg->content);
+        if (cmd_response) {
+            log_info("[Channel] Command received on %s: %s", channel->name, msg->content);
+            *out_response = cmd_response;
+            return true;  // 命令已处理
+        }
+    }
+
+    // 2. 调用渠道特定的消息接收回调
+    if (channel->receive_message) {
+        char* custom_response = NULL;
+        if (channel->receive_message(channel, msg, &custom_response)) {
+            if (custom_response) {
+                *out_response = custom_response;
+            }
+            return true;  // 渠道已处理
+        }
+        // 渠道未处理，继续默认流程
+        if (custom_response) {
+            free(custom_response);
+        }
+    }
+
+    // 3. 发送到 agent 处理
+    if (agent_send_message(msg->content)) {
+        log_info("[Channel] Message sent to agent from %s", channel->name);
+    } else {
+        log_error("[Channel] Failed to send message to agent from %s", channel->name);
+    }
+
+    return false;  // 消息已发送到 agent，没有即时响应
 }
 
 ChannelType channel_name_to_type(const char *name) {
@@ -678,3 +755,4 @@ void channel_stream_submit_task(ChannelInstance *channel, StreamTaskType type, c
         thread_pool_add_task(g_channel_manager.pool, stream_process_queue, channel);
     }
 }
+

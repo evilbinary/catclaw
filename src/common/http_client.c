@@ -256,7 +256,7 @@ static HttpResponse* do_request(const HttpRequest* req, bool stream,
         resp->headers = header_buf.data;
         
         // 提取 Content-Type
-        char* ct_start = strcasestr(header_buf.data, "Content-Type:");
+        char* ct_start = http_strcasestr(header_buf.data, "Content-Type:");
         if (ct_start) {
             ct_start += 13;
             while (*ct_start == ' ') ct_start++;

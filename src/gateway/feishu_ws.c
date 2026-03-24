@@ -7,6 +7,7 @@
 #include "common/log.h"
 #include "common/http_client.h"
 #include "common/cJSON.h"
+#include "agent/command.h"
 #include "agent/agent.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -515,32 +516,47 @@ static bool feishu_ws_on_message(WsClient *ws, const char *data, size_t len, voi
         
         // 处理事件
         log_info("[FeishuWS] Event payload: %.*s", (int)frame.payload_len, frame.payload);
-        
-        // 解析事件并发送到 agent
+
+        // 解析事件并使用统一消息处理
         FeishuMessage *msg = feishu_parse_message((const char *)frame.payload);
         if (msg && msg->content) {
-            log_info("[FeishuWS] Message from %s: %s", 
+            log_info("[FeishuWS] Message from %s: %s",
                      msg->sender_id ? msg->sender_id : "unknown",
                      msg->content);
-            
-            // 构建带有上下文的消息
-            char *context_msg = (char *)malloc(512 + strlen(msg->content));
-            if (context_msg) {
-                snprintf(context_msg, 512 + strlen(msg->content),
-                         "[feishu:%s:%s] %s",
-                         msg->sender_id ? msg->sender_id : "unknown",
-                         msg->chat_id ? msg->chat_id : (msg->message_id ? msg->message_id : "unknown"),
-                         msg->content);
-                
-                // 发送到 agent
-                if (agent_send_message(context_msg)) {
-                    log_info("[FeishuWS] Message sent to agent successfully");
-                } else {
-                    log_error("[FeishuWS] Failed to send message to agent");
-                }
-                free(context_msg);
+
+            // 获取飞书 channel 实例
+            ChannelInstance* feishu_channel = channel_first_of_type(CHANNEL_FEISHU);
+
+            // 动态更新回复目标（用于流式回复）
+            const char* reply_target = msg->chat_id ? msg->chat_id : msg->sender_id;
+            if (reply_target && feishu_channel) {
+                feishu_set_receive_id(feishu_channel, reply_target, "chat_id");
             }
-            
+
+            // 构建统一消息结构
+            ChannelIncomingMessage incoming_msg = {
+                .content = msg->content,
+                .sender_id = msg->sender_id,
+                .chat_id = msg->chat_id,
+                .message_id = msg->message_id,
+                .extra = NULL
+            };
+
+            // 使用统一消息处理入口
+            char* response = NULL;
+            bool handled = channel_handle_incoming_message(feishu_channel, &incoming_msg, &response);
+            log_debug("handled incoming_msg %s ===> %d response %s", msg->content,handled, response);
+            if (handled && response) {
+                // 已处理（命令或自定义处理），发送响应
+                const char* reply_id = msg->chat_id ? msg->chat_id : msg->sender_id;
+                if (reply_id) {
+                    feishu_reply_to_chat(reply_id, response);
+                } else {
+                    channel_send_message_to_type(CHANNEL_FEISHU, response);
+                }
+                free(response);
+            }
+
             feishu_message_free(msg);
         }
         

@@ -21,18 +21,28 @@ static const char* DEFAULT_SYSTEM_PROMPT =
 "你是一个有用的助手，可以帮助用户完成各种任务。请保持对话的连贯性，基于上下文进行回复。\n"
 "\n"
 "可用工具（使用关键字参数格式）：\n"
-"1. (get_weather location \"城市名\") - 获取天气信息\n"
-"2. (web_search query \"搜索词\") - 搜索网络信息\n"
+"1. (get-weather location \"城市名\") - 获取天气信息\n"
+"2. (web-search query \"搜索词\") - 搜索网络信息\n"
 "3. (calculator expression \"表达式\") - 计算数学表达式\n"
 "4. (time) - 获取当前时间\n"
-"5. (read_file path \"文件路径\") - 读取文件内容\n"
-"6. (write_file path \"路径\" content \"内容\") - 写入文件内容\n"
-"7. (reverse_string text \"文本\") - 反转字符串\n"
-"8. (memory_save key \"键名\" value \"值\") - 保存信息到内存\n"
-"9. (memory_load key \"键名\") - 从内存读取信息\n"
-"10. (list_directory path \"目录路径\") - 列出目录内容，支持 ~ 展开\n"
-"11. (web_fetch url \"URL地址\") - 获取网页内容\n"
+"5. (read-file path \"文件路径\") - 读取文件内容\n"
+"6. (write-file path \"路径\" content \"内容\") - 写入文件内容\n"
+"7. (reverse-string text \"文本\") - 反转字符串\n"
+"8. (memory-save key \"键名\" value \"值\") - 保存信息到内存\n"
+"9. (memory-load key \"键名\") - 从内存读取信息\n"
+"10. (list-directory path \"目录路径\") - 列出目录内容，支持 ~ 展开\n"
+"11. (web-fetch url \"URL地址\") - 获取网页内容\n"
 "12. (shell command \"命令\") - 执行系统命令\n"
+"\n"
+"技能发现工具（用于查找和使用技能）：\n"
+"13. (skill-search query \"关键词\" limit 5) - 搜索本地技能库\n"
+"14. (skill-match query \"关键词\") - 发现相关技能（返回JSON格式匹配结果）\n"
+"15. (skill-preview name \"技能名\" lines 5) - 预览技能内容\n"
+"\n"
+"技能发现工具说明：\n"
+"- skill-search: 搜索已加载的技能，返回匹配度排序的列表\n"
+"- skill-match: 用于自动发现相关技能，返回JSON格式包含name/relevance/source/type等\n"
+"- skill-preview: 快速预览技能模板内容，lines参数控制显示行数\n"
 "\n"
 "如果需要使用工具，请使用 S表达式格式输出：\n"
 "(tool-calls\n"
@@ -41,10 +51,19 @@ static const char* DEFAULT_SYSTEM_PROMPT =
 "\n"
 "示例：\n"
 "用户：北京天气怎么样？\n"
-"助手：(tool-calls (get_weather location \"北京\"))\n"
+"助手：(tool-calls (get-weather location \"北京\"))\n"
 "\n"
 "用户：列出 ~/.catclaw 目录\n"
-"助手：(tool-calls (list_directory path \"~/.catclaw\"))\n"
+"助手：(tool-calls (list-directory path \"~/.catclaw\"))\n"
+"\n"
+"用户：获取 https://example.com 的内容\n"
+"助手：(tool-calls (web-fetch url \"https://example.com\"))\n"
+"\n"
+"用户：有没有翻译相关的技能？\n"
+"助手：(tool-calls (skill-search query \"translate\" limit 5))\n"
+"\n"
+"用户：帮我找一个处理天气的技能\n"
+"助手：(tool-calls (skill-match query \"weather\"))\n"
 "\n"
 "用户：获取 https://example.com 的内容\n"
 "助手：(tool-calls (web_fetch url \"https://example.com\"))\n"
@@ -68,12 +87,13 @@ typedef struct {
 
 // ==================== 流式消息系统 ====================
 
-// 全局流式状态
-static bool g_stream_active = false;
-
-// 节流控制
-static int g_last_sent_len = 0;
-static struct timespec g_last_update_time = {0, 0};
+// 流式状态结构体（支持多 context/agent）
+typedef struct {
+    bool active;
+    char* accumulated_content;  // 保存累积内容
+    int last_sent_len;          // 上次发送的长度
+    struct timespec last_update_time;
+} StreamState;
 
 #define STREAM_MIN_INTERVAL_MS  300  // 最小更新间隔（配合飞书API延迟）
 #define STREAM_MIN_CHARS        50   // 最小新增字符数
@@ -109,18 +129,64 @@ static void stream_end_iterator(ChannelInstance* channel, void* user_data) {
     }
 }
 
+// 检查 tool-calls 是否完整（有闭合的括号）
+// 返回: true=完整或无tool-calls, false=不完整（需要等待）
+static bool tool_calls_is_complete(const char* content) {
+    if (!content) return true;
+    
+    const char* tc_start = strstr(content, "(tool-calls");
+    if (!tc_start) {
+        // 检查是否有不完整的 "(tool" 前缀
+        const char* tool_pos = strstr(content, "(tool");
+        if (tool_pos) {
+            const char* after = tool_pos + 5;  // "(tool" 长度
+            // 如果 "(tool" 后面可能继续（末尾、空格、-、字母），等待更多内容
+            if (*after == '\0' || *after == ' ' || *after == '-' || 
+                (*after >= 'a' && *after <= 'z')) {
+                return false;  // 不完整，等待
+            }
+        }
+        return true;  // 无 tool-calls，可以发送
+    }
+    
+    // 检查 tool-calls 的括号是否闭合
+    int paren_depth = 0;
+    const char* p = tc_start;
+    while (*p) {
+        if (*p == '(') paren_depth++;
+        else if (*p == ')') paren_depth--;
+        p++;
+    }
+    
+    return paren_depth == 0;  // 括号闭合则完整
+}
+
 // AI 流式回调函数：往所有支持流式的 channel 推送任务
 static void stream_callback(const char* chunk, const char* accumulated, void* user_data) {
     (void)chunk;
-    (void)user_data;
+    StreamState* state = (StreamState*)user_data;
+    if (!state) return;
     
-    int current_len = accumulated ? strlen(accumulated) : 0;
+    // 检查 tool-calls 是否完整，不完整则等待更多内容
+    if (!tool_calls_is_complete(accumulated)) {
+        return;
+    }
+    
+    if (!accumulated || strlen(accumulated) == 0) {
+        return;
+    }
+    
+    // 保存累积内容（用于结束时发送剩余部分）
+    free(state->accumulated_content);
+    state->accumulated_content = strdup(accumulated);
+    
+    int current_len = strlen(accumulated);
     
     // 第一个 chunk：启动所有支持流式的 channel
-    if (!g_stream_active) {
-        g_stream_active = true;
-        g_last_sent_len = current_len;
-        clock_gettime(CLOCK_MONOTONIC, &g_last_update_time);
+    if (!state->active) {
+        state->active = true;
+        state->last_sent_len = current_len;
+        clock_gettime(CLOCK_MONOTONIC, &state->last_update_time);
         
         StreamCallbackData data = { .content = accumulated };
         channels_foreach(stream_start_iterator, &data);
@@ -131,17 +197,17 @@ static void stream_callback(const char* chunk, const char* accumulated, void* us
     struct timespec now;
     clock_gettime(CLOCK_MONOTONIC, &now);
     
-    long elapsed_ms = (now.tv_sec - g_last_update_time.tv_sec) * 1000 +
-                       (now.tv_nsec - g_last_update_time.tv_nsec) / 1000000;
-    int chars_added = current_len - g_last_sent_len;
+    long elapsed_ms = (now.tv_sec - state->last_update_time.tv_sec) * 1000 +
+                       (now.tv_nsec - state->last_update_time.tv_nsec) / 1000000;
+    int chars_added = current_len - state->last_sent_len;
     
     // 判断是否需要更新
     bool should_update = (elapsed_ms >= STREAM_MIN_INTERVAL_MS && chars_added > 0) ||
                           (chars_added >= STREAM_MIN_CHARS);
     
     if (should_update) {
-        g_last_sent_len = current_len;
-        g_last_update_time = now;
+        state->last_sent_len = current_len;
+        state->last_update_time = now;
         
         log_debug("[TIMING] AI callback: elapsed=%ldms, chars_added=%d, len=%d", 
                   elapsed_ms, chars_added, current_len);
@@ -152,15 +218,27 @@ static void stream_callback(const char* chunk, const char* accumulated, void* us
 }
 
 // 结束流式消息
-static void end_stream_message(void) {
-    if (!g_stream_active) return;
+static void end_stream_message(StreamState* state) {
+    if (!state || !state->active) return;
+    
+    // 发送剩余未发送的内容
+    if (state->accumulated_content) {
+        int total_len = strlen(state->accumulated_content);
+        if (total_len > state->last_sent_len) {
+            log_debug("[Stream] Sending remaining content: %d chars", total_len - state->last_sent_len);
+            StreamCallbackData data = { .content = state->accumulated_content };
+            channels_foreach(stream_update_iterator, &data);
+        }
+        free(state->accumulated_content);
+        state->accumulated_content = NULL;
+    }
     
     channels_foreach(stream_end_iterator, NULL);
     
-    g_stream_active = false;
-    g_last_sent_len = 0;
-    g_last_update_time.tv_sec = 0;
-    g_last_update_time.tv_nsec = 0;
+    state->active = false;
+    state->last_sent_len = 0;
+    state->last_update_time.tv_sec = 0;
+    state->last_update_time.tv_nsec = 0;
     
     log_debug("[Stream] Ended stream message");
 }
@@ -758,11 +836,13 @@ void* agent_node_worker_thread(void* arg) {
                     log_debug("Calling AI model with %d messages in context\n", context->count);
                 }
                 
+                // 初始化流式状态（支持多 context/agent）
+                StreamState stream_state = {0};
+                
                 // 设置流式回调（如果 AI 配置了 stream 模式）
                 AIProvider* provider = ai_model_get_provider();
                 if (provider && provider->config.stream) {
-                    ai_model_set_stream_callback(stream_callback, NULL);
-                    g_stream_active = false;  // 重置流式状态
+                    ai_model_set_stream_callback(stream_callback, &stream_state);
                 }
                 
                 // Use configured system prompt or default
@@ -780,7 +860,7 @@ void* agent_node_worker_thread(void* arg) {
                     if (g_config.debug) {
                         log_debug("No response from AI model\n");
                     }
-                    end_stream_message();  // 结束流式消息
+                    end_stream_message(&stream_state);  // 结束流式消息
                     break;
                 }
                 
@@ -883,10 +963,10 @@ void* agent_node_worker_thread(void* arg) {
                         }
 
                         // 检查是否使用了流式模式
-                        bool used_stream = g_stream_active;
+                        bool used_stream = stream_state.active;
 
                         // 结束流式消息（如果流式模式已启动）
-                        end_stream_message();
+                        end_stream_message(&stream_state);
 
                         // 只有非流式模式才发送完整消息
                         // 流式模式下消息已经在回调中发送
@@ -899,7 +979,7 @@ void* agent_node_worker_thread(void* arg) {
                     }
                 } else {
                     printf("\n[AI Error]: %s\n\n", response->error);
-                    end_stream_message();  // 结束流式消息
+                    end_stream_message(&stream_state);  // 结束流式消息
                     ai_model_free_response(response);
                     break;
                 }

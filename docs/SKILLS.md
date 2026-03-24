@@ -6,6 +6,37 @@
 
 技能是CatClaw中可扩展的功能模块，用于执行特定任务或提供特定服务。技能以插件形式实现，通过动态加载机制集成到系统中。
 
+### 技能来源与优先级
+
+CatClaw 支持多种技能来源，按优先级从高到低排列：
+
+| 来源 | 目录 | 优先级 | 说明 |
+|------|------|--------|------|
+| Workspace Skills | `~/.catclaw/workspace/skills/` | 最高 | 工作区技能，用户自定义，可覆盖其他技能 |
+| Local Skills | `./local_skills/` | 高 | 本地技能，项目级自定义 |
+| Plugin Skills | `./skills/` | 中 | 插件技能，标准的动态加载技能 |
+| Hub Skills | `~/.catclaw/hub_skills/` | 中 | 从技能仓库下载的技能 |
+| Built-in Skills | - | 低 | 内置技能，编译时注册 |
+
+**冲突处理**：同名技能按优先级覆盖，高优先级技能会替换低优先级技能。例如，工作区中的 `weather` 技能会覆盖插件目录中的同名技能。
+
+### 技能类型
+
+CatClaw 支持以下技能实现类型：
+
+| 类型 | 扩展名 | 说明 |
+|------|--------|------|
+| Plugin | `.so` | 动态链接库，高性能，支持复杂逻辑 |
+| Markdown | `.md` | Markdown 文档，定义提示词模板，易于编写和分享 |
+| Executable | - | 外部可执行程序（计划中） |
+
+### 自动加载机制
+
+系统启动时会自动扫描并加载以下目录中的技能：
+1. `skills/` - 插件技能（`.so` 和 `.md`）
+2. `local_skills/` - 本地技能
+3. `~/.catclaw/workspace/skills/` - 工作区技能
+
 ## 技能插件结构
 
 一个技能插件需要实现以下函数：
@@ -158,32 +189,312 @@ void *plugin_get_function(const char *name) {
 
 ### 加载技能
 ```
-skill load <path>
+/skill load <path>
 ```
 
 ### 卸载技能
 ```
-skill unload <name>
+/skill unload <name>
 ```
 
 ### 执行技能
 ```
-skill execute <name> [params]
+/skill execute <name> [params]
 ```
 
 ### 列出技能
 ```
-skills list
+/skill list
 ```
+
+输出格式：
+```
+Loaded skills:
+  translator (1.0) [plugin/markdown] - Translate text between languages
+    Author: CatClaw Team | Category: Utility | ✓ Enabled
+  weather (2.0-local) [local/plugin] - LOCAL weather - overrides plugin
+    Author: Local User | Category: Local | ✓ Enabled
+```
+
+方括号中显示 `[来源/类型]`，来源包括：`builtin`、`plugin`、`local`、`workspace`、`hub`
+类型包括：`plugin`、`markdown`
 
 ### 启用技能
 ```
-skill enable <name>
+/skill enable <name>
 ```
 
 ### 禁用技能
 ```
-skill disable <name>
+/skill disable <name>
+```
+
+## 内置技能注册
+
+内置技能是编译时直接注册到程序中的技能，无需动态库。使用 `skill_register_builtin` 函数注册：
+
+```c
+// 示例：注册一个内置计算器技能
+char *builtin_calculator(const char *params) {
+    // 实现计算逻辑
+    return strdup("result");
+}
+
+// 在初始化时注册
+skill_register_builtin(
+    "calculator",           // 技能名称
+    "Simple calculator",    // 描述
+    "1.0",                  // 版本
+    builtin_calculator      // 执行函数
+);
+```
+
+内置技能优先级最低，可以被插件、本地或工作区技能覆盖。
+
+## Markdown 技能
+
+Markdown 技能是一种轻量级技能定义方式，使用 YAML front matter 和 Markdown 格式编写提示词模板。
+
+### Markdown 技能格式
+
+```markdown
+---
+name: skill-name
+description: 技能描述
+version: 1.0
+author: 作者名
+category: Utility
+tags: tag1, tag2
+examples: "example usage"
+---
+
+# 技能提示词
+
+你是一个专业的助手。请根据用户输入执行任务：
+
+{{params}}
+
+执行规则：
+- 规则1
+- 规则2
+```
+
+### Front Matter 字段说明
+
+| 字段 | 必需 | 说明 |
+|------|------|------|
+| name | 是 | 技能名称，用于调用 |
+| description | 否 | 技能描述 |
+| version | 否 | 版本号，默认 "1.0" |
+| author | 否 | 作者名 |
+| category | 否 | 分类，默认 "General" |
+| tags | 否 | 标签，逗号分隔 |
+| examples | 否 | 使用示例 |
+
+### 模板语法
+
+- `{{params}}` - 用户输入的参数占位符
+- 如果没有占位符，参数会追加到模板末尾
+
+### 示例：翻译技能
+
+```markdown
+---
+name: translator
+description: Translate text between languages
+version: 1.0
+category: Utility
+tags: translation, language
+---
+
+# Translation Skill
+
+You are a professional translator. Translate the following text:
+
+{{params}}
+
+Rules:
+- Preserve the original meaning and tone
+- Use natural, idiomatic expressions
+```
+
+## 技能仓库 (Hub)
+
+CatClaw 支持从远程技能仓库浏览和下载技能。
+
+### Hub 命令
+
+```bash
+# 列出仓库中的技能
+/skill hub list [page] [limit]
+
+# 搜索技能
+/skill hub search <query>
+
+# 查看技能详情
+/skill hub info <skill_id>
+
+# 下载技能（保存到 ~/.catclaw/hub_skills/）
+/skill hub download <skill_id>
+
+# 安装技能（下载并加载）
+/skill hub install <skill_id>
+```
+
+### 示例
+
+```bash
+# 列出第一页技能
+/skill hub list 1 10
+
+# 搜索翻译相关技能
+/skill hub search translator
+
+# 查看技能详情
+/skill hub info translator-pro
+
+# 安装技能
+/skill hub install translator-pro
+```
+
+### Hub API 配置
+
+默认 Hub 地址：`https://skills.catclaw.dev`
+
+可通过环境变量自定义：
+```bash
+export CATCLAW_SKILL_HUB="https://your-custom-hub.com"
+```
+
+## 技能发现与深度加载
+
+Agent 可以通过技能发现功能自动匹配相关技能，并按需深度加载技能详情。
+
+### 技能发现
+
+根据关键词自动发现相关技能，返回匹配度排序的技能列表：
+
+```bash
+# 发现与翻译相关的技能
+/skill discover translate
+
+# 发现天气相关技能
+/skill discover weather
+```
+
+**匹配规则**（按权重计算）：
+
+| 匹配字段 | 权重 |
+|---------|------|
+| 精确匹配名称 | 100 |
+| 名称前缀匹配 | 80 |
+| 名称包含 | 60 |
+| 描述包含 | +30 |
+| 分类匹配 | +20 |
+| 标签匹配 | +15 |
+
+**输出示例**：
+```
+🔍 发现 2 个相关技能:
+─────────────────────────────────────────────────────────
+  [100] translator (plugin/markdown)
+        匹配字段: name
+        描述: Translate text between languages
+        
+  [45] language-detector (local/markdown)
+        匹配字段: description
+        描述: Detect the language of text
+─────────────────────────────────────────────────────────
+```
+
+### 本地搜索
+
+在本地技能库中模糊搜索：
+
+```bash
+# 搜索并限制返回数量
+/skill search "utility" --limit 5
+```
+
+### 深度加载
+
+获取技能的详细信息（包括 Markdown 技能的完整模板）：
+
+```bash
+/skill info <name>
+```
+
+**输出示例**：
+```
+Skill: translator
+────────────────────────────────────────
+  Name:        translator
+  Version:     1.0
+  Author:      CatClaw Team
+  Category:    Utility
+  Tags:        translation, language
+  Source:      plugin
+  Type:        markdown
+  Path:        skills/translator.md
+  Status:      Enabled
+────────────────────────────────────────
+Description:
+  Translate text between languages
+
+────────────────────────────────────────
+Prompt Template (preview):
+# Translation Skill
+
+You are a professional translator. Translate the following text:
+
+{{params}}
+...
+```
+
+### 技能预览
+
+快速预览技能内容（显示前几行）：
+
+```bash
+# 预览技能前 5 行
+/skill preview translator 5
+```
+
+**输出示例**：
+```
+📌 translator [plugin/markdown]
+   Translate text between languages
+
+   Template Preview:
+   │ # Translation Skill
+   │ 
+   │ You are a professional translator...
+   └ ... (more lines)
+```
+
+### Agent 集成使用
+
+Agent 可以通过以下 API 实现智能技能发现：
+
+```c
+// 发现相关技能
+SkillMatchResult *matches = skill_discover("translate");
+for (int i = 0; i < matches->count; i++) {
+    printf("Found: %s (relevance: %d)\n", 
+           matches->matches[i].skill->name,
+           matches->matches[i].relevance);
+}
+skill_match_result_free(matches);
+
+// 深度加载
+char *details = skill_get_detailed("translator");
+printf("%s\n", details);
+free(details);
+
+// 预览技能
+char *preview = skill_preview("translator", 5);
+printf("%s\n", preview);
+free(preview);
 ```
 
 ## 技能开发最佳实践

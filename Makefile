@@ -1,5 +1,5 @@
-CC = gcc
-CFLAGS = -Wall -Wextra  -I. -I./src -g
+CC = gcc-13
+CFLAGS = -Wall -Wextra -O2 -I. -I./src
 
 # Platform-specific flags
 ifeq ($(OS),Windows_NT)
@@ -28,10 +28,15 @@ else
 endif
 SRC_DIR = src
 OBJ_DIR = obj
+SKILL_DIR = skills
 
 # Exclude old files in src/ that have been moved to subdirectories
-SOURCES = $(filter-out $(SRC_DIR)/skill_weather.c $(SRC_DIR)/agent.c $(SRC_DIR)/channels.c $(SRC_DIR)/discord.c $(SRC_DIR)/telegram.c $(SRC_DIR)/websocket.c $(SRC_DIR)/gateway.c $(SRC_DIR)/cJSON.c $(SRC_DIR)/config.c $(SRC_DIR)/log.c $(SRC_DIR)/plugin.c $(SRC_DIR)/thread_pool.c, $(wildcard $(SRC_DIR)/*.c) $(wildcard $(SRC_DIR)/*/*.c))
+SOURCES = $(filter-out $(SRC_DIR)/agent.c $(SRC_DIR)/channels.c $(SRC_DIR)/discord.c $(SRC_DIR)/telegram.c $(SRC_DIR)/websocket.c $(SRC_DIR)/gateway.c $(SRC_DIR)/cJSON.c $(SRC_DIR)/config.c $(SRC_DIR)/log.c $(SRC_DIR)/plugin.c $(SRC_DIR)/thread_pool.c, $(wildcard $(SRC_DIR)/*.c) $(wildcard $(SRC_DIR)/*/*.c))
 OBJECTS = $(patsubst $(SRC_DIR)/%.c, $(OBJ_DIR)/%.o, $(SOURCES))
+
+# Skill sources (for building .so plugins)
+SKILL_SOURCES = $(wildcard $(SRC_DIR)/tool/skill_*.c)
+SKILL_TARGETS = $(patsubst $(SRC_DIR)/tool/skill_%.c, $(SKILL_DIR)/skill_%.so, $(SKILL_SOURCES))
 
 TARGET = catclaw
 
@@ -58,6 +63,13 @@ all: $(TARGET)
 $(TARGET): $(OBJECTS)
 	$(CC) -o $@ $^ $(LDFLAGS)
 
+# Build skill plugins (.so)
+build-skills: $(SKILL_TARGETS)
+
+$(SKILL_DIR)/skill_%.so: $(SRC_DIR)/tool/skill_%.c
+	@mkdir -p $(SKILL_DIR)
+	$(CC) -shared -fPIC -o $@ $<
+
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c | $(OBJ_DIR)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c -o $@ $<
@@ -73,6 +85,6 @@ gdb: $(TARGET)
 	gdb -x  gdb.gdb ./catclaw
 
 clean:
-	rm -rf $(OBJ_DIR) $(TARGET)
+	rm -rf $(OBJ_DIR) $(TARGET) $(SKILL_DIR)
 
-.PHONY: all clean
+.PHONY: all clean build-skills

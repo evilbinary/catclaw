@@ -55,6 +55,8 @@ bool agent_register_tool(const char *name, const char *description, const char *
 int agent_execute_tool(const char *name, ToolArgs* args, char** result, int* result_len);
 void agent_list_tools(void);
 void agent_set_debug_mode(bool enabled);
+const char* agent_get_model(void);
+bool agent_set_model(const char* model);
 bool agent_memory_set(const char *key, const char *value);
 char *agent_memory_get(const char *key);
 bool agent_memory_clear(void);

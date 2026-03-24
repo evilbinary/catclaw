@@ -64,4 +64,9 @@ int tool_list_directory(ToolArgs* args, char** result, int* result_len);
 int tool_web_fetch(ToolArgs* args, char** result, int* result_len);
 int tool_shell_execute(ToolArgs* args, char** result, int* result_len);
 
+// Skill discovery tools
+int tool_skill_search(ToolArgs* args, char** result, int* result_len);
+int tool_skill_match(ToolArgs* args, char** result, int* result_len);
+int tool_skill_preview(ToolArgs* args, char** result, int* result_len);
+
 #endif // TOOL_H

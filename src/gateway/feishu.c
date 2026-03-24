@@ -3,6 +3,7 @@
 #include "common/cJSON.h"
 #include "common/config.h"
 #include "common/log.h"
+#include "agent/command.h"
 #include "agent/agent.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -375,13 +376,6 @@ static bool feishu_send_message(ChannelInstance *channel, const char *message) {
     return feishu_send_via_api(config, message);
 }
 
-// 接收消息
-static bool feishu_receive_message(ChannelInstance *channel, const char *message) {
-    (void)channel;  // unused
-    printf("[Feishu] Receiving message: %s\n", message);
-    return true;
-}
-
 // 流式发送消息 (打字机效果) - 完整消息一次性发送
 static bool feishu_stream_send_callback(ChannelInstance *channel, const char *message) {
     FeishuConfig *config = (FeishuConfig *)channel->config;
@@ -521,7 +515,7 @@ void feishu_channel_init(ChannelInstance *channel, ChannelConfig *base_config) {
     channel->connect = feishu_connect;
     channel->disconnect = feishu_disconnect;
     channel->send_message = feishu_send_message;
-    channel->receive_message = feishu_receive_message;
+    channel->receive_message = NULL;  // 使用默认消息处理流程
     channel->cleanup = feishu_cleanup;
     channel->stream_ctx = NULL;
     
@@ -660,21 +654,61 @@ void feishu_message_free(FeishuMessage *msg) {
     free(msg);
 }
 
-// 回复飞书消息
-bool feishu_reply_message(const char *channel_id, const char *message_id, const char *content) {
-    (void)message_id;  // unused for now
+// 回复飞书消息（通过 chat_id/open_id）
+bool feishu_reply_to_chat(const char *chat_id, const char *content) {
+    if (!chat_id || !content) return false;
     
-    if (!channel_id || !content) return false;
-    
-    // 查找对应的飞书渠道实例
-    ChannelInstance *channel = channel_find(channel_id);
-    if (!channel || channel->type != CHANNEL_FEISHU) {
-        log_error("[Feishu] Channel not found or not a Feishu channel: %s", channel_id);
+    // 获取第一个飞书渠道
+    ChannelInstance *channel = channel_first_of_type(CHANNEL_FEISHU);
+    if (!channel) {
+        log_error("[Feishu] No Feishu channel available");
         return false;
     }
     
-    // 使用渠道的发送消息功能
-    return channel_send_message(channel, content);
+    FeishuConfig *config = (FeishuConfig *)channel->config;
+    if (!config) {
+        log_error("[Feishu] No config in channel");
+        return false;
+    }
+    
+    // 临时保存原来的 receive_id
+    char *orig_receive_id = config->receive_id;
+    char *orig_receive_id_type = config->receive_id_type;
+    
+    // 设置目标 chat_id
+    config->receive_id = strdup(chat_id);
+    config->receive_id_type = strdup("chat_id");  // 使用 chat_id 类型
+    
+    // 发送消息
+    bool success = false;
+    if (config->app_id && config->app_secret) {
+        success = feishu_send_via_api(config, content);
+    } else if (config->webhook_url) {
+        success = feishu_send_via_webhook(config, content);
+    }
+    
+    // 恢复原来的 receive_id
+    free(config->receive_id);
+    free(config->receive_id_type);
+    config->receive_id = orig_receive_id;
+    config->receive_id_type = orig_receive_id_type;
+    
+    return success;
+}
+
+// 回复飞书消息（保留向后兼容）
+bool feishu_reply_message(const char *channel_id, const char *message_id, const char *content) {
+    (void)message_id;  // unused for now
+    
+    // channel_id 可能是内部 channel_id 或者 Feishu chat_id
+    // 先尝试查找内部 channel
+    ChannelInstance *channel = channel_find(channel_id);
+    if (channel && channel->type == CHANNEL_FEISHU) {
+        return channel_send_message(channel, content);
+    }
+    
+    // 不是内部 channel，可能是 Feishu chat_id，使用 reply_to_chat
+    return feishu_reply_to_chat(channel_id, content);
 }
 
 // 处理飞书事件回调
@@ -721,23 +755,38 @@ char* feishu_handle_event(const char *body) {
                                  msg->sender_id ? msg->sender_id : "unknown",
                                  msg->content);
                         
-                        // 构建带有上下文的消息
-                        // 格式: [feishu:sender_id:message_id] content
-                        char *context_msg = (char *)malloc(512 + strlen(msg->content));
-                        if (context_msg) {
-                            snprintf(context_msg, 512 + strlen(msg->content),
-                                     "[feishu:%s:%s] %s",
-                                     msg->sender_id ? msg->sender_id : "unknown",
-                                     msg->chat_id ? msg->chat_id : msg->message_id,
-                                     msg->content);
-                            
-                            // 发送到 agent
-                            if (agent_send_message(context_msg)) {
-                                log_info("[Feishu] Message sent to agent successfully");
+                        // 检查是否是命令（以 / 开头）
+                        // 获取飞书 channel 实例
+                        ChannelInstance* feishu_channel = channel_first_of_type(CHANNEL_FEISHU);
+
+                        // 动态更新回复目标（用于流式回复）
+                        const char* reply_target = msg->chat_id ? msg->chat_id : msg->sender_id;
+                        if (reply_target && feishu_channel) {
+                            feishu_set_receive_id(feishu_channel, reply_target, "chat_id");
+                        }
+
+                        // 构建统一消息结构
+                        ChannelIncomingMessage incoming_msg = {
+                            .content = msg->content,
+                            .sender_id = msg->sender_id,
+                            .chat_id = msg->chat_id,
+                            .message_id = msg->message_id,
+                            .extra = NULL
+                        };
+
+                        // 使用统一消息处理入口
+                        char* response = NULL;
+                        bool handled = channel_handle_incoming_message(feishu_channel, &incoming_msg, &response);
+
+                        if (handled && response) {
+                            // 已处理（命令或自定义处理），发送响应
+                            const char* reply_id = msg->chat_id ? msg->chat_id : msg->sender_id;
+                            if (reply_id) {
+                                feishu_reply_to_chat(reply_id, response);
                             } else {
-                                log_error("[Feishu] Failed to send message to agent");
+                                channel_send_message_to_type(CHANNEL_FEISHU, response);
                             }
-                            free(context_msg);
+                            free(response);
                         }
                         
                         feishu_message_free(msg);

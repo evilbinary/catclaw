@@ -8,28 +8,6 @@
 #include <ctype.h>
 #include <pthread.h>
 
-// Cross-platform strcasestr implementation (case-insensitive strstr)
-#ifndef HAVE_STRCASESTR
-static char* strcasestr(const char* haystack, const char* needle) {
-    if (!haystack || !needle) return NULL;
-    if (!*needle) return (char*)haystack;
-    
-    char* h = (char*)haystack;
-    while (*h) {
-        if (tolower((unsigned char)*h) == tolower((unsigned char)*needle)) {
-            char* h2 = h + 1;
-            char* n2 = (char*)needle + 1;
-            while (*n2 && tolower((unsigned char)*h2) == tolower((unsigned char)*n2)) {
-                h2++;
-                n2++;
-            }
-            if (!*n2) return h;
-        }
-        h++;
-    }
-    return NULL;
-}
-#endif
 
 // Platform-specific includes
 #ifdef _WIN32
@@ -269,7 +247,7 @@ static SrvRequest* parse_request(const char* buffer, size_t len) {
     }
     
     // 解析 Content-Type
-    const char* ct = strcasestr(buffer, "Content-Type:");
+    const char* ct = http_strcasestr(buffer, "Content-Type:");
     if (ct) {
         ct += 13;
         while (*ct == ' ') ct++;
@@ -366,7 +344,7 @@ static void handle_connection(int client_socket, HttpServer* server) {
         
         // 检查 Authorization header: "Bearer <token>"
         if (request->headers) {
-            const char* auth = strcasestr(request->headers, "Authorization:");
+            const char* auth = http_strcasestr(request->headers, "Authorization:");
             if (auth) {
                 auth += 14; // skip "Authorization:"
                 while (*auth == ' ') auth++;
@@ -398,7 +376,7 @@ static void handle_connection(int client_socket, HttpServer* server) {
             
             // 检查 X-API-Key header
             if (!authorized) {
-                const char* api_key_header = strcasestr(request->headers, "X-API-Key:");
+                const char* api_key_header = http_strcasestr(request->headers, "X-API-Key:");
                 if (api_key_header) {
                     api_key_header += 10;
                     while (*api_key_header == ' ') api_key_header++;
@@ -434,7 +412,7 @@ static void handle_connection(int client_socket, HttpServer* server) {
     bool is_stream_request = false;
     
     // 检查 Accept header
-    if (strcasestr(request->headers ? request->headers : "", "text/event-stream")) {
+    if (http_strcasestr(request->headers ? request->headers : "", "text/event-stream")) {
         is_stream_request = true;
     }
     
@@ -444,7 +422,7 @@ static void handle_connection(int client_socket, HttpServer* server) {
     }
     
     // 检查 body 中的 stream 参数
-    if (request->body && strcasestr(request->body, "\"stream\":true")) {
+    if (request->body && http_strcasestr(request->body, "\"stream\":true")) {
         is_stream_request = true;
     }
     
