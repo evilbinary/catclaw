@@ -9,10 +9,11 @@
 
 // 命令动作类型（CLI 特有动作）
 typedef enum {
-    COMMAND_ACTION_NONE,      // 无特殊动作
-    COMMAND_ACTION_EXIT,      // 退出程序
-    COMMAND_ACTION_RESTART,   // 重启系统
-    COMMAND_ACTION_SHUTDOWN   // 关闭系统
+    COMMAND_ACTION_NONE,        // 无特殊动作
+    COMMAND_ACTION_EXIT,        // 退出程序
+    COMMAND_ACTION_RESTART,     // 重启系统
+    COMMAND_ACTION_SHUTDOWN,    // 关闭系统
+    COMMAND_ACTION_SEND_MESSAGE // 发送消息给 AI (response 中存储消息内容)
 } CommandAction;
 
 // 命令处理结果

@@ -277,125 +277,41 @@ int main(int argc, char *argv[]) {
 
         if (strlen(command) > 0) {
             if (command[0] == '/') {
-                // Command mode: input starts with /
-                
-                // CLI 特有命令处理
-                char *cmd = command + 1; // Skip the /
-                
-                // /message 命令 - 直接发送消息
-                if (strncmp(cmd, "message ", 8) == 0) {
-                    char *message = cmd + 8;
-                    if (*message) {
-                        agent_send_message(message);
-                    } else {
-                        printf("Usage: /message <text>\n");
-                    }
-                }
-                // /skill 命令 - CLI 特有
-                else if (strncmp(cmd, "skill load ", 11) == 0) {
-                    char *path = cmd + 11;
-                    if (*path) {
-                        agent_load_skill(path);
-                    } else {
-                        printf("Usage: /skill load <path>\n");
-                    }
-                } else if (strncmp(cmd, "skill unload ", 13) == 0) {
-                    char *name = cmd + 13;
-                    if (*name) {
-                        agent_unload_skill(name);
-                    } else {
-                        printf("Usage: /skill unload <name>\n");
-                    }
-                } else if (strncmp(cmd, "skill execute ", 14) == 0) {
-                    char *params = cmd + 14;
-                    char *name = strtok(params, " ");
-                    char *skill_params = strtok(NULL, "");
-                    if (name) {
-                        char *result = agent_execute_skill(name, skill_params);
-                        printf("%s\n", result);
-                        free(result);
-                    } else {
-                        printf("Usage: /skill execute <name> [params]\n");
-                    }
-                } else if (strcmp(cmd, "skills list") == 0) {
-                    agent_list_skills();
-                } else if (strncmp(cmd, "skill enable ", 12) == 0) {
-                    char *name = cmd + 12;
-                    if (*name) {
-                        agent_enable_skill(name);
-                    } else {
-                        printf("Usage: /skill enable <name>\n");
-                    }
-                } else if (strncmp(cmd, "skill disable ", 13) == 0) {
-                    char *name = cmd + 13;
-                    if (*name) {
-                        agent_disable_skill(name);
-                    } else {
-                        printf("Usage: /skill disable <name>\n");
-                    }
-                }
-                // /channel connect/disconnect - CLI 特有
-                else if (strncmp(cmd, "channel connect ", 16) == 0) {
-                    char *channel_id = cmd + 16;
-                    if (*channel_id) {
-                        ChannelInstance *ch = channel_find(channel_id);
-                        if (ch) {
-                            channel_connect(ch);
-                        } else {
-                            printf("Error: Channel not found: %s\n", channel_id);
-                        }
-                    } else {
-                        printf("Usage: /channel connect <id>\n");
-                    }
-                } else if (strncmp(cmd, "channel disconnect ", 18) == 0) {
-                    char *channel_id = cmd + 18;
-                    if (*channel_id) {
-                        ChannelInstance *ch = channel_find(channel_id);
-                        if (ch) {
-                            channel_disconnect(ch);
-                        } else {
-                            printf("Error: Channel not found: %s\n", channel_id);
-                        }
-                    } else {
-                        printf("Usage: /channel disconnect <id>\n");
-                    }
-                }
-                // /system shutdown - CLI 特有
-                else if (strcmp(cmd, "system shutdown") == 0) {
-                    printf("Shutting down CatClaw...\n");
-                    // Cleanup and exit
-                    stop_gateway_server();
-                    agent_cleanup();
-                    channels_cleanup();
-                    plugin_system_cleanup();
-                    if (g_thread_pool) {
-                        thread_pool_destroy(g_thread_pool);
-                    }
-                    gateway_cleanup();
-                    config_cleanup();
-                    log_info("CatClaw exiting");
-                    log_cleanup();
-                    printf("CatClaw shutdown\n");
-                    exit(0);
-                } else if (strcmp(cmd, "system restart") == 0) {
-                    printf("Restarting CatClaw...\n");
-                    printf("Restart functionality not yet implemented\n");
-                }
                 // 使用统一的命令处理器
-                else {
-                    CommandResult* result = command_process(command);
-                    if (result) {
-                        if (result->is_command) {
-                            printf("%s\n", result->response);
-                            
-                            // 处理特殊动作
-                            if (result->action == COMMAND_ACTION_EXIT) {
-                                command_result_free(result);
-                                break;
+                CommandResult* result = command_process(command);
+                if (result) {
+                    if (result->is_command) {
+                        printf("%s\n", result->response);
+                        
+                        // 处理特殊动作
+                        if (result->action == COMMAND_ACTION_EXIT) {
+                            command_result_free(result);
+                            break;
+                        } else if (result->action == COMMAND_ACTION_SEND_MESSAGE) {
+                            // 发送消息给 AI
+                            agent_send_message(result->response);
+                        } else if (result->action == COMMAND_ACTION_SHUTDOWN) {
+                            command_result_free(result);
+                            // 清理并退出
+                            stop_gateway_server();
+                            agent_cleanup();
+                            channels_cleanup();
+                            plugin_system_cleanup();
+                            skill_system_cleanup();
+                            if (g_thread_pool) {
+                                thread_pool_destroy(g_thread_pool);
                             }
+                            gateway_cleanup();
+                            config_cleanup();
+                            log_info("CatClaw exiting");
+                            log_cleanup();
+                            printf("CatClaw shutdown\n");
+                            exit(0);
+                        } else if (result->action == COMMAND_ACTION_RESTART) {
+                            printf("Restart functionality not yet implemented\n");
                         }
-                        command_result_free(result);
                     }
+                    command_result_free(result);
                 }
             } else {
                 // Conversation mode: input does not start with /

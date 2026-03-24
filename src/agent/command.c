@@ -14,6 +14,7 @@
 #include "agent/agent.h"
 #include "gateway/gateway.h"
 #include "gateway/channels.h"
+#include "tool/skill.h"
 
 // 创建命令结果
 static CommandResult* result_create(bool is_cmd, bool handled, CommandAction action, const char* response) {
@@ -30,7 +31,7 @@ static CommandResult* result_create(bool is_cmd, bool handled, CommandAction act
 
 // 处理 help 命令
 static char* cmd_help(void) {
-    size_t size = 4096;
+    size_t size = 8192;
     char* buf = (char*)malloc(size);
     if (!buf) return NULL;
     
@@ -56,20 +57,42 @@ static char* cmd_help(void) {
         "  /channel list      - 列出频道\n"
         "  /channel enable <id>   - 启用频道\n"
         "  /channel disable <id>  - 禁用频道\n"
+        "  /channel connect <id>  - 连接频道\n"
+        "  /channel disconnect <id> - 断开频道\n"
         "\n"
         "配置相关:\n"
         "  /config list       - 列出配置\n"
         "  /config get <key>  - 获取配置\n"
         "  /config set <key> <value> - 设置配置\n"
         "\n"
+        "技能相关:\n"
+        "  /skill list        - 列出技能\n"
+        "  /skill load <path> - 加载技能\n"
+        "  /skill unload <name> - 卸载技能\n"
+        "  /skill execute <name> [params] - 执行技能\n"
+        "  /skill enable <name> - 启用技能\n"
+        "  /skill disable <name> - 禁用技能\n"
+        "\n"
+        "插件相关:\n"
+        "  /plugin list       - 列出插件\n"
+        "  /plugin load <path> - 加载插件\n"
+        "  /plugin unload <name> - 卸载插件\n"
+        "\n"
         "工具命令:\n"
         "  /search <query>    - 搜索网络\n"
         "  /weather <city>    - 获取天气\n"
         "  /shell <command>   - 执行Shell命令\n"
         "\n"
+        "系统控制:\n"
+        "  /system restart    - 重启系统\n"
+        "  /system shutdown   - 关闭系统\n"
+        "\n"
         "调试命令:\n"
         "  /loglevel <level>  - 设置日志级别\n"
-        "  /debug on/off      - 开启/关闭调试模式\n");
+        "  /debug on/off      - 开启/关闭调试模式\n"
+        "\n"
+        "消息:\n"
+        "  /message <text>    - 发送消息给AI\n");
     
     return buf;
 }
@@ -194,6 +217,24 @@ static char* cmd_channel(const char* args) {
         if (ch) {
             channel_disable(ch);
             snprintf(buf, size, "✓ 已禁用频道: %s", id);
+        } else {
+            snprintf(buf, size, "✗ 未找到频道: %s", id);
+        }
+    } else if (strncmp(args, "connect ", 8) == 0) {
+        const char* id = args + 8;
+        ChannelInstance* ch = channel_find(id);
+        if (ch) {
+            channel_connect(ch);
+            snprintf(buf, size, "✓ 已连接频道: %s", id);
+        } else {
+            snprintf(buf, size, "✗ 未找到频道: %s", id);
+        }
+    } else if (strncmp(args, "disconnect ", 11) == 0) {
+        const char* id = args + 11;
+        ChannelInstance* ch = channel_find(id);
+        if (ch) {
+            channel_disconnect(ch);
+            snprintf(buf, size, "✓ 已断开频道: %s", id);
         } else {
             snprintf(buf, size, "✗ 未找到频道: %s", id);
         }
@@ -373,6 +414,94 @@ static char* cmd_shell(const char* args) {
     return buf;
 }
 
+// 处理 message 命令
+static char* cmd_message(const char* args) {
+    if (!args || strlen(args) == 0) {
+        return strdup("用法: /message <text>");
+    }
+    // 返回消息内容，由调用者处理发送
+    return strdup(args);
+}
+
+// 处理 skill 命令
+static char* cmd_skill(const char* args) {
+    size_t size = 512;
+    char* buf = (char*)malloc(size);
+    if (!buf) return NULL;
+    
+    if (!args || strlen(args) == 0 || strcmp(args, "list") == 0) {
+        skill_list();
+        snprintf(buf, size, "技能列表已打印到控制台");
+    } else if (strncmp(args, "load ", 5) == 0) {
+        const char* path = args + 5;
+        if (skill_load(path)) {
+            snprintf(buf, size, "✓ 已加载技能: %s", path);
+        } else {
+            snprintf(buf, size, "✗ 加载失败: %s", path);
+        }
+    } else if (strncmp(args, "unload ", 7) == 0) {
+        const char* name = args + 7;
+        if (skill_unload(name)) {
+            snprintf(buf, size, "✓ 已卸载技能: %s", name);
+        } else {
+            snprintf(buf, size, "✗ 卸载失败: %s", name);
+        }
+    } else if (strncmp(args, "execute ", 8) == 0) {
+        char* params = strdup(args + 8);
+        char* name = strtok(params, " ");
+        char* skill_params = strtok(NULL, "");
+        if (name) {
+            char* result = skill_execute_skill(name, skill_params);
+            if (result) {
+                snprintf(buf, size, "%s", result);
+                free(result);
+            } else {
+                snprintf(buf, size, "✗ 执行失败: %s", name);
+            }
+        } else {
+            snprintf(buf, size, "用法: /skill execute <name> [params]");
+        }
+        free(params);
+    } else if (strncmp(args, "enable ", 7) == 0) {
+        const char* name = args + 7;
+        if (skill_enable(name)) {
+            snprintf(buf, size, "✓ 已启用技能: %s", name);
+        } else {
+            snprintf(buf, size, "✗ 启用失败: %s", name);
+        }
+    } else if (strncmp(args, "disable ", 8) == 0) {
+        const char* name = args + 8;
+        if (skill_disable(name)) {
+            snprintf(buf, size, "✓ 已禁用技能: %s", name);
+        } else {
+            snprintf(buf, size, "✗ 禁用失败: %s", name);
+        }
+    } else {
+        snprintf(buf, size, "未知子命令: skill %s", args);
+    }
+    
+    return buf;
+}
+
+// 处理 system 命令
+static char* cmd_system(const char* args, CommandAction* action) {
+    size_t size = 256;
+    char* buf = (char*)malloc(size);
+    if (!buf) return NULL;
+    
+    if (strcmp(args, "shutdown") == 0) {
+        *action = COMMAND_ACTION_SHUTDOWN;
+        snprintf(buf, size, "🛑 正在关闭系统...");
+    } else if (strcmp(args, "restart") == 0) {
+        *action = COMMAND_ACTION_RESTART;
+        snprintf(buf, size, "🔄 正在重启系统...");
+    } else {
+        snprintf(buf, size, "未知子命令: system %s\n可用: shutdown, restart", args);
+    }
+    
+    return buf;
+}
+
 // 主处理函数
 CommandResult* command_process(const char* input) {
     if (!input || strlen(input) == 0) {
@@ -417,6 +546,11 @@ CommandResult* command_process(const char* input) {
     } else if (strcmp(cmd_copy, "exit") == 0 || strcmp(cmd_copy, "quit") == 0) {
         response = strdup("👋 再见!");
         action = COMMAND_ACTION_EXIT;
+    } else if (strcmp(cmd_copy, "message") == 0) {
+        response = cmd_message(args);
+        if (response && strlen(response) > 0 && strcmp(response, "用法: /message <text>") != 0) {
+            action = COMMAND_ACTION_SEND_MESSAGE;
+        }
     } else if (strcmp(cmd_copy, "model") == 0) {
         response = cmd_model(args);
     } else if (strcmp(cmd_copy, "gateway") == 0) {
@@ -431,6 +565,10 @@ CommandResult* command_process(const char* input) {
         response = cmd_debug(args);
     } else if (strcmp(cmd_copy, "plugin") == 0) {
         response = cmd_plugin(args);
+    } else if (strcmp(cmd_copy, "skill") == 0 || strcmp(cmd_copy, "skills") == 0) {
+        response = cmd_skill(args);
+    } else if (strcmp(cmd_copy, "system") == 0) {
+        response = cmd_system(args, &action);
     } else if (strcmp(cmd_copy, "search") == 0) {
         response = cmd_search(args);
     } else if (strcmp(cmd_copy, "weather") == 0) {
