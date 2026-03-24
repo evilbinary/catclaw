@@ -203,6 +203,28 @@ void channels_status(void) {
     }
 }
 
+char* channels_status_string(void) {
+    size_t size = 1024;
+    char* buf = (char*)malloc(size);
+    if (!buf) return NULL;
+
+    int offset = snprintf(buf, size, "Channels (%d):\n", g_channel_manager.count);
+    ChannelInstance* current = g_channel_manager.head;
+
+    while (current && offset < (int)(size - 128)) {
+        offset += snprintf(buf + offset, size - offset,
+            "  [%s] %s (%s): %s, %s\n",
+            current->id,
+            current->name,
+            channel_type_names[current->type],
+            current->enabled ? "启用" : "禁用",
+            current->connected ? "已连接" : "未连接");
+        current = current->next;
+    }
+
+    return buf;
+}
+
 ChannelInstance* channel_add(const char *id, ChannelType type, ChannelConfig *config) {
     // Check if channel with same ID exists
     if (channel_find(id)) {

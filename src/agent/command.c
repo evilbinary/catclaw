@@ -99,22 +99,44 @@ static char* cmd_help(void) {
 
 // 处理 status 命令
 static char* cmd_status(void) {
-    size_t size = 2048;
+    size_t size = 4096;
     char* buf = (char*)malloc(size);
     if (!buf) return NULL;
-    
+
     int offset = snprintf(buf, size,
         "🦞 CatClaw 状态\n"
         "────────────────────────\n\n");
-    
-    // Model
-    offset += snprintf(buf + offset, size - offset, "模型: %s\n",
-        agent_get_model() ? agent_get_model() : "未设置");
-    
-    // Channels status
-    offset += snprintf(buf + offset, size - offset, "\n频道:\n");
-    channels_status();
-    
+
+    // Agent 状态
+    const char* model = agent_get_model();
+    offset += snprintf(buf + offset, size - offset,
+        "📱 Agent:\n"
+        "  模型: %s\n",
+        model ? model : "未设置");
+
+    // 推断 provider
+    if (model) {
+        const char* provider = "unknown";
+        if (strstr(model, "anthropic") != NULL) provider = "anthropic";
+        else if (strstr(model, "openai") != NULL) provider = "openai";
+        else if (strstr(model, "gemini") != NULL) provider = "gemini";
+        else if (strstr(model, "llama") != NULL || strstr(model, "ollama") != NULL) provider = "ollama";
+        offset += snprintf(buf + offset, size - offset, "  Provider: %s\n", provider);
+    }
+
+    // Gateway 状态
+    offset += snprintf(buf + offset, size - offset,
+        "\n🌐 Gateway:\n"
+        "  状态: %s\n",
+        gateway_is_running() ? "✓ 运行中" : "✗ 未启动");
+
+    // Channels 状态
+    char* channels_str = channels_status_string();
+    if (channels_str) {
+        offset += snprintf(buf + offset, size - offset, "\n📺 %s", channels_str);
+        free(channels_str);
+    }
+
     return buf;
 }
 

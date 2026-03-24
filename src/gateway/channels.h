@@ -138,6 +138,7 @@ typedef struct {
 bool channels_init(void);
 void channels_cleanup(void);
 void channels_status(void);
+char* channels_status_string(void);  // 返回状态字符串(需要调用者free)
 bool channels_load_from_config(void);
 
 // Functions - Channel Instance Management
