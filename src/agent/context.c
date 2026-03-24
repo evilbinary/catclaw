@@ -31,6 +31,8 @@ static const char* DEFAULT_SYSTEM_PROMPT =
 "8. (memory_save key \"键名\" value \"值\") - 保存信息到内存\n"
 "9. (memory_load key \"键名\") - 从内存读取信息\n"
 "10. (list_directory path \"目录路径\") - 列出目录内容，支持 ~ 展开\n"
+"11. (web_fetch url \"URL地址\") - 获取网页内容\n"
+"12. (shell command \"命令\") - 执行系统命令\n"
 "\n"
 "如果需要使用工具，请使用 S表达式格式输出：\n"
 "(tool-calls\n"
@@ -43,6 +45,9 @@ static const char* DEFAULT_SYSTEM_PROMPT =
 "\n"
 "用户：列出 ~/.catclaw 目录\n"
 "助手：(tool-calls (list_directory path \"~/.catclaw\"))\n"
+"\n"
+"用户：获取 https://example.com 的内容\n"
+"助手：(tool-calls (web_fetch url \"https://example.com\"))\n"
 "\n"
 "工具执行后返回格式：[TOOL_RESULT] 结果 [/TOOL_RESULT]\n"
 "看到 [TOOL_RESULT] 后直接回复用户，不要再调用工具！\n";

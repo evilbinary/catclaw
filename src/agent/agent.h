@@ -58,6 +58,7 @@ void agent_set_debug_mode(bool enabled);
 bool agent_memory_set(const char *key, const char *value);
 char *agent_memory_get(const char *key);
 bool agent_memory_clear(void);
+bool agent_memory_delete(const char *key);
 
 // Multi-step execution functions
 bool agent_add_step(const char *description, const char *tool_name, const char *params);

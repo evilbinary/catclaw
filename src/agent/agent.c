@@ -63,6 +63,11 @@ bool agent_memory_clear(void) {
     return memory_clear(g_agent.memory_manager);
 }
 
+bool agent_memory_delete(const char *key) {
+    debug_log("Memory delete: %s", key);
+    return memory_delete(g_agent.memory_manager, key);
+}
+
 void agent_set_debug_mode(bool enabled) {
     g_agent.debug_mode = enabled;
     printf("Debug mode %s\n", enabled ? "enabled" : "disabled");
@@ -335,6 +340,23 @@ char *agent_parse_command(const char *command) {
         } else {
             snprintf(result, 2048, "Error: No key provided");
         }
+    } else if (strstr(command, "memory delete") != NULL) {
+        char *str = strstr(command, "memory delete");
+        if (str) {
+            str += 14; // Skip "memory delete "
+            char *tool_result;
+            int result_len;
+            ToolArgs* args = tool_args_from_string(str);
+            if (agent_execute_tool("memory_delete", args, &tool_result, &result_len) == 0) {
+                snprintf(result, 2048, "%s", tool_result);
+                free(tool_result);
+            } else {
+                snprintf(result, 2048, "Error executing memory_delete tool");
+            }
+            tool_args_free(args);
+        } else {
+            snprintf(result, 2048, "Error: No key provided");
+        }
     } else if (strstr(command, "list tools") != NULL || strstr(command, "tools") != NULL) {
         agent_list_tools();
         snprintf(result, 2048, "Tools listed above");
@@ -549,7 +571,8 @@ bool agent_init(void) {
     agent_register_tool("write_file", "Write content to a file", NULL, tool_write_file);
     agent_register_tool("web_search", "Simulate web search", NULL, tool_search_web);
     agent_register_tool("memory_save", "Save a key-value pair to memory", NULL, tool_save_memory);
-    agent_register_tool("memory_load", "Load a value from memory by key", NULL, tool_read_memory);
+    agent_register_tool("memory_load", "Load a value from memory by key (no key = list all)", NULL, tool_read_memory);
+    agent_register_tool("memory_delete", "Delete a key-value pair from memory", NULL, tool_delete_memory);
     agent_register_tool("get_weather", "Get weather information for a location", NULL, tool_get_weather);
     agent_register_tool("list_directory", "List files and directories in a given path", NULL, tool_list_directory);
     agent_register_tool("web_fetch", "Fetch content from a URL", NULL, tool_web_fetch);

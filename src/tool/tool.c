@@ -13,63 +13,15 @@
 #include "tool.h"
 #include "common/cJSON.h"
 #include "common/http_client.h"
+#include "common/log.h"
+#include "common/utils.h"
 
-// Resolve relative path to absolute path
-// If path starts with '/', return as-is (absolute path)
-// If path starts with '~', expand to home directory
-// Otherwise, resolve relative to current working directory
-static char* resolve_path(const char* path) {
-    if (!path) return NULL;
-    
-    // Absolute path - return copy
-    if (path[0] == '/') {
-        return strdup(path);
-    }
-    
-    // Home directory expansion
-    if (path[0] == '~') {
-        const char* home = getenv("HOME");
-#ifdef _WIN32
-        if (!home) {
-            home = getenv("USERPROFILE");
-        }
-#else
-        if (!home) {
-            struct passwd* pw = getpwuid(getuid());
-            if (pw) home = pw->pw_dir;
-        }
-#endif
-        if (home) {
-            size_t home_len = strlen(home);
-            size_t path_len = strlen(path);
-            char* resolved = malloc(home_len + path_len + 1);
-            if (!resolved) return NULL;
-            strcpy(resolved, home);
-            strcat(resolved, path + 1);  // Skip the '~'
-            return resolved;
-        }
-    }
-    
-    // Relative path - resolve against current working directory
-    char cwd[1024];
-    if (!getcwd(cwd, sizeof(cwd))) {
-        return strdup(path);  // Fallback to original path
-    }
-    
-    size_t cwd_len = strlen(cwd);
-    size_t path_len = strlen(path);
-    
-    char* resolved = malloc(cwd_len + path_len + 2);
-    if (!resolved) return NULL;
-    
-    strcpy(resolved, cwd);
-    if (cwd_len > 0 && cwd[cwd_len - 1] != '/') {
-        strcat(resolved, "/");
-    }
-    strcat(resolved, path);
-    
-    return resolved;
-}
+// Forward declarations for agent memory functions
+// These are implemented in agent/agent.c
+extern bool agent_memory_set(const char *key, const char *value);
+extern char *agent_memory_get(const char *key);
+extern bool agent_memory_clear(void);
+extern bool agent_memory_delete(const char *key);
 
 // Helper to get argument value by key
 const char* tool_args_get(ToolArgs* args, const char* key) {
@@ -579,25 +531,84 @@ int tool_save_memory(ToolArgs* args, char** result, int* result_len) {
     const char* key = tool_args_get(args, "key");
     const char* value = tool_args_get(args, "value");
     
+    // If key/value not provided as separate args, try to parse from "arg"
+    if (!key || !value) {
+        const char* arg = tool_args_get(args, "arg");
+        if (arg) {
+            // Parse "key value" format - first word is key, rest is value
+            char* arg_copy = strdup(arg);
+            char* space = strchr(arg_copy, ' ');
+            if (space) {
+                *space = '\0';
+                key = arg_copy;
+                value = space + 1;
+            } else {
+                free(arg_copy);
+                *result = strdup("Error: Invalid format. Use 'memory save <key> <value>'");
+                *result_len = strlen(*result);
+                return -1;
+            }
+        }
+    }
+    
     if (!key || !value) {
         *result = strdup("Error: Missing key or value parameter");
         *result_len = strlen(*result);
         return -1;
     }
     
-    // Here we would normally save to memory storage
-    // For now, just return success
-    *result = (char*)malloc(100);
-    if (*result) {
-        snprintf(*result, 100, "Saved memory: %s = %s", key, value);
+    // Save to memory storage using agent's memory interface
+    if (agent_memory_set(key, value)) {
+        size_t buf_size = strlen(key) + strlen(value) + 100;
+        *result = (char*)malloc(buf_size);
+        if (*result) {
+            snprintf(*result, buf_size, "✓ Saved to memory: %s = %s", key, value);
+            *result_len = strlen(*result);
+        }
+        return 0;
+    } else {
+        *result = strdup("Error: Failed to save memory (storage may be full)");
         *result_len = strlen(*result);
+        return -1;
     }
-    
-    return 0;
 }
 
 // Read memory tool
 int tool_read_memory(ToolArgs* args, char** result, int* result_len) {
+    const char* key = tool_args_get(args, "key");
+    if (!key) key = tool_args_get(args, "arg");
+    
+    // If no key provided, list all keys (TODO: implement list in agent)
+    if (!key) {
+        *result = strdup("Memory list not implemented. Please provide a key.");
+        *result_len = strlen(*result);
+        return 0;
+    }
+    
+    // Read from memory storage using agent's memory interface
+    char* value = agent_memory_get(key);
+    if (value) {
+        size_t buf_size = strlen(key) + strlen(value) + 100;
+        *result = (char*)malloc(buf_size);
+        if (*result) {
+            snprintf(*result, buf_size, "✓ Memory value for '%s': %s", key, value);
+            *result_len = strlen(*result);
+        }
+        free(value);  // agent_memory_get returns strdup'd string
+        return 0;
+    } else {
+        size_t buf_size = strlen(key) + 100;
+        *result = (char*)malloc(buf_size);
+        if (*result) {
+            snprintf(*result, buf_size, "✗ No memory found for key: %s", key);
+            *result_len = strlen(*result);
+        }
+        return 0;
+    }
+}
+
+// Delete memory tool
+int tool_delete_memory(ToolArgs* args, char** result, int* result_len) {
     const char* key = tool_args_get(args, "key");
     if (!key) key = tool_args_get(args, "arg");
     
@@ -607,15 +618,24 @@ int tool_read_memory(ToolArgs* args, char** result, int* result_len) {
         return -1;
     }
     
-    // Here we would normally read from memory storage
-    // For now, just return a mock value
-    *result = (char*)malloc(100);
-    if (*result) {
-        snprintf(*result, 100, "Memory value for '%s': [mock value]", key);
-        *result_len = strlen(*result);
+    // Use agent's memory delete function
+    if (agent_memory_delete(key)) {
+        size_t buf_size = strlen(key) + 100;
+        *result = (char*)malloc(buf_size);
+        if (*result) {
+            snprintf(*result, buf_size, "✓ Deleted memory key: %s", key);
+            *result_len = strlen(*result);
+        }
+        return 0;
+    } else {
+        size_t buf_size = strlen(key) + 100;
+        *result = (char*)malloc(buf_size);
+        if (*result) {
+            snprintf(*result, buf_size, "✗ Key not found: %s", key);
+            *result_len = strlen(*result);
+        }
+        return 0;
     }
-    
-    return 0;
 }
 
 // Weather tool - calls wttr.in API

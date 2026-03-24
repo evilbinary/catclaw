@@ -3,6 +3,7 @@
 #include <string.h>
 #include <time.h>
 #include <sys/stat.h>
+#include <errno.h>
 
 #ifdef _WIN32
 #include <direct.h>
@@ -14,6 +15,54 @@
 
 #include "memory.h"
 #include "common/cJSON.h"
+#include "common/log.h"
+
+// Helper function to recursively create directories
+static bool mkdir_recursive(const char* path) {
+    if (!path || strlen(path) == 0) return false;
+    
+    // Check if directory already exists
+    struct stat st;
+    if (stat(path, &st) == 0) {
+        return true;  // Directory already exists
+    }
+    
+    // Find parent directory
+    char* parent = strdup(path);
+    if (!parent) return false;
+    
+    // Remove trailing slashes
+    size_t len = strlen(parent);
+    while (len > 0 && (parent[len-1] == '/' || parent[len-1] == '\\')) {
+        parent[len-1] = '\0';
+        len--;
+    }
+    
+    // Find last separator
+    char* last_slash = strrchr(parent, '/');
+#ifdef _WIN32
+    char* last_backslash = strrchr(parent, '\\');
+    if (last_backslash > last_slash) last_slash = last_backslash;
+#endif
+    
+    if (last_slash && last_slash != parent) {
+        // Recursively create parent directories
+        *last_slash = '\0';
+        if (!mkdir_recursive(parent)) {
+            free(parent);
+            return false;
+        }
+    }
+    
+    free(parent);
+    
+    // Create this directory
+    if (MKDIR(path) != 0 && errno != EEXIST) {
+        return false;
+    }
+    
+    return true;
+}
 
 // Initialize memory manager
 MemoryManager* memory_manager_init(const char* memory_dir) {
@@ -226,21 +275,25 @@ void memory_list(MemoryManager* manager) {
 
 // Save memory to file
 bool memory_save(MemoryManager* manager) {
+
     if (!manager || !manager->memory_dir) {
         return false;
     }
     
-    // Create memory directory if it doesn't exist
-    struct stat st;
-    if (stat(manager->memory_dir, &st) != 0) {
-        if (MKDIR(manager->memory_dir) != 0) {
-            return false;
-        }
+    // Build memory subdirectory path (memory_dir/memory/)
+    char memory_subdir[512];
+    snprintf(memory_subdir, sizeof(memory_subdir), "%s/memory", manager->memory_dir);
+    
+    // Create memory directory if it doesn't exist (recursively)
+    if (!mkdir_recursive(memory_subdir)) {
+        log_error("Failed to create memory directory: %s", memory_subdir);
+        return false;
     }
     
     // Create memory file
-    char memory_file[256];
-    snprintf(memory_file, sizeof(memory_file), "%s/memory.json", manager->memory_dir);
+    char memory_file[512];
+    snprintf(memory_file, sizeof(memory_file), "%s/memory.json", memory_subdir);
+    log_debug("Saving memory to: %s", memory_file);
     
     // Create JSON object
     cJSON* root = cJSON_CreateObject();
@@ -283,9 +336,9 @@ bool memory_load(MemoryManager* manager) {
         return false;
     }
     
-    // Create memory file path
-    char memory_file[256];
-    snprintf(memory_file, sizeof(memory_file), "%s/memory.json", manager->memory_dir);
+    // Create memory file path (memory_dir/memory/memory.json)
+    char memory_file[512];
+    snprintf(memory_file, sizeof(memory_file), "%s/memory/memory.json", manager->memory_dir);
     
     // Open file
     FILE* fp = fopen(memory_file, "r");
