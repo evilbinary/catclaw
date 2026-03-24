@@ -263,7 +263,7 @@ Debug mode enabled
 
 ## 许可证
 
-MIT License
+Apache License Version 2.0
 
 ## 联系方式
 
