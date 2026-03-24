@@ -3,6 +3,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <dirent.h>
+#include <sys/stat.h>
+
+// Default skill directory
+#define DEFAULT_SKILL_DIR "skills"
 
 // Global skill registry
 static SkillRegistry g_skill_registry = {
@@ -10,6 +15,49 @@ static SkillRegistry g_skill_registry = {
     .count = 0,
     .capacity = 0
 };
+
+// Auto-load skills from directory
+static int skill_auto_load_from_dir(const char *dir_path) {
+    DIR *dir = opendir(dir_path);
+    if (!dir) {
+        return 0;  // Directory doesn't exist, not an error
+    }
+    
+    int loaded = 0;
+    struct dirent *entry;
+    
+    while ((entry = readdir(dir)) != NULL) {
+        // Skip hidden files and directories
+        if (entry->d_name[0] == '.') {
+            continue;
+        }
+        
+        // Check if it's a .so file
+        const char *ext = strrchr(entry->d_name, '.');
+        if (!ext || strcmp(ext, ".so") != 0) {
+            continue;
+        }
+        
+        // Build full path
+        char full_path[512];
+        snprintf(full_path, sizeof(full_path), "%s/%s", dir_path, entry->d_name);
+        
+        // Check if file exists and is readable
+        struct stat st;
+        if (stat(full_path, &st) != 0 || !S_ISREG(st.st_mode)) {
+            continue;
+        }
+        
+        // Try to load the skill
+        printf("Auto-loading skill: %s\n", full_path);
+        if (skill_load(full_path)) {
+            loaded++;
+        }
+    }
+    
+    closedir(dir);
+    return loaded;
+}
 
 // Initialize skill system
 bool skill_system_init(void) {
@@ -20,6 +68,13 @@ bool skill_system_init(void) {
     }
     g_skill_registry.capacity = 10;
     g_skill_registry.count = 0;
+    
+    // Auto-load skills from default directory
+    int loaded = skill_auto_load_from_dir(DEFAULT_SKILL_DIR);
+    if (loaded > 0) {
+        printf("Auto-loaded %d skill(s) from %s\n", loaded, DEFAULT_SKILL_DIR);
+    }
+    
     return true;
 }
 
