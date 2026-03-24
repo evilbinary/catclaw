@@ -527,6 +527,12 @@ static bool feishu_ws_on_message(WsClient *ws, const char *data, size_t len, voi
             // 获取飞书 channel 实例
             ChannelInstance* feishu_channel = channel_first_of_type(CHANNEL_FEISHU);
 
+            // 动态更新回复目标（用于流式回复）
+            const char* reply_target = msg->chat_id ? msg->chat_id : msg->sender_id;
+            if (reply_target && feishu_channel) {
+                feishu_set_receive_id(feishu_channel, reply_target, "chat_id");
+            }
+
             // 构建统一消息结构
             ChannelIncomingMessage incoming_msg = {
                 .content = msg->content,
@@ -539,7 +545,7 @@ static bool feishu_ws_on_message(WsClient *ws, const char *data, size_t len, voi
             // 使用统一消息处理入口
             char* response = NULL;
             bool handled = channel_handle_incoming_message(feishu_channel, &incoming_msg, &response);
-
+            log_debug("handled incoming_msg %s ===> %d response %s", msg->content,handled, response);
             if (handled && response) {
                 // 已处理（命令或自定义处理），发送响应
                 const char* reply_id = msg->chat_id ? msg->chat_id : msg->sender_id;

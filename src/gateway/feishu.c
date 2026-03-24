@@ -376,13 +376,6 @@ static bool feishu_send_message(ChannelInstance *channel, const char *message) {
     return feishu_send_via_api(config, message);
 }
 
-// 接收消息
-static bool feishu_receive_message(ChannelInstance *channel, const char *message) {
-    (void)channel;  // unused
-    printf("[Feishu] Receiving message: %s\n", message);
-    return true;
-}
-
 // 流式发送消息 (打字机效果) - 完整消息一次性发送
 static bool feishu_stream_send_callback(ChannelInstance *channel, const char *message) {
     FeishuConfig *config = (FeishuConfig *)channel->config;
@@ -522,7 +515,7 @@ void feishu_channel_init(ChannelInstance *channel, ChannelConfig *base_config) {
     channel->connect = feishu_connect;
     channel->disconnect = feishu_disconnect;
     channel->send_message = feishu_send_message;
-    channel->receive_message = feishu_receive_message;
+    channel->receive_message = NULL;  // 使用默认消息处理流程
     channel->cleanup = feishu_cleanup;
     channel->stream_ctx = NULL;
     
@@ -763,40 +756,37 @@ char* feishu_handle_event(const char *body) {
                                  msg->content);
                         
                         // 检查是否是命令（以 / 开头）
-                        char* cmd_response = command_handle(msg->content);
-                        if (cmd_response) {
-                            // 是命令，直接回复结果
-                            log_info("[Feishu] Command received: %s", msg->content);
-                            
-                            // 发送命令响应回飞书（使用 chat_id 回复到同一个会话）
+                        // 获取飞书 channel 实例
+                        ChannelInstance* feishu_channel = channel_first_of_type(CHANNEL_FEISHU);
+
+                        // 动态更新回复目标（用于流式回复）
+                        const char* reply_target = msg->chat_id ? msg->chat_id : msg->sender_id;
+                        if (reply_target && feishu_channel) {
+                            feishu_set_receive_id(feishu_channel, reply_target, "chat_id");
+                        }
+
+                        // 构建统一消息结构
+                        ChannelIncomingMessage incoming_msg = {
+                            .content = msg->content,
+                            .sender_id = msg->sender_id,
+                            .chat_id = msg->chat_id,
+                            .message_id = msg->message_id,
+                            .extra = NULL
+                        };
+
+                        // 使用统一消息处理入口
+                        char* response = NULL;
+                        bool handled = channel_handle_incoming_message(feishu_channel, &incoming_msg, &response);
+
+                        if (handled && response) {
+                            // 已处理（命令或自定义处理），发送响应
                             const char* reply_id = msg->chat_id ? msg->chat_id : msg->sender_id;
                             if (reply_id) {
-                                feishu_reply_to_chat(reply_id, cmd_response);
+                                feishu_reply_to_chat(reply_id, response);
                             } else {
-                                // 没有 chat_id，广播到所有飞书渠道
-                                channel_send_message_to_type(CHANNEL_FEISHU, cmd_response);
+                                channel_send_message_to_type(CHANNEL_FEISHU, response);
                             }
-                            free(cmd_response);
-                        } else {
-                            // 不是命令，发送到 agent 处理
-                            // 构建带有上下文的消息
-                            // 格式: [feishu:sender_id:message_id] content
-                            char *context_msg = (char *)malloc(512 + strlen(msg->content));
-                            if (context_msg) {
-                                snprintf(context_msg, 512 + strlen(msg->content),
-                                         "[feishu:%s:%s] %s",
-                                         msg->sender_id ? msg->sender_id : "unknown",
-                                         msg->chat_id ? msg->chat_id : msg->message_id,
-                                         msg->content);
-                                
-                                // 发送到 agent
-                                if (agent_send_message(context_msg)) {
-                                    log_info("[Feishu] Message sent to agent successfully");
-                                } else {
-                                    log_error("[Feishu] Failed to send message to agent");
-                                }
-                                free(context_msg);
-                            }
+                            free(response);
                         }
                         
                         feishu_message_free(msg);

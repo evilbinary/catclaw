@@ -553,14 +553,10 @@ bool channel_handle_incoming_message(ChannelInstance *channel, ChannelIncomingMe
     }
 
     // 3. 发送到 agent 处理
-    char* context_msg = channel_build_context_message(channel, msg);
-    if (context_msg) {
-        if (agent_send_message(context_msg)) {
-            log_info("[Channel] Message sent to agent from %s", channel->name);
-        } else {
-            log_error("[Channel] Failed to send message to agent from %s", channel->name);
-        }
-        free(context_msg);
+    if (agent_send_message(msg->content)) {
+        log_info("[Channel] Message sent to agent from %s", channel->name);
+    } else {
+        log_error("[Channel] Failed to send message to agent from %s", channel->name);
     }
 
     return false;  // 消息已发送到 agent，没有即时响应
@@ -759,3 +755,4 @@ void channel_stream_submit_task(ChannelInstance *channel, StreamTaskType type, c
         thread_pool_add_task(g_channel_manager.pool, stream_process_queue, channel);
     }
 }
+
