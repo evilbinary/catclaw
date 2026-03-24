@@ -1,5 +1,6 @@
 #include "config.h"
 #include "common/cJSON.h"
+#include "common/utils.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -354,11 +355,12 @@ static void parse_gateway_config(cJSON *gateway) {
 // Parse workspace configuration
 static void parse_workspace_config(cJSON *workspace) {
     if (!workspace) return;
-    
+
     cJSON *path = cJSON_GetObjectItem(workspace, "path");
     if (path && cJSON_IsString(path)) {
         free(g_config.workspace.path);
-        g_config.workspace.path = strdup(path->valuestring);
+        // Resolve path (handles ~ expansion)
+        g_config.workspace.path = resolve_path(path->valuestring);
     }
 }
 
@@ -695,11 +697,13 @@ static void parse_legacy_config(cJSON *root) {
         workspace = cJSON_GetObjectItem(root, "workspace_dir");
     }
     if (workspace && cJSON_IsString(workspace)) {
+        // Resolve path (handles ~ expansion)
+        char *resolved = resolve_path(workspace->valuestring);
         free(g_config.workspace_path);
-        g_config.workspace_path = strdup(workspace->valuestring);
+        g_config.workspace_path = resolved ? strdup(resolved) : NULL;
         // Also set new config
         free(g_config.workspace.path);
-        g_config.workspace.path = strdup(workspace->valuestring);
+        g_config.workspace.path = resolved;
     }
 
     // Parse model provider

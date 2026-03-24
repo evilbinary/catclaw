@@ -14,6 +14,7 @@
 #include "common/cJSON.h"
 #include "common/http_client.h"
 #include "common/log.h"
+#include "common/utils.h"
 
 // Forward declarations for agent memory functions
 // These are implemented in agent/agent.c
@@ -21,63 +22,6 @@ extern bool agent_memory_set(const char *key, const char *value);
 extern char *agent_memory_get(const char *key);
 extern bool agent_memory_clear(void);
 extern bool agent_memory_delete(const char *key);
-
-// Resolve relative path to absolute path
-// If path starts with '/', return as-is (absolute path)
-// If path starts with '~', expand to home directory
-// Otherwise, resolve relative to current working directory
-static char* resolve_path(const char* path) {
-    if (!path) return NULL;
-    
-    // Absolute path - return copy
-    if (path[0] == '/') {
-        return strdup(path);
-    }
-    
-    // Home directory expansion
-    if (path[0] == '~') {
-        const char* home = getenv("HOME");
-#ifdef _WIN32
-        if (!home) {
-            home = getenv("USERPROFILE");
-        }
-#else
-        if (!home) {
-            struct passwd* pw = getpwuid(getuid());
-            if (pw) home = pw->pw_dir;
-        }
-#endif
-        if (home) {
-            size_t home_len = strlen(home);
-            size_t path_len = strlen(path);
-            char* resolved = malloc(home_len + path_len + 1);
-            if (!resolved) return NULL;
-            strcpy(resolved, home);
-            strcat(resolved, path + 1);  // Skip the '~'
-            return resolved;
-        }
-    }
-    
-    // Relative path - resolve against current working directory
-    char cwd[1024];
-    if (!getcwd(cwd, sizeof(cwd))) {
-        return strdup(path);  // Fallback to original path
-    }
-    
-    size_t cwd_len = strlen(cwd);
-    size_t path_len = strlen(path);
-    
-    char* resolved = malloc(cwd_len + path_len + 2);
-    if (!resolved) return NULL;
-    
-    strcpy(resolved, cwd);
-    if (cwd_len > 0 && cwd[cwd_len - 1] != '/') {
-        strcat(resolved, "/");
-    }
-    strcat(resolved, path);
-    
-    return resolved;
-}
 
 // Helper to get argument value by key
 const char* tool_args_get(ToolArgs* args, const char* key) {
