@@ -10,6 +10,29 @@
 #include <sys/stat.h>
 #include <ctype.h>
 
+// Windows compatibility
+#ifdef _WIN32
+  #include <direct.h>
+  #define mkdir(path, mode) _mkdir(path)
+#endif
+
+// Cross-platform strndup (Windows doesn't have it)
+#ifndef HAVE_STRNDUP
+static char* strndup_impl(const char* s, size_t n) {
+    size_t len = 0;
+    while (len < n && s[len] != '\0') {
+        len++;
+    }
+    char* result = (char*)malloc(len + 1);
+    if (result) {
+        memcpy(result, s, len);
+        result[len] = '\0';
+    }
+    return result;
+}
+#define strndup(s, n) strndup_impl(s, n)
+#endif
+
 // Skill directories (loaded in order: low priority first)
 #define SKILL_DIR_BUILTIN   NULL  // Built-in skills are registered programmatically
 #define SKILL_DIR_PLUGIN    "skills"
