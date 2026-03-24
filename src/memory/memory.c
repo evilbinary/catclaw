@@ -280,15 +280,19 @@ bool memory_save(MemoryManager* manager) {
         return false;
     }
     
+    // Build memory subdirectory path (memory_dir/memory/)
+    char memory_subdir[512];
+    snprintf(memory_subdir, sizeof(memory_subdir), "%s/memory", manager->memory_dir);
+    
     // Create memory directory if it doesn't exist (recursively)
-    if (!mkdir_recursive(manager->memory_dir)) {
-        log_error("Failed to create memory directory: %s", manager->memory_dir);
+    if (!mkdir_recursive(memory_subdir)) {
+        log_error("Failed to create memory directory: %s", memory_subdir);
         return false;
     }
     
     // Create memory file
-    char memory_file[256];
-    snprintf(memory_file, sizeof(memory_file), "%s/memory.json", manager->memory_dir);
+    char memory_file[512];
+    snprintf(memory_file, sizeof(memory_file), "%s/memory.json", memory_subdir);
     log_debug("Saving memory to: %s", memory_file);
     
     // Create JSON object
@@ -332,9 +336,9 @@ bool memory_load(MemoryManager* manager) {
         return false;
     }
     
-    // Create memory file path
-    char memory_file[256];
-    snprintf(memory_file, sizeof(memory_file), "%s/memory.json", manager->memory_dir);
+    // Create memory file path (memory_dir/memory/memory.json)
+    char memory_file[512];
+    snprintf(memory_file, sizeof(memory_file), "%s/memory/memory.json", manager->memory_dir);
     
     // Open file
     FILE* fp = fopen(memory_file, "r");
