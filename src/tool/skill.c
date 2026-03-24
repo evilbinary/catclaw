@@ -1,13 +1,17 @@
 #include "skill.h"
 #include "common/plugin.h"
+#include "common/log.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <dirent.h>
 #include <sys/stat.h>
 
-// Default skill directory
-#define DEFAULT_SKILL_DIR "skills"
+// Skill directories (loaded in order: low priority first)
+#define SKILL_DIR_BUILTIN   NULL  // Built-in skills are registered programmatically
+#define SKILL_DIR_PLUGIN    "skills"
+#define SKILL_DIR_LOCAL     "local_skills"
+#define MAX_PATH_LEN        512
 
 // Global skill registry
 static SkillRegistry g_skill_registry = {
@@ -16,8 +20,42 @@ static SkillRegistry g_skill_registry = {
     .capacity = 0
 };
 
-// Auto-load skills from directory
-static int skill_auto_load_from_dir(const char *dir_path) {
+// Forward declaration
+static bool skill_add_to_registry(Skill *skill);
+
+// Get skill source name string
+static const char *skill_source_name(SkillSource source) {
+    switch (source) {
+        case SKILL_SOURCE_BUILTIN:   return "builtin";
+        case SKILL_SOURCE_PLUGIN:    return "plugin";
+        case SKILL_SOURCE_LOCAL:     return "local";
+        case SKILL_SOURCE_WORKSPACE: return "workspace";
+        default: return "unknown";
+    }
+}
+
+// Get workspace skills directory path
+static char *get_workspace_skills_path(void) {
+    char *home = getenv("HOME");
+    if (!home) {
+        return NULL;
+    }
+    
+    char *path = malloc(MAX_PATH_LEN);
+    if (!path) {
+        return NULL;
+    }
+    
+    snprintf(path, MAX_PATH_LEN, "%s/.catclaw/workspace/skills", home);
+    return path;
+}
+
+// Auto-load skills from directory with specified source type
+static int skill_auto_load_from_dir(const char *dir_path, SkillSource source) {
+    if (!dir_path) {
+        return 0;
+    }
+    
     DIR *dir = opendir(dir_path);
     if (!dir) {
         return 0;  // Directory doesn't exist, not an error
@@ -39,7 +77,7 @@ static int skill_auto_load_from_dir(const char *dir_path) {
         }
         
         // Build full path
-        char full_path[512];
+        char full_path[MAX_PATH_LEN];
         snprintf(full_path, sizeof(full_path), "%s/%s", dir_path, entry->d_name);
         
         // Check if file exists and is readable
@@ -49,8 +87,8 @@ static int skill_auto_load_from_dir(const char *dir_path) {
         }
         
         // Try to load the skill
-        printf("Auto-loading skill: %s\n", full_path);
-        if (skill_load(full_path)) {
+        log_info("[Skill] Auto-loading %s skill: %s", skill_source_name(source), full_path);
+        if (skill_load_from_source(full_path, source)) {
             loaded++;
         }
     }
@@ -61,20 +99,45 @@ static int skill_auto_load_from_dir(const char *dir_path) {
 
 // Initialize skill system
 bool skill_system_init(void) {
-    g_skill_registry.skills = malloc(sizeof(Skill *) * 10);
+    g_skill_registry.skills = malloc(sizeof(Skill *) * 20);
     if (!g_skill_registry.skills) {
         fprintf(stderr, "Failed to allocate memory for skill registry\n");
         return false;
     }
-    g_skill_registry.capacity = 10;
+    g_skill_registry.capacity = 20;
     g_skill_registry.count = 0;
     
-    // Auto-load skills from default directory
-    int loaded = skill_auto_load_from_dir(DEFAULT_SKILL_DIR);
-    if (loaded > 0) {
-        printf("Auto-loaded %d skill(s) from %s\n", loaded, DEFAULT_SKILL_DIR);
+    int total_loaded = 0;
+    
+    // Load skills in priority order (low to high, so higher priority overrides)
+    // 1. Built-in skills (registered programmatically, skip directory scan)
+    
+    // 2. Plugin skills (from skills/ directory)
+    int plugin_skills = skill_auto_load_from_dir(SKILL_DIR_PLUGIN, SKILL_SOURCE_PLUGIN);
+    if (plugin_skills > 0) {
+        log_info("[Skill] Loaded %d plugin skill(s) from %s", plugin_skills, SKILL_DIR_PLUGIN);
+        total_loaded += plugin_skills;
     }
     
+    // 3. Local skills (from ./local_skills/)
+    int local_skills = skill_auto_load_from_dir(SKILL_DIR_LOCAL, SKILL_SOURCE_LOCAL);
+    if (local_skills > 0) {
+        log_info("[Skill] Loaded %d local skill(s) from %s", local_skills, SKILL_DIR_LOCAL);
+        total_loaded += local_skills;
+    }
+    
+    // 4. Workspace skills (from ~/.catclaw/workspace/skills/)
+    char *workspace_path = get_workspace_skills_path();
+    if (workspace_path) {
+        int workspace_skills = skill_auto_load_from_dir(workspace_path, SKILL_SOURCE_WORKSPACE);
+        if (workspace_skills > 0) {
+            log_info("[Skill] Loaded %d workspace skill(s) from %s", workspace_skills, workspace_path);
+            total_loaded += workspace_skills;
+        }
+        free(workspace_path);
+    }
+    
+    log_info("[Skill] System initialized with %d skill(s)", total_loaded);
     return true;
 }
 
@@ -88,6 +151,7 @@ void skill_system_cleanup(void) {
             free(skill->version);
             free(skill->author);
             free(skill->category);
+            free(skill->path);
             free(skill);
         }
     }
@@ -97,15 +161,77 @@ void skill_system_cleanup(void) {
     g_skill_registry.capacity = 0;
 }
 
-// Load a skill from a plugin
-bool skill_load(const char *path) {
-    // Load the plugin
-    if (!plugin_load(path)) {
-        fprintf(stderr, "Failed to load plugin: %s\n", path);
-        return false;
+// Add skill to registry (handles override by source priority)
+static bool skill_add_to_registry(Skill *new_skill) {
+    // Check if skill with same name exists
+    for (int i = 0; i < g_skill_registry.count; i++) {
+        Skill *existing = g_skill_registry.skills[i];
+        if (existing && strcmp(existing->name, new_skill->name) == 0) {
+            // Compare source priority
+            if (new_skill->source >= existing->source) {
+                // New skill has higher or equal priority, replace
+                log_info("[Skill] Replacing '%s' (%s -> %s)", 
+                         existing->name,
+                         skill_source_name(existing->source),
+                         skill_source_name(new_skill->source));
+                
+                // Free existing skill
+                free(existing->name);
+                free(existing->description);
+                free(existing->version);
+                free(existing->author);
+                free(existing->category);
+                free(existing->path);
+                free(existing);
+                
+                // Replace with new skill
+                g_skill_registry.skills[i] = new_skill;
+                return true;
+            } else {
+                // Existing skill has higher priority, skip new skill
+                log_info("[Skill] Keeping existing '%s' (%s, new skill '%s' ignored)",
+                         existing->name,
+                         skill_source_name(existing->source),
+                         skill_source_name(new_skill->source));
+                
+                // Free new skill
+                free(new_skill->name);
+                free(new_skill->description);
+                free(new_skill->version);
+                free(new_skill->author);
+                free(new_skill->category);
+                free(new_skill->path);
+                free(new_skill);
+                
+                return false;  // Not added, but not an error
+            }
+        }
     }
     
-    // Get the plugin name from the path
+    // No existing skill with same name, add new one
+    if (g_skill_registry.count >= g_skill_registry.capacity) {
+        int new_capacity = g_skill_registry.capacity * 2;
+        Skill **new_skills = realloc(g_skill_registry.skills, sizeof(Skill *) * new_capacity);
+        if (!new_skills) {
+            fprintf(stderr, "Failed to reallocate memory for skill registry\n");
+            return false;
+        }
+        g_skill_registry.skills = new_skills;
+        g_skill_registry.capacity = new_capacity;
+    }
+    
+    g_skill_registry.skills[g_skill_registry.count] = new_skill;
+    g_skill_registry.count++;
+    return true;
+}
+
+// Load a skill from a plugin (default source: PLUGIN)
+bool skill_load(const char *path) {
+    return skill_load_from_source(path, SKILL_SOURCE_PLUGIN);
+}
+
+// Unload a plugin by extracting name from path
+static void unload_plugin_by_path(const char *path) {
     const char *plugin_name = strrchr(path, '/');
     if (!plugin_name) {
         plugin_name = strrchr(path, '\\');
@@ -116,11 +242,76 @@ bool skill_load(const char *path) {
         plugin_name = path;
     }
     
-    // Remove file extension
+    // Remove extension
     char *name_copy = strdup(plugin_name);
     char *dot = strrchr(name_copy, '.');
     if (dot) {
         *dot = '\0';
+    }
+    
+    plugin_unload(name_copy);
+    free(name_copy);
+}
+
+// Load a skill from a plugin with specified source
+bool skill_load_from_source(const char *path, SkillSource source) {
+    // Get the plugin name from the path first
+    const char *plugin_name = strrchr(path, '/');
+    if (!plugin_name) {
+        plugin_name = strrchr(path, '\\');
+    }
+    if (plugin_name) {
+        plugin_name++;
+    } else {
+        plugin_name = path;
+    }
+    
+    // Make a copy for later use
+    char *name_copy = strdup(plugin_name);
+    char *dot = strrchr(name_copy, '.');
+    if (dot) {
+        *dot = '\0';
+    }
+    
+    // Check if plugin already loaded (same filename), if so, check priority
+    Plugin *existing_plugin = plugin_find(name_copy);
+    if (existing_plugin) {
+        // Plugin file already loaded, check if we need to replace
+        // Find the skill using this plugin
+        for (int i = 0; i < g_skill_registry.count; i++) {
+            Skill *existing = g_skill_registry.skills[i];
+            if (existing && existing->source < source) {
+                // Lower priority skill exists, unload it first
+                log_info("[Skill] Unloading lower priority skill: %s", existing->name);
+                
+                // Free skill data
+                free(existing->name);
+                free(existing->description);
+                free(existing->version);
+                free(existing->author);
+                free(existing->category);
+                free(existing->path);
+                free(existing);
+                
+                // Shift remaining skills
+                for (int j = i; j < g_skill_registry.count - 1; j++) {
+                    g_skill_registry.skills[j] = g_skill_registry.skills[j + 1];
+                }
+                g_skill_registry.count--;
+                break;
+            }
+        }
+        
+        // Unload the old plugin
+        plugin_unload(name_copy);
+        existing_plugin = NULL;
+    }
+    
+    // Load the plugin
+    if (!plugin_load(path)) {
+        fprintf(stderr, "Failed to load plugin: %s\n", path);
+        free(name_copy);
+        return false;
     }
     
     // Find the plugin
@@ -159,30 +350,45 @@ bool skill_load(const char *path) {
     skill->category = get_skill_category() ? strdup(get_skill_category()) : strdup("General");
     skill->execute = skill_execute_func;
     skill->enabled = true;
+    skill->source = source;
+    skill->path = strdup(path);
     
-    // Add to registry
-    if (g_skill_registry.count >= g_skill_registry.capacity) {
-        int new_capacity = g_skill_registry.capacity * 2;
-        Skill **new_skills = realloc(g_skill_registry.skills, sizeof(Skill *) * new_capacity);
-        if (!new_skills) {
-            fprintf(stderr, "Failed to reallocate memory for skill registry\n");
-            free(skill->name);
-            free(skill->description);
-            free(skill->version);
-            free(skill->author);
-            free(skill->category);
-            free(skill);
-            return false;
-        }
-        g_skill_registry.skills = new_skills;
-        g_skill_registry.capacity = new_capacity;
+    if (skill_add_to_registry(skill)) {
+        log_info("[Skill] Loaded: %s [%s]", skill->name, skill_source_name(source));
+        return true;
     }
     
-    g_skill_registry.skills[g_skill_registry.count] = skill;
-    g_skill_registry.count++;
+    return false;
+}
+
+// Register a built-in skill
+bool skill_register_builtin(const char *name, const char *description,
+                            const char *version, char *(*execute)(const char *)) {
+    if (!name || !execute) {
+        return false;
+    }
     
-    printf("Skill loaded: %s\n", skill->name);
-    return true;
+    Skill *skill = malloc(sizeof(Skill));
+    if (!skill) {
+        return false;
+    }
+    
+    skill->name = strdup(name);
+    skill->description = description ? strdup(description) : strdup("");
+    skill->version = version ? strdup(version) : strdup("1.0");
+    skill->author = strdup("CatClaw");
+    skill->category = strdup("Built-in");
+    skill->execute = execute;
+    skill->enabled = true;
+    skill->source = SKILL_SOURCE_BUILTIN;
+    skill->path = NULL;
+    
+    if (skill_add_to_registry(skill)) {
+        log_info("[Skill] Registered built-in skill: %s", name);
+        return true;
+    }
+    
+    return false;
 }
 
 // Unload a skill
@@ -190,10 +396,25 @@ bool skill_unload(const char *name) {
     for (int i = 0; i < g_skill_registry.count; i++) {
         Skill *skill = g_skill_registry.skills[i];
         if (skill && strcmp(skill->name, name) == 0) {
-            // Unload the plugin
-            if (!plugin_unload(name)) {
-                fprintf(stderr, "Failed to unload plugin for skill: %s\n", name);
-                return false;
+            // For plugin-based skills, unload the plugin
+            if (skill->source != SKILL_SOURCE_BUILTIN && skill->path) {
+                // Extract plugin name from path for plugin_unload
+                const char *plugin_name = strrchr(skill->path, '/');
+                if (plugin_name) {
+                    plugin_name++;
+                } else {
+                    plugin_name = skill->path;
+                }
+                
+                // Remove extension
+                char *name_copy = strdup(plugin_name);
+                char *dot = strrchr(name_copy, '.');
+                if (dot) {
+                    *dot = '\0';
+                }
+                
+                plugin_unload(name_copy);
+                free(name_copy);
             }
             
             // Remove from registry
@@ -202,6 +423,7 @@ bool skill_unload(const char *name) {
             free(skill->version);
             free(skill->author);
             free(skill->category);
+            free(skill->path);
             free(skill);
             
             // Shift remaining skills
@@ -210,7 +432,7 @@ bool skill_unload(const char *name) {
             }
             g_skill_registry.count--;
             
-            printf("Skill unloaded: %s\n", name);
+            log_info("[Skill] Unloaded: %s", name);
             return true;
         }
     }
@@ -219,15 +441,21 @@ bool skill_unload(const char *name) {
     return false;
 }
 
-// Find a skill by name
+// Find a skill by name (returns highest priority if duplicates exist)
 Skill *skill_find(const char *name) {
+    Skill *found = NULL;
+    
     for (int i = 0; i < g_skill_registry.count; i++) {
         Skill *skill = g_skill_registry.skills[i];
         if (skill && strcmp(skill->name, name) == 0) {
-            return skill;
+            // Return first match (registry maintains priority order after add_to_registry)
+            if (!found || skill->source > found->source) {
+                found = skill;
+            }
         }
     }
-    return NULL;
+    
+    return found;
 }
 
 // Execute a skill
@@ -262,10 +490,13 @@ void skill_list(void) {
     for (int i = 0; i < g_skill_registry.count; i++) {
         Skill *skill = g_skill_registry.skills[i];
         if (skill) {
-            printf("  %s (%s) - %s\n", skill->name, skill->version, skill->description);
-            printf("    Author: %s\n", skill->author);
-            printf("    Category: %s\n", skill->category);
-            printf("    Status: %s\n", skill->enabled ? "Enabled" : "Disabled");
+            printf("  %s (%s) [%s] - %s\n", 
+                   skill->name, skill->version, 
+                   skill_source_name(skill->source), 
+                   skill->description);
+            printf("    Author: %s | Category: %s | %s\n", 
+                   skill->author, skill->category,
+                   skill->enabled ? "Enabled" : "Disabled");
         }
     }
 }

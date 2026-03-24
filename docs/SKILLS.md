@@ -6,7 +6,25 @@
 
 技能是CatClaw中可扩展的功能模块，用于执行特定任务或提供特定服务。技能以插件形式实现，通过动态加载机制集成到系统中。
 
-除了支持插件技能Plguin Skills，我们的catclaw需要支持工作技能工作区技能（Workspace Skills）md文档，冲突处理：同名技能以工作区 > 本地 > 插件 > 内置的顺序覆盖
+### 技能来源与优先级
+
+CatClaw 支持多种技能来源，按优先级从高到低排列：
+
+| 来源 | 目录 | 优先级 | 说明 |
+|------|------|--------|------|
+| Workspace Skills | `~/.catclaw/workspace/skills/` | 最高 | 工作区技能，用户自定义，可覆盖其他技能 |
+| Local Skills | `./local_skills/` | 高 | 本地技能，项目级自定义 |
+| Plugin Skills | `./skills/` | 中 | 插件技能，标准的动态加载技能 |
+| Built-in Skills | - | 低 | 内置技能，编译时注册 |
+
+**冲突处理**：同名技能按优先级覆盖，高优先级技能会替换低优先级技能。例如，工作区中的 `weather` 技能会覆盖插件目录中的同名技能。
+
+### 自动加载机制
+
+系统启动时会自动扫描并加载以下目录中的技能：
+1. `skills/` - 插件技能
+2. `local_skills/` - 本地技能
+3. `~/.catclaw/workspace/skills/` - 工作区技能
 
 ## 技能插件结构
 
@@ -160,33 +178,64 @@ void *plugin_get_function(const char *name) {
 
 ### 加载技能
 ```
-skill load <path>
+/skill load <path>
 ```
 
 ### 卸载技能
 ```
-skill unload <name>
+/skill unload <name>
 ```
 
 ### 执行技能
 ```
-skill execute <name> [params]
+/skill execute <name> [params]
 ```
 
 ### 列出技能
 ```
-skills list
+/skill list
 ```
+
+输出格式：
+```
+Loaded skills:
+  weather (1.0) [plugin] - Get weather information for a location
+    Author: CatClaw Team | Category: Utility | Enabled
+```
+
+方括号中的内容表示技能来源：`[builtin]`、`[plugin]`、`[local]`、`[workspace]`
 
 ### 启用技能
 ```
-skill enable <name>
+/skill enable <name>
 ```
 
 ### 禁用技能
 ```
-skill disable <name>
+/skill disable <name>
 ```
+
+## 内置技能注册
+
+内置技能是编译时直接注册到程序中的技能，无需动态库。使用 `skill_register_builtin` 函数注册：
+
+```c
+// 示例：注册一个内置计算器技能
+char *builtin_calculator(const char *params) {
+    // 实现计算逻辑
+    return strdup("result");
+}
+
+// 在初始化时注册
+skill_register_builtin(
+    "calculator",           // 技能名称
+    "Simple calculator",    // 描述
+    "1.0",                  // 版本
+    builtin_calculator      // 执行函数
+);
+```
+
+内置技能优先级最低，可以被插件、本地或工作区技能覆盖。
 
 ## 技能开发最佳实践
 
