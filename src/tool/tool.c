@@ -15,163 +15,12 @@
 #include "common/http_client.h"
 #include "common/log.h"
 
-// ==================== Memory Storage System ====================
-
-typedef struct MemoryEntry {
-    char* key;
-    char* value;
-    time_t created_at;
-    time_t updated_at;
-    struct MemoryEntry* next;
-} MemoryEntry;
-
-static MemoryEntry* g_memory_store = NULL;
-static int g_memory_count = 0;
-#define MAX_MEMORY_ENTRIES 1000
-
-// Initialize memory storage
-static void memory_init(void) {
-    if (g_memory_store == NULL) {
-        g_memory_store = NULL;
-        g_memory_count = 0;
-        log_debug("[Memory] Storage initialized");
-    }
-}
-
-// Find memory entry by key
-static MemoryEntry* memory_find(const char* key) {
-    if (!key) return NULL;
-    
-    MemoryEntry* entry = g_memory_store;
-    while (entry) {
-        if (strcmp(entry->key, key) == 0) {
-            return entry;
-        }
-        entry = entry->next;
-    }
-    return NULL;
-}
-
-// Save value to memory
-static bool memory_save(const char* key, const char* value) {
-    if (!key || !value) return false;
-    
-    memory_init();
-    
-    // Check if key already exists
-    MemoryEntry* entry = memory_find(key);
-    if (entry) {
-        // Update existing entry
-        free(entry->value);
-        entry->value = strdup(value);
-        entry->updated_at = time(NULL);
-        log_debug("[Memory] Updated: %s = %s", key, value);
-        return true;
-    }
-    
-    // Check limit
-    if (g_memory_count >= MAX_MEMORY_ENTRIES) {
-        log_error("[Memory] Storage limit reached (%d entries)", MAX_MEMORY_ENTRIES);
-        return false;
-    }
-    
-    // Create new entry
-    entry = (MemoryEntry*)malloc(sizeof(MemoryEntry));
-    if (!entry) return false;
-    
-    entry->key = strdup(key);
-    entry->value = strdup(value);
-    entry->created_at = time(NULL);
-    entry->updated_at = entry->created_at;
-    entry->next = g_memory_store;
-    g_memory_store = entry;
-    g_memory_count++;
-    
-    log_debug("[Memory] Saved: %s = %s (total: %d)", key, value, g_memory_count);
-    return true;
-}
-
-// Read value from memory
-static char* memory_read(const char* key) {
-    if (!key) return NULL;
-    
-    memory_init();
-    
-    MemoryEntry* entry = memory_find(key);
-    if (entry) {
-        log_debug("[Memory] Read: %s = %s", key, entry->value);
-        return strdup(entry->value);
-    }
-    
-    log_debug("[Memory] Key not found: %s", key);
-    return NULL;
-}
-
-// Delete memory entry
-static bool memory_delete(const char* key) {
-    if (!key) return false;
-    
-    MemoryEntry** current = &g_memory_store;
-    while (*current) {
-        MemoryEntry* entry = *current;
-        if (strcmp(entry->key, key) == 0) {
-            *current = entry->next;
-            free(entry->key);
-            free(entry->value);
-            free(entry);
-            g_memory_count--;
-            log_debug("[Memory] Deleted: %s (total: %d)", key, g_memory_count);
-            return true;
-        }
-        current = &entry->next;
-    }
-    
-    return false;
-}
-
-// List all memory keys
-static char* memory_list_keys(void) {
-    if (g_memory_count == 0) {
-        return strdup("No memory entries");
-    }
-    
-    // Calculate buffer size
-    size_t buf_size = 1024;
-    char* buf = (char*)malloc(buf_size);
-    if (!buf) return NULL;
-    
-    int offset = snprintf(buf, buf_size, "Memory entries (%d):\n", g_memory_count);
-    
-    MemoryEntry* entry = g_memory_store;
-    while (entry && offset < (int)buf_size - 100) {
-        char time_str[64];
-        struct tm* tm_info = localtime(&entry->updated_at);
-        strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", tm_info);
-        
-        int written = snprintf(buf + offset, buf_size - offset, 
-                               "  - %s (updated: %s)\n", 
-                               entry->key, time_str);
-        if (written > 0) offset += written;
-        entry = entry->next;
-    }
-    
-    return buf;
-}
-
-// Clear all memory
-static void memory_clear(void) {
-    MemoryEntry* entry = g_memory_store;
-    while (entry) {
-        MemoryEntry* next = entry->next;
-        free(entry->key);
-        free(entry->value);
-        free(entry);
-        entry = next;
-    }
-    g_memory_store = NULL;
-    g_memory_count = 0;
-    log_debug("[Memory] Storage cleared");
-}
+// Forward declarations for agent memory functions
+// These are implemented in agent/agent.c
+extern bool agent_memory_set(const char *key, const char *value);
+extern char *agent_memory_get(const char *key);
+extern bool agent_memory_clear(void);
+extern bool agent_memory_delete(const char *key);
 
 // Resolve relative path to absolute path
 // If path starts with '/', return as-is (absolute path)
@@ -744,8 +593,8 @@ int tool_save_memory(ToolArgs* args, char** result, int* result_len) {
         return -1;
     }
     
-    // Save to memory storage
-    if (memory_save(key, value)) {
+    // Save to memory storage using agent's memory interface
+    if (agent_memory_set(key, value)) {
         size_t buf_size = strlen(key) + strlen(value) + 100;
         *result = (char*)malloc(buf_size);
         if (*result) {
@@ -765,15 +614,15 @@ int tool_read_memory(ToolArgs* args, char** result, int* result_len) {
     const char* key = tool_args_get(args, "key");
     if (!key) key = tool_args_get(args, "arg");
     
-    // If no key provided, list all keys
+    // If no key provided, list all keys (TODO: implement list in agent)
     if (!key) {
-        *result = memory_list_keys();
+        *result = strdup("Memory list not implemented. Please provide a key.");
         *result_len = strlen(*result);
         return 0;
     }
     
-    // Read from memory storage
-    char* value = memory_read(key);
+    // Read from memory storage using agent's memory interface
+    char* value = agent_memory_get(key);
     if (value) {
         size_t buf_size = strlen(key) + strlen(value) + 100;
         *result = (char*)malloc(buf_size);
@@ -781,13 +630,44 @@ int tool_read_memory(ToolArgs* args, char** result, int* result_len) {
             snprintf(*result, buf_size, "✓ Memory value for '%s': %s", key, value);
             *result_len = strlen(*result);
         }
-        free(value);
+        free(value);  // agent_memory_get returns strdup'd string
         return 0;
     } else {
         size_t buf_size = strlen(key) + 100;
         *result = (char*)malloc(buf_size);
         if (*result) {
             snprintf(*result, buf_size, "✗ No memory found for key: %s", key);
+            *result_len = strlen(*result);
+        }
+        return 0;
+    }
+}
+
+// Delete memory tool
+int tool_delete_memory(ToolArgs* args, char** result, int* result_len) {
+    const char* key = tool_args_get(args, "key");
+    if (!key) key = tool_args_get(args, "arg");
+    
+    if (!key) {
+        *result = strdup("Error: No key provided");
+        *result_len = strlen(*result);
+        return -1;
+    }
+    
+    // Use agent's memory delete function
+    if (agent_memory_delete(key)) {
+        size_t buf_size = strlen(key) + 100;
+        *result = (char*)malloc(buf_size);
+        if (*result) {
+            snprintf(*result, buf_size, "✓ Deleted memory key: %s", key);
+            *result_len = strlen(*result);
+        }
+        return 0;
+    } else {
+        size_t buf_size = strlen(key) + 100;
+        *result = (char*)malloc(buf_size);
+        if (*result) {
+            snprintf(*result, buf_size, "✗ Key not found: %s", key);
             *result_len = strlen(*result);
         }
         return 0;
