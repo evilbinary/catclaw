@@ -68,12 +68,13 @@ typedef struct {
 
 // ==================== 流式消息系统 ====================
 
-// 全局流式状态
-static bool g_stream_active = false;
-
-// 节流控制
-static int g_last_sent_len = 0;
-static struct timespec g_last_update_time = {0, 0};
+// 流式状态结构体（支持多 context/agent）
+typedef struct {
+    bool active;
+    char* accumulated_content;  // 保存累积内容
+    int last_sent_len;          // 上次发送的长度
+    struct timespec last_update_time;
+} StreamState;
 
 #define STREAM_MIN_INTERVAL_MS  300  // 最小更新间隔（配合飞书API延迟）
 #define STREAM_MIN_CHARS        50   // 最小新增字符数
@@ -144,7 +145,8 @@ static bool tool_calls_is_complete(const char* content) {
 // AI 流式回调函数：往所有支持流式的 channel 推送任务
 static void stream_callback(const char* chunk, const char* accumulated, void* user_data) {
     (void)chunk;
-    (void)user_data;
+    StreamState* state = (StreamState*)user_data;
+    if (!state) return;
     
     // 检查 tool-calls 是否完整，不完整则等待更多内容
     if (!tool_calls_is_complete(accumulated)) {
@@ -155,13 +157,17 @@ static void stream_callback(const char* chunk, const char* accumulated, void* us
         return;
     }
     
+    // 保存累积内容（用于结束时发送剩余部分）
+    free(state->accumulated_content);
+    state->accumulated_content = strdup(accumulated);
+    
     int current_len = strlen(accumulated);
     
     // 第一个 chunk：启动所有支持流式的 channel
-    if (!g_stream_active) {
-        g_stream_active = true;
-        g_last_sent_len = current_len;
-        clock_gettime(CLOCK_MONOTONIC, &g_last_update_time);
+    if (!state->active) {
+        state->active = true;
+        state->last_sent_len = current_len;
+        clock_gettime(CLOCK_MONOTONIC, &state->last_update_time);
         
         StreamCallbackData data = { .content = accumulated };
         channels_foreach(stream_start_iterator, &data);
@@ -172,17 +178,17 @@ static void stream_callback(const char* chunk, const char* accumulated, void* us
     struct timespec now;
     clock_gettime(CLOCK_MONOTONIC, &now);
     
-    long elapsed_ms = (now.tv_sec - g_last_update_time.tv_sec) * 1000 +
-                       (now.tv_nsec - g_last_update_time.tv_nsec) / 1000000;
-    int chars_added = current_len - g_last_sent_len;
+    long elapsed_ms = (now.tv_sec - state->last_update_time.tv_sec) * 1000 +
+                       (now.tv_nsec - state->last_update_time.tv_nsec) / 1000000;
+    int chars_added = current_len - state->last_sent_len;
     
     // 判断是否需要更新
     bool should_update = (elapsed_ms >= STREAM_MIN_INTERVAL_MS && chars_added > 0) ||
                           (chars_added >= STREAM_MIN_CHARS);
     
     if (should_update) {
-        g_last_sent_len = current_len;
-        g_last_update_time = now;
+        state->last_sent_len = current_len;
+        state->last_update_time = now;
         
         log_debug("[TIMING] AI callback: elapsed=%ldms, chars_added=%d, len=%d", 
                   elapsed_ms, chars_added, current_len);
@@ -193,15 +199,27 @@ static void stream_callback(const char* chunk, const char* accumulated, void* us
 }
 
 // 结束流式消息
-static void end_stream_message(void) {
-    if (!g_stream_active) return;
+static void end_stream_message(StreamState* state) {
+    if (!state || !state->active) return;
+    
+    // 发送剩余未发送的内容
+    if (state->accumulated_content) {
+        int total_len = strlen(state->accumulated_content);
+        if (total_len > state->last_sent_len) {
+            log_debug("[Stream] Sending remaining content: %d chars", total_len - state->last_sent_len);
+            StreamCallbackData data = { .content = state->accumulated_content };
+            channels_foreach(stream_update_iterator, &data);
+        }
+        free(state->accumulated_content);
+        state->accumulated_content = NULL;
+    }
     
     channels_foreach(stream_end_iterator, NULL);
     
-    g_stream_active = false;
-    g_last_sent_len = 0;
-    g_last_update_time.tv_sec = 0;
-    g_last_update_time.tv_nsec = 0;
+    state->active = false;
+    state->last_sent_len = 0;
+    state->last_update_time.tv_sec = 0;
+    state->last_update_time.tv_nsec = 0;
     
     log_debug("[Stream] Ended stream message");
 }
@@ -799,11 +817,13 @@ void* agent_node_worker_thread(void* arg) {
                     log_debug("Calling AI model with %d messages in context\n", context->count);
                 }
                 
+                // 初始化流式状态（支持多 context/agent）
+                StreamState stream_state = {0};
+                
                 // 设置流式回调（如果 AI 配置了 stream 模式）
                 AIProvider* provider = ai_model_get_provider();
                 if (provider && provider->config.stream) {
-                    ai_model_set_stream_callback(stream_callback, NULL);
-                    g_stream_active = false;  // 重置流式状态
+                    ai_model_set_stream_callback(stream_callback, &stream_state);
                 }
                 
                 // Use configured system prompt or default
@@ -821,7 +841,7 @@ void* agent_node_worker_thread(void* arg) {
                     if (g_config.debug) {
                         log_debug("No response from AI model\n");
                     }
-                    end_stream_message();  // 结束流式消息
+                    end_stream_message(&stream_state);  // 结束流式消息
                     break;
                 }
                 
@@ -924,10 +944,10 @@ void* agent_node_worker_thread(void* arg) {
                         }
 
                         // 检查是否使用了流式模式
-                        bool used_stream = g_stream_active;
+                        bool used_stream = stream_state.active;
 
                         // 结束流式消息（如果流式模式已启动）
-                        end_stream_message();
+                        end_stream_message(&stream_state);
 
                         // 只有非流式模式才发送完整消息
                         // 流式模式下消息已经在回调中发送
@@ -940,7 +960,7 @@ void* agent_node_worker_thread(void* arg) {
                     }
                 } else {
                     printf("\n[AI Error]: %s\n\n", response->error);
-                    end_stream_message();  // 结束流式消息
+                    end_stream_message(&stream_state);  // 结束流式消息
                     ai_model_free_response(response);
                     break;
                 }
