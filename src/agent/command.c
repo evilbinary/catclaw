@@ -125,10 +125,11 @@ static char* cmd_status(void) {
     }
 
     // Gateway 状态
-    offset += snprintf(buf + offset, size - offset,
-        "\n🌐 Gateway:\n"
-        "  状态: %s\n",
-        gateway_is_running() ? "✓ 运行中" : "✗ 未启动");
+    char* gateway_str = gateway_status_string();
+    if (gateway_str) {
+        offset += snprintf(buf + offset, size - offset, "\n🌐 %s", gateway_str);
+        free(gateway_str);
+    }
 
     // Channels 状态
     char* channels_str = channels_status_string();
