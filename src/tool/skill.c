@@ -88,12 +88,16 @@ static int skill_auto_load_from_dir(const char *dir_path, SkillSource source) {
         return 0;
     }
     
+    log_info("[Skill] Scanning directory: %s", dir_path);
+    
     DIR *dir = opendir(dir_path);
     if (!dir) {
+        log_info("[Skill] Cannot open directory: %s (not an error, may not exist)", dir_path);
         return 0;  // Directory doesn't exist, not an error
     }
     
     int loaded = 0;
+    int scanned = 0;
     struct dirent *entry;
     
     while ((entry = readdir(dir)) != NULL) {
@@ -102,11 +106,17 @@ static int skill_auto_load_from_dir(const char *dir_path, SkillSource source) {
             continue;
         }
         
+        scanned++;
+        log_debug("[Skill] Found entry: %s", entry->d_name);
+        
         // Check file extension
         const char *ext = strrchr(entry->d_name, '.');
         if (!ext) {
+            log_debug("[Skill] No extension, skipping: %s", entry->d_name);
             continue;
         }
+        
+        log_debug("[Skill] Extension: %s for file: %s", ext, entry->d_name);
         
         // Build full path
         char full_path[MAX_PATH_LEN];
@@ -114,7 +124,12 @@ static int skill_auto_load_from_dir(const char *dir_path, SkillSource source) {
         
         // Check if file exists and is readable
         struct stat st;
-        if (stat(full_path, &st) != 0 || !S_ISREG(st.st_mode)) {
+        if (stat(full_path, &st) != 0) {
+            log_warn("[Skill] Cannot stat file: %s", full_path);
+            continue;
+        }
+        if (!S_ISREG(st.st_mode)) {
+            log_debug("[Skill] Not a regular file: %s", full_path);
             continue;
         }
         
@@ -128,14 +143,19 @@ static int skill_auto_load_from_dir(const char *dir_path, SkillSource source) {
             // Markdown skill
             log_info("[Skill] Auto-loading %s markdown: %s", skill_source_name(source), full_path);
             success = skill_load_markdown(full_path, source);
+        } else {
+            log_debug("[Skill] Unknown extension, skipping: %s", ext);
         }
         
         if (success) {
             loaded++;
+        } else {
+            log_warn("[Skill] Failed to load: %s", full_path);
         }
     }
     
     closedir(dir);
+    log_info("[Skill] Scanned %d entries, loaded %d skills from %s", scanned, loaded, dir_path);
     return loaded;
 }
 
