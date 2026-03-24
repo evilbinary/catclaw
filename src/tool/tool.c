@@ -587,6 +587,26 @@ int tool_save_memory(ToolArgs* args, char** result, int* result_len) {
     const char* key = tool_args_get(args, "key");
     const char* value = tool_args_get(args, "value");
     
+    // If key/value not provided as separate args, try to parse from "arg"
+    if (!key || !value) {
+        const char* arg = tool_args_get(args, "arg");
+        if (arg) {
+            // Parse "key value" format - first word is key, rest is value
+            char* arg_copy = strdup(arg);
+            char* space = strchr(arg_copy, ' ');
+            if (space) {
+                *space = '\0';
+                key = arg_copy;
+                value = space + 1;
+            } else {
+                free(arg_copy);
+                *result = strdup("Error: Invalid format. Use 'memory save <key> <value>'");
+                *result_len = strlen(*result);
+                return -1;
+            }
+        }
+    }
+    
     if (!key || !value) {
         *result = strdup("Error: Missing key or value parameter");
         *result_len = strlen(*result);
