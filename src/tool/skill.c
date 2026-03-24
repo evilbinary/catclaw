@@ -1,6 +1,8 @@
 #include "skill.h"
 #include "common/plugin.h"
 #include "common/log.h"
+#include "common/http_client.h"
+#include "common/cJSON.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -12,6 +14,7 @@
 #define SKILL_DIR_PLUGIN    "skills"
 #define SKILL_DIR_LOCAL     "local_skills"
 #define MAX_PATH_LEN        512
+#define MAX_FILE_SIZE       (1024 * 1024)  // 1MB max file size
 
 // Global skill registry
 static SkillRegistry g_skill_registry = {
@@ -20,16 +23,28 @@ static SkillRegistry g_skill_registry = {
     .capacity = 0
 };
 
-// Forward declaration
+// Forward declarations
 static bool skill_add_to_registry(Skill *skill);
+static void skill_free(Skill *skill);
 
 // Get skill source name string
-static const char *skill_source_name(SkillSource source) {
+const char *skill_source_name(SkillSource source) {
     switch (source) {
         case SKILL_SOURCE_BUILTIN:   return "builtin";
         case SKILL_SOURCE_PLUGIN:    return "plugin";
         case SKILL_SOURCE_LOCAL:     return "local";
         case SKILL_SOURCE_WORKSPACE: return "workspace";
+        case SKILL_SOURCE_HUB:       return "hub";
+        default: return "unknown";
+    }
+}
+
+// Get skill type name string
+const char *skill_type_name(SkillType type) {
+    switch (type) {
+        case SKILL_TYPE_PLUGIN:     return "plugin";
+        case SKILL_TYPE_MARKDOWN:   return "markdown";
+        case SKILL_TYPE_EXECUTABLE: return "executable";
         default: return "unknown";
     }
 }
@@ -47,6 +62,22 @@ static char *get_workspace_skills_path(void) {
     }
     
     snprintf(path, MAX_PATH_LEN, "%s/.catclaw/workspace/skills", home);
+    return path;
+}
+
+// Get hub cache directory path
+static char *get_hub_cache_path(void) {
+    char *home = getenv("HOME");
+    if (!home) {
+        return NULL;
+    }
+    
+    char *path = malloc(MAX_PATH_LEN);
+    if (!path) {
+        return NULL;
+    }
+    
+    snprintf(path, MAX_PATH_LEN, "%s/.catclaw/hub_skills", home);
     return path;
 }
 
@@ -70,9 +101,9 @@ static int skill_auto_load_from_dir(const char *dir_path, SkillSource source) {
             continue;
         }
         
-        // Check if it's a .so file
+        // Check file extension
         const char *ext = strrchr(entry->d_name, '.');
-        if (!ext || strcmp(ext, ".so") != 0) {
+        if (!ext) {
             continue;
         }
         
@@ -86,9 +117,19 @@ static int skill_auto_load_from_dir(const char *dir_path, SkillSource source) {
             continue;
         }
         
-        // Try to load the skill
-        log_info("[Skill] Auto-loading %s skill: %s", skill_source_name(source), full_path);
-        if (skill_load_from_source(full_path, source)) {
+        // Load based on file type
+        bool success = false;
+        if (strcmp(ext, ".so") == 0) {
+            // Plugin skill
+            log_info("[Skill] Auto-loading %s plugin: %s", skill_source_name(source), full_path);
+            success = skill_load_from_source(full_path, source);
+        } else if (strcmp(ext, ".md") == 0) {
+            // Markdown skill
+            log_info("[Skill] Auto-loading %s markdown: %s", skill_source_name(source), full_path);
+            success = skill_load_markdown(full_path, source);
+        }
+        
+        if (success) {
             loaded++;
         }
     }
@@ -144,16 +185,7 @@ bool skill_system_init(void) {
 // Cleanup skill system
 void skill_system_cleanup(void) {
     for (int i = 0; i < g_skill_registry.count; i++) {
-        Skill *skill = g_skill_registry.skills[i];
-        if (skill) {
-            free(skill->name);
-            free(skill->description);
-            free(skill->version);
-            free(skill->author);
-            free(skill->category);
-            free(skill->path);
-            free(skill);
-        }
+        skill_free(g_skill_registry.skills[i]);
     }
     free(g_skill_registry.skills);
     g_skill_registry.skills = NULL;
@@ -176,13 +208,7 @@ static bool skill_add_to_registry(Skill *new_skill) {
                          skill_source_name(new_skill->source));
                 
                 // Free existing skill
-                free(existing->name);
-                free(existing->description);
-                free(existing->version);
-                free(existing->author);
-                free(existing->category);
-                free(existing->path);
-                free(existing);
+                skill_free(existing);
                 
                 // Replace with new skill
                 g_skill_registry.skills[i] = new_skill;
@@ -195,13 +221,7 @@ static bool skill_add_to_registry(Skill *new_skill) {
                          skill_source_name(new_skill->source));
                 
                 // Free new skill
-                free(new_skill->name);
-                free(new_skill->description);
-                free(new_skill->version);
-                free(new_skill->author);
-                free(new_skill->category);
-                free(new_skill->path);
-                free(new_skill);
+                skill_free(new_skill);
                 
                 return false;  // Not added, but not an error
             }
@@ -228,29 +248,6 @@ static bool skill_add_to_registry(Skill *new_skill) {
 // Load a skill from a plugin (default source: PLUGIN)
 bool skill_load(const char *path) {
     return skill_load_from_source(path, SKILL_SOURCE_PLUGIN);
-}
-
-// Unload a plugin by extracting name from path
-static void unload_plugin_by_path(const char *path) {
-    const char *plugin_name = strrchr(path, '/');
-    if (!plugin_name) {
-        plugin_name = strrchr(path, '\\');
-    }
-    if (plugin_name) {
-        plugin_name++;
-    } else {
-        plugin_name = path;
-    }
-    
-    // Remove extension
-    char *name_copy = strdup(plugin_name);
-    char *dot = strrchr(name_copy, '.');
-    if (dot) {
-        *dot = '\0';
-    }
-    
-    plugin_unload(name_copy);
-    free(name_copy);
 }
 
 // Load a skill from a plugin with specified source
@@ -285,13 +282,7 @@ bool skill_load_from_source(const char *path, SkillSource source) {
                 log_info("[Skill] Unloading lower priority skill: %s", existing->name);
                 
                 // Free skill data
-                free(existing->name);
-                free(existing->description);
-                free(existing->version);
-                free(existing->author);
-                free(existing->category);
-                free(existing->path);
-                free(existing);
+                skill_free(existing);
                 
                 // Shift remaining skills
                 for (int j = i; j < g_skill_registry.count - 1; j++) {
@@ -337,7 +328,7 @@ bool skill_load_from_source(const char *path, SkillSource source) {
     }
     
     // Create skill structure
-    Skill *skill = malloc(sizeof(Skill));
+    Skill *skill = calloc(1, sizeof(Skill));
     if (!skill) {
         fprintf(stderr, "Failed to allocate memory for skill\n");
         return false;
@@ -351,10 +342,17 @@ bool skill_load_from_source(const char *path, SkillSource source) {
     skill->execute = skill_execute_func;
     skill->enabled = true;
     skill->source = source;
+    skill->type = SKILL_TYPE_PLUGIN;
     skill->path = strdup(path);
+    skill->tags = NULL;
+    skill->prompt_template = NULL;
+    skill->examples = NULL;
+    skill->hub_url = NULL;
+    skill->hub_id = NULL;
     
     if (skill_add_to_registry(skill)) {
-        log_info("[Skill] Loaded: %s [%s]", skill->name, skill_source_name(source));
+        log_info("[Skill] Loaded: %s [%s/%s]", skill->name, 
+                 skill_source_name(source), skill_type_name(skill->type));
         return true;
     }
     
@@ -368,7 +366,7 @@ bool skill_register_builtin(const char *name, const char *description,
         return false;
     }
     
-    Skill *skill = malloc(sizeof(Skill));
+    Skill *skill = calloc(1, sizeof(Skill));
     if (!skill) {
         return false;
     }
@@ -381,7 +379,13 @@ bool skill_register_builtin(const char *name, const char *description,
     skill->execute = execute;
     skill->enabled = true;
     skill->source = SKILL_SOURCE_BUILTIN;
+    skill->type = SKILL_TYPE_PLUGIN;
     skill->path = NULL;
+    skill->tags = NULL;
+    skill->prompt_template = NULL;
+    skill->examples = NULL;
+    skill->hub_url = NULL;
+    skill->hub_id = NULL;
     
     if (skill_add_to_registry(skill)) {
         log_info("[Skill] Registered built-in skill: %s", name);
@@ -397,7 +401,7 @@ bool skill_unload(const char *name) {
         Skill *skill = g_skill_registry.skills[i];
         if (skill && strcmp(skill->name, name) == 0) {
             // For plugin-based skills, unload the plugin
-            if (skill->source != SKILL_SOURCE_BUILTIN && skill->path) {
+            if (skill->type == SKILL_TYPE_PLUGIN && skill->path) {
                 // Extract plugin name from path for plugin_unload
                 const char *plugin_name = strrchr(skill->path, '/');
                 if (plugin_name) {
@@ -418,13 +422,7 @@ bool skill_unload(const char *name) {
             }
             
             // Remove from registry
-            free(skill->name);
-            free(skill->description);
-            free(skill->version);
-            free(skill->author);
-            free(skill->category);
-            free(skill->path);
-            free(skill);
+            skill_free(skill);
             
             // Shift remaining skills
             for (int j = i; j < g_skill_registry.count - 1; j++) {
@@ -471,12 +469,21 @@ char *skill_execute_skill(const char *name, const char *params) {
         return strdup("Error: Skill is disabled");
     }
     
-    if (!skill->execute) {
-        fprintf(stderr, "Skill has no execute function: %s\n", name);
-        return strdup("Error: Skill has no execute function");
+    // Execute based on skill type
+    switch (skill->type) {
+        case SKILL_TYPE_PLUGIN:
+            if (!skill->execute) {
+                fprintf(stderr, "Skill has no execute function: %s\n", name);
+                return strdup("Error: Skill has no execute function");
+            }
+            return skill->execute(params);
+            
+        case SKILL_TYPE_MARKDOWN:
+            return skill_execute_markdown(skill, params);
+            
+        default:
+            return strdup("Error: Unknown skill type");
     }
-    
-    return skill->execute(params);
 }
 
 // List all skills
@@ -490,13 +497,14 @@ void skill_list(void) {
     for (int i = 0; i < g_skill_registry.count; i++) {
         Skill *skill = g_skill_registry.skills[i];
         if (skill) {
-            printf("  %s (%s) [%s] - %s\n", 
+            printf("  %s (%s) [%s/%s] - %s\n", 
                    skill->name, skill->version, 
-                   skill_source_name(skill->source), 
+                   skill_source_name(skill->source),
+                   skill_type_name(skill->type),
                    skill->description);
             printf("    Author: %s | Category: %s | %s\n", 
                    skill->author, skill->category,
-                   skill->enabled ? "Enabled" : "Disabled");
+                   skill->enabled ? "✓ Enabled" : "✗ Disabled");
         }
     }
 }
@@ -530,4 +538,471 @@ bool skill_disable(const char *name) {
     skill->enabled = false;
     printf("Skill disabled: %s\n", name);
     return true;
+}
+
+// Free a skill structure
+static void skill_free(Skill *skill) {
+    if (!skill) return;
+    
+    free(skill->name);
+    free(skill->description);
+    free(skill->version);
+    free(skill->author);
+    free(skill->category);
+    free(skill->tags);
+    free(skill->path);
+    free(skill->prompt_template);
+    free(skill->examples);
+    free(skill->hub_url);
+    free(skill->hub_id);
+    free(skill);
+}
+
+//==================== Markdown Skill Functions ====================
+
+// Parse markdown front matter (YAML-like header)
+static char *parse_md_front_matter(const char *content, const char *key) {
+    // Look for ---\nkey: value\n---
+    char pattern[64];
+    snprintf(pattern, sizeof(pattern), "\n%s:", key);
+    
+    const char *start = strstr(content, pattern);
+    if (!start) return NULL;
+    
+    start += strlen(pattern);
+    while (*start == ' ' || *start == '\t') start++;
+    
+    const char *end = strchr(start, '\n');
+    if (!end) return NULL;
+    
+    size_t len = end - start;
+    char *value = malloc(len + 1);
+    if (value) {
+        strncpy(value, start, len);
+        value[len] = '\0';
+    }
+    return value;
+}
+
+// Load a markdown skill
+bool skill_load_markdown(const char *path, SkillSource source) {
+    FILE *fp = fopen(path, "r");
+    if (!fp) {
+        fprintf(stderr, "Cannot open markdown skill: %s\n", path);
+        return false;
+    }
+    
+    // Read file content
+    fseek(fp, 0, SEEK_END);
+    long file_size = ftell(fp);
+    fseek(fp, 0, SEEK_SET);
+    
+    if (file_size > MAX_FILE_SIZE) {
+        fclose(fp);
+        fprintf(stderr, "Markdown skill too large: %s\n", path);
+        return false;
+    }
+    
+    char *content = malloc(file_size + 1);
+    if (!content) {
+        fclose(fp);
+        return false;
+    }
+    
+    size_t read_size = fread(content, 1, file_size, fp);
+    content[read_size] = '\0';
+    fclose(fp);
+    
+    // Check for front matter
+    if (strncmp(content, "---\n", 4) != 0) {
+        free(content);
+        fprintf(stderr, "Invalid markdown skill format (missing front matter): %s\n", path);
+        return false;
+    }
+    
+    // Parse front matter
+    char *name = parse_md_front_matter(content, "name");
+    if (!name) {
+        // Use filename as name
+        const char *filename = strrchr(path, '/');
+        filename = filename ? filename + 1 : path;
+        char *dot = strchr(filename, '.');
+        if (dot) {
+            name = strndup(filename, dot - filename);
+        } else {
+            name = strdup(filename);
+        }
+    }
+    
+    // Create skill structure
+    Skill *skill = calloc(1, sizeof(Skill));
+    if (!skill) {
+        free(content);
+        free(name);
+        return false;
+    }
+    
+    skill->name = name;
+    skill->description = parse_md_front_matter(content, "description");
+    if (!skill->description) skill->description = strdup("");
+    
+    skill->version = parse_md_front_matter(content, "version");
+    if (!skill->version) skill->version = strdup("1.0");
+    
+    skill->author = parse_md_front_matter(content, "author");
+    if (!skill->author) skill->author = strdup("Unknown");
+    
+    skill->category = parse_md_front_matter(content, "category");
+    if (!skill->category) skill->category = strdup("General");
+    
+    skill->tags = parse_md_front_matter(content, "tags");
+    
+    // Find prompt template (after ---\n---)
+    const char *body = strstr(content + 4, "\n---\n");
+    if (body) {
+        body += 5;  // Skip ---\n
+        skill->prompt_template = strdup(body);
+    } else {
+        skill->prompt_template = strdup(content);
+    }
+    
+    skill->examples = parse_md_front_matter(content, "examples");
+    
+    skill->type = SKILL_TYPE_MARKDOWN;
+    skill->source = source;
+    skill->path = strdup(path);
+    skill->enabled = true;
+    skill->execute = NULL;  // MD skills use skill_execute_markdown
+    
+    free(content);
+    
+    if (skill_add_to_registry(skill)) {
+        log_info("[Skill] Loaded markdown: %s [%s]", skill->name, skill_source_name(source));
+        return true;
+    }
+    
+    return false;
+}
+
+// Execute a markdown skill (returns prompt with params)
+char *skill_execute_markdown(Skill *skill, const char *params) {
+    if (!skill || !skill->prompt_template) {
+        return strdup("Error: Invalid markdown skill");
+    }
+    
+    // If no params, return the template as-is
+    if (!params || strlen(params) == 0) {
+        return strdup(skill->prompt_template);
+    }
+    
+    // Replace {{params}} placeholder in template
+    const char *placeholder = "{{params}}";
+    size_t result_size = strlen(skill->prompt_template) + strlen(params) + 256;
+    char *result = malloc(result_size);
+    if (!result) {
+        return strdup("Error: Memory allocation failed");
+    }
+    
+    // Simple replacement
+    const char *pos = strstr(skill->prompt_template, placeholder);
+    if (pos) {
+        size_t prefix_len = pos - skill->prompt_template;
+        snprintf(result, result_size, "%.*s%s%s",
+                 (int)prefix_len, skill->prompt_template,
+                 params,
+                 pos + strlen(placeholder));
+    } else {
+        // No placeholder, append params
+        snprintf(result, result_size, "%s\n\nUser input: %s", skill->prompt_template, params);
+    }
+    
+    return result;
+}
+
+//==================== Hub Skill Functions ====================
+
+// Parse hub skill JSON response
+static HubSkillInfo *parse_hub_skill_json(cJSON *json) {
+    if (!json) return NULL;
+    
+    HubSkillInfo *info = calloc(1, sizeof(HubSkillInfo));
+    if (!info) return NULL;
+    
+    cJSON *item;
+    
+    item = cJSON_GetObjectItem(json, "id");
+    info->id = item ? strdup(item->valuestring) : NULL;
+    
+    item = cJSON_GetObjectItem(json, "name");
+    info->name = item ? strdup(item->valuestring) : NULL;
+    
+    item = cJSON_GetObjectItem(json, "description");
+    info->description = item ? strdup(item->valuestring) : NULL;
+    
+    item = cJSON_GetObjectItem(json, "author");
+    info->author = item ? strdup(item->valuestring) : NULL;
+    
+    item = cJSON_GetObjectItem(json, "version");
+    info->version = item ? strdup(item->valuestring) : NULL;
+    
+    item = cJSON_GetObjectItem(json, "category");
+    info->category = item ? strdup(item->valuestring) : NULL;
+    
+    item = cJSON_GetObjectItem(json, "tags");
+    info->tags = item ? strdup(item->valuestring) : NULL;
+    
+    item = cJSON_GetObjectItem(json, "download_url");
+    info->download_url = item ? strdup(item->valuestring) : NULL;
+    
+    item = cJSON_GetObjectItem(json, "preview_url");
+    info->preview_url = item ? strdup(item->valuestring) : NULL;
+    
+    return info;
+}
+
+static void free_hub_skill_info(HubSkillInfo *info) {
+    if (!info) return;
+    free(info->id);
+    free(info->name);
+    free(info->description);
+    free(info->author);
+    free(info->version);
+    free(info->category);
+    free(info->tags);
+    free(info->download_url);
+    free(info->preview_url);
+    free(info);
+}
+
+// List skills from hub
+bool skill_hub_list(int page, int limit) {
+    char url[256];
+    snprintf(url, sizeof(url), "%s/api/skills?page=%d&limit=%d", SKILL_HUB_URL, page, limit);
+    
+    printf("Fetching skills from hub: %s\n", url);
+    
+    HttpResponse *response = http_get(url);
+    if (!response || response->status_code != 200) {
+        fprintf(stderr, "Failed to fetch skills from hub\n");
+        if (response) http_response_free(response);
+        return false;
+    }
+    
+    cJSON *json = cJSON_Parse(response->body);
+    if (!json) {
+        fprintf(stderr, "Invalid JSON response from hub\n");
+        http_response_free(response);
+        return false;
+    }
+    
+    cJSON *skills = cJSON_GetObjectItem(json, "skills");
+    if (!skills || !cJSON_IsArray(skills)) {
+        fprintf(stderr, "No skills array in response\n");
+        cJSON_Delete(json);
+        http_response_free(response);
+        return false;
+    }
+    
+    printf("\n📦 Hub Skills (Page %d):\n", page);
+    printf("─────────────────────────────────────────────────────────\n");
+    
+    cJSON *item = NULL;
+    cJSON_ArrayForEach(item, skills) {
+        HubSkillInfo *info = parse_hub_skill_json(item);
+        if (info) {
+            printf("  📌 %s (v%s)\n", info->name ? info->name : "Unknown", 
+                   info->version ? info->version : "0.0");
+            printf("     ID: %s\n", info->id ? info->id : "N/A");
+            printf("     %s\n", info->description ? info->description : "No description");
+            printf("     Author: %s | Category: %s\n", 
+                   info->author ? info->author : "Unknown",
+                   info->category ? info->category : "General");
+            printf("\n");
+            free_hub_skill_info(info);
+        }
+    }
+    
+    cJSON_Delete(json);
+    http_response_free(response);
+    return true;
+}
+
+// Search skills on hub
+bool skill_hub_search(const char *query) {
+    if (!query) return false;
+    
+    char url[512];
+    char encoded_query[256];
+    // Simple URL encoding for spaces
+    char *p = encoded_query;
+    for (const char *q = query; *q && p < encoded_query + sizeof(encoded_query) - 4; q++) {
+        if (*q == ' ') {
+            *p++ = '%'; *p++ = '2'; *p++ = '0';
+        } else if (*q == '&') {
+            *p++ = '%'; *p++ = '2'; *p++ = '6';
+        } else {
+            *p++ = *q;
+        }
+    }
+    *p = '\0';
+    
+    snprintf(url, sizeof(url), "%s/api/skills/search?q=%s", SKILL_HUB_URL, encoded_query);
+    
+    printf("Searching hub for: %s\n", query);
+    
+    HttpResponse *response = http_get(url);
+    if (!response || response->status_code != 200) {
+        fprintf(stderr, "Search failed\n");
+        if (response) http_response_free(response);
+        return false;
+    }
+    
+    cJSON *json = cJSON_Parse(response->body);
+    if (!json) {
+        http_response_free(response);
+        return false;
+    }
+    
+    cJSON *results = cJSON_GetObjectItem(json, "results");
+    if (!results || !cJSON_IsArray(results)) {
+        printf("No results found.\n");
+        cJSON_Delete(json);
+        http_response_free(response);
+        return true;
+    }
+    
+    int count = cJSON_GetArraySize(results);
+    printf("\n🔍 Found %d result(s) for '%s':\n", count, query);
+    printf("─────────────────────────────────────────────────────────\n");
+    
+    cJSON *item = NULL;
+    cJSON_ArrayForEach(item, results) {
+        HubSkillInfo *info = parse_hub_skill_json(item);
+        if (info) {
+            printf("  📌 %s [%s]\n", info->name, info->id);
+            printf("     %s\n", info->description);
+            printf("\n");
+            free_hub_skill_info(info);
+        }
+    }
+    
+    cJSON_Delete(json);
+    http_response_free(response);
+    return true;
+}
+
+// Get skill info from hub
+bool skill_hub_info(const char *skill_id) {
+    if (!skill_id) return false;
+    
+    char url[512];
+    snprintf(url, sizeof(url), "%s/api/skills/%s", SKILL_HUB_URL, skill_id);
+    
+    HttpResponse *response = http_get(url);
+    if (!response || response->status_code != 200) {
+        fprintf(stderr, "Skill not found: %s\n", skill_id);
+        if (response) http_response_free(response);
+        return false;
+    }
+    
+    cJSON *json = cJSON_Parse(response->body);
+    if (!json) {
+        http_response_free(response);
+        return false;
+    }
+    
+    HubSkillInfo *info = parse_hub_skill_json(json);
+    if (info) {
+        printf("\n📌 Skill: %s\n", info->name);
+        printf("─────────────────────────────────────────────────────────\n");
+        printf("  ID:          %s\n", info->id);
+        printf("  Version:     %s\n", info->version);
+        printf("  Author:      %s\n", info->author);
+        printf("  Category:    %s\n", info->category);
+        printf("  Tags:        %s\n", info->tags ? info->tags : "None");
+        printf("  Description: %s\n", info->description);
+        printf("  Download:    /skill hub download %s\n", skill_id);
+        free_hub_skill_info(info);
+    }
+    
+    cJSON_Delete(json);
+    http_response_free(response);
+    return true;
+}
+
+// Download skill from hub
+bool skill_hub_download(const char *skill_id) {
+    if (!skill_id) return false;
+    
+    char url[512];
+    snprintf(url, sizeof(url), "%s/api/skills/%s/download", SKILL_HUB_URL, skill_id);
+    
+    printf("Downloading skill: %s\n", skill_id);
+    
+    HttpResponse *response = http_get(url);
+    if (!response || response->status_code != 200) {
+        fprintf(stderr, "Download failed: %s\n", skill_id);
+        if (response) http_response_free(response);
+        return false;
+    }
+    
+    // Get hub cache directory
+    char *cache_dir = get_hub_cache_path();
+    if (!cache_dir) {
+        fprintf(stderr, "Failed to get cache directory\n");
+        http_response_free(response);
+        return false;
+    }
+    
+    // Create directory if not exists
+    mkdir(cache_dir, 0755);
+    
+    // Save to file
+    char filepath[MAX_PATH_LEN];
+    snprintf(filepath, sizeof(filepath), "%s/%s.md", cache_dir, skill_id);
+    
+    FILE *fp = fopen(filepath, "w");
+    if (!fp) {
+        fprintf(stderr, "Failed to create file: %s\n", filepath);
+        free(cache_dir);
+        http_response_free(response);
+        return false;
+    }
+    
+    fwrite(response->body, 1, response->body_len, fp);
+    fclose(fp);
+    
+    printf("✓ Downloaded to: %s\n", filepath);
+    
+    free(cache_dir);
+    http_response_free(response);
+    return true;
+}
+
+// Install skill from hub (download and load)
+bool skill_hub_install(const char *skill_id) {
+    if (!skill_id) return false;
+    
+    // Download first
+    if (!skill_hub_download(skill_id)) {
+        return false;
+    }
+    
+    // Get file path
+    char *cache_dir = get_hub_cache_path();
+    if (!cache_dir) return false;
+    
+    char filepath[MAX_PATH_LEN];
+    snprintf(filepath, sizeof(filepath), "%s/%s.md", cache_dir, skill_id);
+    
+    // Load the skill
+    bool success = skill_load_markdown(filepath, SKILL_SOURCE_HUB);
+    
+    free(cache_dir);
+    
+    if (success) {
+        printf("✓ Skill installed: %s\n", skill_id);
+    }
+    
+    return success;
 }
