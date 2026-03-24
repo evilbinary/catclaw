@@ -594,6 +594,11 @@ bool agent_init(void) {
     agent_register_tool("list-directory", "List files and directories in a given path", NULL, tool_list_directory);
     agent_register_tool("web-fetch", "Fetch content from a URL", NULL, tool_web_fetch);
     agent_register_tool("shell", "Execute shell commands", NULL, tool_shell_execute);
+    
+    // Skill discovery tools
+    agent_register_tool("skill-search", "Search local skills by query keyword", NULL, tool_skill_search);
+    agent_register_tool("skill-match", "Discover and match relevant skills by keyword (for agent auto-discovery)", NULL, tool_skill_match);
+    agent_register_tool("skill-preview", "Preview skill content without full loading", NULL, tool_skill_preview);
 
     g_agent.running = true;
     

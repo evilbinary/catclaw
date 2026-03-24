@@ -18,6 +18,7 @@
 #endif
 
 #include "tool.h"
+#include "skill.h"
 #include "common/cJSON.h"
 #include "common/http_client.h"
 #include "common/log.h"
@@ -1016,5 +1017,187 @@ int tool_shell_execute(ToolArgs* args, char** result, int* result_len) {
     offset += snprintf(*result + offset, buf_size - offset, "\nExit code: %d", exit_code);
     
     *result_len = offset;
+    return 0;
+}
+
+// Skill search tool - search local skills by query
+int tool_skill_search(ToolArgs* args, char** result, int* result_len) {
+    const char* query = tool_args_get(args, "query");
+    if (!query) query = tool_args_get(args, "arg");
+    
+    if (!query || strlen(query) == 0) {
+        *result = strdup("Error: No search query provided");
+        *result_len = strlen(*result);
+        return -1;
+    }
+    
+    // Get limit parameter (default 10)
+    const char* limit_str = tool_args_get(args, "limit");
+    int limit = 10;
+    if (limit_str) {
+        limit = atoi(limit_str);
+        if (limit <= 0) limit = 10;
+        if (limit > 50) limit = 50;
+    }
+    
+    // Search skills
+    SkillMatchResult* matches = skill_search_local(query, limit);
+    if (!matches || matches->count == 0) {
+        char* no_result = (char*)malloc(128);
+        if (no_result) {
+            snprintf(no_result, 128, "No skills found matching '%s'", query);
+        }
+        *result = no_result ? no_result : strdup("No skills found");
+        *result_len = strlen(*result);
+        if (matches) skill_match_result_free(matches);
+        return 0;
+    }
+    
+    // Format result
+    size_t buf_size = 4096;
+    *result = (char*)malloc(buf_size);
+    if (!*result) {
+        skill_match_result_free(matches);
+        *result = strdup("Error: Memory allocation failed");
+        *result_len = strlen(*result);
+        return -1;
+    }
+    
+    int offset = snprintf(*result, buf_size,
+        "🔍 Found %d skill(s) matching '%s':\n"
+        "─────────────────────────────────────────────────────────\n",
+        matches->count, query);
+    
+    for (int i = 0; i < matches->count && offset < (int)(buf_size - 256); i++) {
+        Skill* skill = matches->matches[i].skill;
+        int relevance = matches->matches[i].relevance;
+        const char* matched_by = matches->matches[i].matched_by;
+        
+        offset += snprintf(*result + offset, buf_size - offset,
+            "  [%d] %s (%s/%s)\n"
+            "      匹配字段: %s\n"
+            "      描述: %s\n\n",
+            relevance,
+            skill->name,
+            skill_source_name(skill->source),
+            skill_type_name(skill->type),
+            matched_by,
+            skill->description ? skill->description : "无描述");
+    }
+    
+    skill_match_result_free(matches);
+    *result_len = offset;
+    return 0;
+}
+
+// Skill match tool - discover skills by keyword (for agent auto-discovery)
+int tool_skill_match(ToolArgs* args, char** result, int* result_len) {
+    const char* query = tool_args_get(args, "query");
+    if (!query) query = tool_args_get(args, "keyword");
+    if (!query) query = tool_args_get(args, "arg");
+    
+    if (!query || strlen(query) == 0) {
+        *result = strdup("Error: No keyword provided for skill matching");
+        *result_len = strlen(*result);
+        return -1;
+    }
+    
+    // Discover skills
+    SkillMatchResult* matches = skill_discover(query);
+    if (!matches || matches->count == 0) {
+        char* no_result = (char*)malloc(128);
+        if (no_result) {
+            snprintf(no_result, 128, "No relevant skills discovered for '%s'", query);
+        }
+        *result = no_result ? no_result : strdup("No skills discovered");
+        *result_len = strlen(*result);
+        if (matches) skill_match_result_free(matches);
+        return 0;
+    }
+    
+    // Format result as JSON-like for agent consumption
+    size_t buf_size = 8192;
+    *result = (char*)malloc(buf_size);
+    if (!*result) {
+        skill_match_result_free(matches);
+        *result = strdup("Error: Memory allocation failed");
+        *result_len = strlen(*result);
+        return -1;
+    }
+    
+    int offset = snprintf(*result, buf_size,
+        "{\n"
+        "  \"query\": \"%s\",\n"
+        "  \"count\": %d,\n"
+        "  \"matches\": [\n",
+        query, matches->count);
+    
+    for (int i = 0; i < matches->count && offset < (int)(buf_size - 512); i++) {
+        Skill* skill = matches->matches[i].skill;
+        int relevance = matches->matches[i].relevance;
+        const char* matched_by = matches->matches[i].matched_by;
+        
+        offset += snprintf(*result + offset, buf_size - offset,
+            "    {\n"
+            "      \"name\": \"%s\",\n"
+            "      \"relevance\": %d,\n"
+            "      \"matched_by\": \"%s\",\n"
+            "      \"source\": \"%s\",\n"
+            "      \"type\": \"%s\",\n"
+            "      \"description\": \"%s\",\n"
+            "      \"category\": \"%s\"\n"
+            "    }%s\n",
+            skill->name,
+            relevance,
+            matched_by,
+            skill_source_name(skill->source),
+            skill_type_name(skill->type),
+            skill->description ? skill->description : "",
+            skill->category ? skill->category : "General",
+            (i < matches->count - 1) ? "," : "");
+    }
+    
+    offset += snprintf(*result + offset, buf_size - offset, "  ]\n}");
+    
+    skill_match_result_free(matches);
+    *result_len = offset;
+    return 0;
+}
+
+// Skill preview tool - preview skill content
+int tool_skill_preview(ToolArgs* args, char** result, int* result_len) {
+    const char* name = tool_args_get(args, "name");
+    if (!name) name = tool_args_get(args, "skill");
+    if (!name) name = tool_args_get(args, "arg");
+    
+    if (!name || strlen(name) == 0) {
+        *result = strdup("Error: No skill name provided");
+        *result_len = strlen(*result);
+        return -1;
+    }
+    
+    // Get max_lines parameter (default 5)
+    const char* lines_str = tool_args_get(args, "lines");
+    int max_lines = 5;
+    if (lines_str) {
+        max_lines = atoi(lines_str);
+        if (max_lines <= 0) max_lines = 5;
+        if (max_lines > 50) max_lines = 50;
+    }
+    
+    // Get preview
+    char* preview = skill_preview(name, max_lines);
+    if (!preview) {
+        char* err = (char*)malloc(128);
+        if (err) {
+            snprintf(err, 128, "Error: Skill '%s' not found", name);
+        }
+        *result = err ? err : strdup("Error: Skill not found");
+        *result_len = strlen(*result);
+        return -1;
+    }
+    
+    *result = preview;
+    *result_len = strlen(preview);
     return 0;
 }

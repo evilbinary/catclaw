@@ -8,6 +8,7 @@
 #include <string.h>
 #include <dirent.h>
 #include <sys/stat.h>
+#include <ctype.h>
 
 // Skill directories (loaded in order: low priority first)
 #define SKILL_DIR_BUILTIN   NULL  // Built-in skills are registered programmatically
@@ -717,6 +718,278 @@ char *skill_execute_markdown(Skill *skill, const char *params) {
     }
     
     return result;
+}
+
+//==================== Skill Discovery Functions ====================
+
+// Case-insensitive substring search
+static bool str_contains_ci(const char *haystack, const char *needle) {
+    if (!haystack || !needle) return false;
+    
+    char *haystack_lower = strdup(haystack);
+    char *needle_lower = strdup(needle);
+    
+    for (char *p = haystack_lower; *p; p++) *p = tolower(*p);
+    for (char *p = needle_lower; *p; p++) *p = tolower(*p);
+    
+    bool found = strstr(haystack_lower, needle_lower) != NULL;
+    
+    free(haystack_lower);
+    free(needle_lower);
+    return found;
+}
+
+// Calculate relevance score for a skill match
+static int calculate_relevance(Skill *skill, const char *query) {
+    int score = 0;
+    
+    // Exact name match: 100
+    if (strcmp(skill->name, query) == 0) {
+        return 100;
+    }
+    
+    // Name starts with query: 80
+    if (strncasecmp(skill->name, query, strlen(query)) == 0) {
+        score = 80;
+    }
+    // Name contains query: 60
+    else if (str_contains_ci(skill->name, query)) {
+        score = 60;
+    }
+    
+    // Description match: +30
+    if (skill->description && str_contains_ci(skill->description, query)) {
+        score = (score > 0) ? score + 30 : 40;
+    }
+    
+    // Category match: +20
+    if (skill->category && str_contains_ci(skill->category, query)) {
+        score = (score > 0) ? score + 20 : 30;
+    }
+    
+    // Tags match: +15
+    if (skill->tags && str_contains_ci(skill->tags, query)) {
+        score = (score > 0) ? score + 15 : 25;
+    }
+    
+    return score;
+}
+
+// Determine which field matched
+static char *get_matched_field(Skill *skill, const char *query) {
+    if (strcmp(skill->name, query) == 0 || str_contains_ci(skill->name, query)) {
+        return strdup("name");
+    }
+    if (skill->description && str_contains_ci(skill->description, query)) {
+        return strdup("description");
+    }
+    if (skill->category && str_contains_ci(skill->category, query)) {
+        return strdup("category");
+    }
+    if (skill->tags && str_contains_ci(skill->tags, query)) {
+        return strdup("tags");
+    }
+    return strdup("unknown");
+}
+
+// Discover skills by query (for agent auto-discovery)
+SkillMatchResult *skill_discover(const char *query) {
+    if (!query) return NULL;
+    
+    SkillMatchResult *result = calloc(1, sizeof(SkillMatchResult));
+    if (!result) return NULL;
+    
+    result->capacity = 20;
+    result->matches = calloc(result->capacity, sizeof(SkillMatch));
+    result->count = 0;
+    
+    // Search all registered skills
+    for (int i = 0; i < g_skill_registry.count; i++) {
+        Skill *skill = g_skill_registry.skills[i];
+        if (!skill || !skill->enabled) continue;
+        
+        int relevance = calculate_relevance(skill, query);
+        if (relevance > 0) {
+            // Expand array if needed
+            if (result->count >= result->capacity) {
+                result->capacity *= 2;
+                result->matches = realloc(result->matches, 
+                                          sizeof(SkillMatch) * result->capacity);
+            }
+            
+            result->matches[result->count].skill = skill;
+            result->matches[result->count].relevance = relevance;
+            result->matches[result->count].matched_by = get_matched_field(skill, query);
+            result->count++;
+        }
+    }
+    
+    // Sort by relevance (bubble sort - simple for small arrays)
+    for (int i = 0; i < result->count - 1; i++) {
+        for (int j = i + 1; j < result->count; j++) {
+            if (result->matches[j].relevance > result->matches[i].relevance) {
+                SkillMatch temp = result->matches[i];
+                result->matches[i] = result->matches[j];
+                result->matches[j] = temp;
+            }
+        }
+    }
+    
+    return result;
+}
+
+// Free match result
+void skill_match_result_free(SkillMatchResult *result) {
+    if (!result) return;
+    
+    for (int i = 0; i < result->count; i++) {
+        free(result->matches[i].matched_by);
+    }
+    free(result->matches);
+    free(result);
+}
+
+// Search local skills with fuzzy matching
+SkillMatchResult *skill_search_local(const char *query, int limit) {
+    if (!query) return NULL;
+    
+    SkillMatchResult *result = skill_discover(query);
+    if (!result) return NULL;
+    
+    // Apply limit
+    if (limit > 0 && result->count > limit) {
+        // Free excess matches
+        for (int i = limit; i < result->count; i++) {
+            free(result->matches[i].matched_by);
+        }
+        result->count = limit;
+    }
+    
+    return result;
+}
+
+// Get detailed skill info (lazy load for markdown skills)
+char *skill_get_detailed(const char *name) {
+    Skill *skill = skill_find(name);
+    if (!skill) {
+        return strdup("Error: Skill not found");
+    }
+    
+    // Build detailed info string
+    char *info = malloc(2048);
+    if (!info) return strdup("Error: Memory allocation failed");
+    
+    int len = snprintf(info, 2048,
+        "Skill: %s\n"
+        "────────────────────────────────────────\n"
+        "  Name:        %s\n"
+        "  Version:     %s\n"
+        "  Author:      %s\n"
+        "  Category:    %s\n"
+        "  Tags:        %s\n"
+        "  Source:      %s\n"
+        "  Type:        %s\n"
+        "  Path:        %s\n"
+        "  Status:      %s\n"
+        "────────────────────────────────────────\n"
+        "Description:\n  %s\n",
+        skill->name,
+        skill->name,
+        skill->version ? skill->version : "N/A",
+        skill->author ? skill->author : "Unknown",
+        skill->category ? skill->category : "General",
+        skill->tags ? skill->tags : "None",
+        skill_source_name(skill->source),
+        skill_type_name(skill->type),
+        skill->path ? skill->path : "N/A",
+        skill->enabled ? "Enabled" : "Disabled",
+        skill->description ? skill->description : "No description"
+    );
+    
+    // For markdown skills, include prompt template preview
+    if (skill->type == SKILL_TYPE_MARKDOWN && skill->prompt_template) {
+        int template_len = strlen(skill->prompt_template);
+        int preview_len = template_len > 500 ? 500 : template_len;
+        
+        char *new_info = realloc(info, len + preview_len + 100);
+        if (new_info) {
+            info = new_info;
+            len += snprintf(info + len, 2048 - len + preview_len + 100,
+                "\n────────────────────────────────────────\n"
+                "Prompt Template (preview):\n%.*s%s\n",
+                preview_len, skill->prompt_template,
+                template_len > 500 ? "\n... (truncated)" : ""
+            );
+        }
+    }
+    
+    // For plugin skills, show execute function status
+    if (skill->type == SKILL_TYPE_PLUGIN) {
+        len += snprintf(info + len, 2048 - len,
+            "\n────────────────────────────────────────\n"
+            "Execute Function: %s\n",
+            skill->execute ? "Available" : "Not Available"
+        );
+    }
+    
+    return info;
+}
+
+// Preview skill content (limited lines)
+char *skill_preview(const char *name, int max_lines) {
+    Skill *skill = skill_find(name);
+    if (!skill) {
+        return strdup("Error: Skill not found");
+    }
+    
+    char *preview = malloc(1024);
+    if (!preview) return strdup("Error: Memory allocation failed");
+    
+    int len = 0;
+    
+    // Show basic info
+    len = snprintf(preview, 1024,
+        "📌 %s [%s/%s]\n"
+        "   %s\n",
+        skill->name,
+        skill_source_name(skill->source),
+        skill_type_name(skill->type),
+        skill->description ? skill->description : "No description"
+    );
+    
+    // For markdown skills, show first few lines of template
+    if (skill->type == SKILL_TYPE_MARKDOWN && skill->prompt_template) {
+        len += snprintf(preview + len, 1024 - len, "\n   Template Preview:\n");
+        
+        const char *line = skill->prompt_template;
+        int line_count = 0;
+        while (*line && line_count < max_lines && len < 1000) {
+            const char *next = strchr(line, '\n');
+            if (!next) next = line + strlen(line);
+            
+            int line_len = next - line;
+            if (line_len > 60) line_len = 60;  // Truncate long lines
+            
+            len += snprintf(preview + len, 1024 - len, "   │ %.*s\n", line_len, line);
+            line = next + 1;
+            line_count++;
+        }
+        
+        if (line_count >= max_lines) {
+            len += snprintf(preview + len, 1024 - len, "   └ ... (more lines)\n");
+        }
+    }
+    
+    return preview;
+}
+
+// Get skill prompt template
+const char *skill_get_prompt_template(const char *name) {
+    Skill *skill = skill_find(name);
+    if (!skill || skill->type != SKILL_TYPE_MARKDOWN) {
+        return NULL;
+    }
+    return skill->prompt_template;
 }
 
 //==================== Hub Skill Functions ====================

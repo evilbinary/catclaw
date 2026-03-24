@@ -366,6 +366,137 @@ CatClaw 支持从远程技能仓库浏览和下载技能。
 export CATCLAW_SKILL_HUB="https://your-custom-hub.com"
 ```
 
+## 技能发现与深度加载
+
+Agent 可以通过技能发现功能自动匹配相关技能，并按需深度加载技能详情。
+
+### 技能发现
+
+根据关键词自动发现相关技能，返回匹配度排序的技能列表：
+
+```bash
+# 发现与翻译相关的技能
+/skill discover translate
+
+# 发现天气相关技能
+/skill discover weather
+```
+
+**匹配规则**（按权重计算）：
+
+| 匹配字段 | 权重 |
+|---------|------|
+| 精确匹配名称 | 100 |
+| 名称前缀匹配 | 80 |
+| 名称包含 | 60 |
+| 描述包含 | +30 |
+| 分类匹配 | +20 |
+| 标签匹配 | +15 |
+
+**输出示例**：
+```
+🔍 发现 2 个相关技能:
+─────────────────────────────────────────────────────────
+  [100] translator (plugin/markdown)
+        匹配字段: name
+        描述: Translate text between languages
+        
+  [45] language-detector (local/markdown)
+        匹配字段: description
+        描述: Detect the language of text
+─────────────────────────────────────────────────────────
+```
+
+### 本地搜索
+
+在本地技能库中模糊搜索：
+
+```bash
+# 搜索并限制返回数量
+/skill search "utility" --limit 5
+```
+
+### 深度加载
+
+获取技能的详细信息（包括 Markdown 技能的完整模板）：
+
+```bash
+/skill info <name>
+```
+
+**输出示例**：
+```
+Skill: translator
+────────────────────────────────────────
+  Name:        translator
+  Version:     1.0
+  Author:      CatClaw Team
+  Category:    Utility
+  Tags:        translation, language
+  Source:      plugin
+  Type:        markdown
+  Path:        skills/translator.md
+  Status:      Enabled
+────────────────────────────────────────
+Description:
+  Translate text between languages
+
+────────────────────────────────────────
+Prompt Template (preview):
+# Translation Skill
+
+You are a professional translator. Translate the following text:
+
+{{params}}
+...
+```
+
+### 技能预览
+
+快速预览技能内容（显示前几行）：
+
+```bash
+# 预览技能前 5 行
+/skill preview translator 5
+```
+
+**输出示例**：
+```
+📌 translator [plugin/markdown]
+   Translate text between languages
+
+   Template Preview:
+   │ # Translation Skill
+   │ 
+   │ You are a professional translator...
+   └ ... (more lines)
+```
+
+### Agent 集成使用
+
+Agent 可以通过以下 API 实现智能技能发现：
+
+```c
+// 发现相关技能
+SkillMatchResult *matches = skill_discover("translate");
+for (int i = 0; i < matches->count; i++) {
+    printf("Found: %s (relevance: %d)\n", 
+           matches->matches[i].skill->name,
+           matches->matches[i].relevance);
+}
+skill_match_result_free(matches);
+
+// 深度加载
+char *details = skill_get_detailed("translator");
+printf("%s\n", details);
+free(details);
+
+// 预览技能
+char *preview = skill_preview("translator", 5);
+printf("%s\n", preview);
+free(preview);
+```
+
 ## 技能开发最佳实践
 
 1. **命名规范**：技能名称应简洁明了，避免使用特殊字符

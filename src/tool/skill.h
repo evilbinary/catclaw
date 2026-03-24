@@ -88,12 +88,41 @@ bool skill_load_markdown(const char *path, SkillSource source);
 char *skill_execute_markdown(Skill *skill, const char *params);
 
 // Hub skill functions
-#define SKILL_HUB_URL "https://skills.catclaw.dev"
+#define SKILL_HUB_URL "https://github.com/evilbinary/catclaw-skills"
 bool skill_hub_list(int page, int limit);
 bool skill_hub_search(const char *query);
 bool skill_hub_info(const char *skill_id);
 bool skill_hub_download(const char *skill_id);
 bool skill_hub_install(const char *skill_id);
+
+// Skill discovery and search
+typedef struct {
+    Skill *skill;
+    int relevance;      // Relevance score (0-100)
+    char *matched_by;   // What field matched (name/description/tags/category)
+} SkillMatch;
+
+typedef struct {
+    SkillMatch *matches;
+    int count;
+    int capacity;
+} SkillMatchResult;
+
+// Discover skills by keywords (for agent auto-discovery)
+SkillMatchResult *skill_discover(const char *query);
+void skill_match_result_free(SkillMatchResult *result);
+
+// Search skills locally (fuzzy match)
+SkillMatchResult *skill_search_local(const char *query, int limit);
+
+// Get detailed skill info (lazy load full content)
+char *skill_get_detailed(const char *name);
+
+// Preview skill content without full loading
+char *skill_preview(const char *name, int max_lines);
+
+// Get skill prompt template (for markdown skills)
+const char *skill_get_prompt_template(const char *name);
 
 // Utility functions
 const char *skill_source_name(SkillSource source);
