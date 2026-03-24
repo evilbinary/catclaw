@@ -1,7 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <pthread.h>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -10,67 +9,16 @@
 #include "common/config.h"
 #include "gateway/gateway.h"
 #include "gateway/channels.h"
-#include "gateway/feishu_ws.h"
 #include "agent/agent.h"
 #include "agent/command.h"
 #include "common/plugin.h"
 #include "tool/skill.h"
 #include "common/log.h"
 #include "common/thread_pool.h"
-#include "gateway/http_api.h"
 #include "model/ai_model.h"
-
-// Gateway server thread
-static pthread_t gateway_thread;
-static bool gateway_thread_running = false;
-
-// HTTP API server
-static HttpServer* g_http_api_server = NULL;
-
-// Feishu WebSocket client
-static FeishuWsClient* g_feishu_ws_client = NULL;
 
 // Thread pool
 static ThreadPool *g_thread_pool = NULL;
-
-// Thread function for gateway server
-static void *gateway_server_thread(void *arg) {
-    gateway_start();
-    gateway_thread_running = false;
-    return NULL;
-}
-
-// Start gateway server in a separate thread
-static bool start_gateway_server(void) {
-    if (gateway_thread_running) {
-        printf("Gateway server is already running\n");
-        return true;
-    }
-
-    gateway_thread_running = true;
-    int ret = pthread_create(&gateway_thread, NULL, gateway_server_thread, NULL);
-    if (ret != 0) {
-        fprintf(stderr, "Failed to create gateway thread: %d\n", ret);
-        gateway_thread_running = false;
-        return false;
-    }
-
-    printf("Gateway server started in background\n");
-    return true;
-}
-
-// Stop gateway server
-static void stop_gateway_server(void) {
-    if (!gateway_thread_running) {
-        printf("Gateway server is not running\n");
-        return;
-    }
-
-    gateway_stop();
-    pthread_join(gateway_thread, NULL);
-    gateway_thread_running = false;
-    printf("Gateway server stopped\n");
-}
 
 int main(int argc, char *argv[]) {
 #ifdef _WIN32
@@ -188,70 +136,18 @@ int main(int argc, char *argv[]) {
         // Continue anyway
     }
 
-    // Start gateway server (only if websocket is enabled)
-    if (g_config.gateway.websocket_enabled) {
-        if (!start_gateway_server()) {
-            log_error("Failed to start gateway server");
-            // Continue anyway
-        }
-    } else {
-        log_info("WebSocket server is disabled");
-    }
-
-    // Start HTTP API server (only if http_server is enabled)
-    if (g_config.gateway.http_server_enabled) {
-        int http_port = g_config.http_port > 0 ? g_config.http_port : 8080;
-        g_http_api_server = http_api_init(http_port);
-        if (g_http_api_server) {
-            if (http_api_start(g_http_api_server)) {
-                log_info("HTTP API server started on port %d", http_port);
-            } else {
-                log_error("Failed to start HTTP API server");
-            }
-        } else {
-            log_error("Failed to initialize HTTP API server");
-        }
-    } else {
-        log_info("HTTP API server is disabled");
-    }
-    
-    // Start Feishu WebSocket client (for channels with ws_enabled=true)
-    for (int i = 0; i < g_config.channels.count; i++) {
-        ChannelConfigEntry *ch = &g_config.channels.channels[i];
-        if (ch->type && strcmp(ch->type, "feishu") == 0 && 
-            ch->ws_enabled && ch->app_id && ch->app_secret) {
-            g_feishu_ws_client = feishu_ws_create(ch->app_id, ch->app_secret);
-            if (g_feishu_ws_client) {
-                if (ch->ws_domain) {
-                    feishu_ws_set_domain(g_feishu_ws_client, ch->ws_domain);
-                }
-                if (ch->ws_ping_interval > 0) {
-                    feishu_ws_set_ping_interval(g_feishu_ws_client, ch->ws_ping_interval);
-                }
-                if (ch->ws_reconnect_interval > 0 || ch->ws_max_reconnect != 0) {
-                    feishu_ws_set_reconnect(g_feishu_ws_client, 
-                                           ch->ws_reconnect_interval > 0 ? ch->ws_reconnect_interval : 120,
-                                           ch->ws_max_reconnect);
-                }
-                
-                if (feishu_ws_start(g_feishu_ws_client)) {
-                    log_info("Feishu WebSocket client started for channel: %s", ch->id);
-                } else {
-                    log_error("Failed to start Feishu WebSocket client for channel: %s", ch->id);
-                    feishu_ws_destroy(g_feishu_ws_client);
-                    g_feishu_ws_client = NULL;
-                }
-            }
-        }
+    // Start gateway (WebSocket server, HTTP API server, Feishu WS clients)
+    if (!gateway_start()) {
+        log_error("Failed to start gateway");
+        // Continue anyway
     }
 
     log_info("CatClaw initialized successfully!");
     if (g_config.gateway.websocket_enabled) {
         log_info("WebSocket server running on port %d", g_config.gateway_port);
     }
-    if (g_config.gateway.http_server_enabled && g_http_api_server) {
-        int http_port = g_config.http_port > 0 ? g_config.http_port : 8080;
-        log_info("HTTP API server running on port %d", http_port);
+    if (g_config.gateway.http_server_enabled) {
+        log_info("HTTP API server running on port %d", g_gateway.http_port);
     }
     log_info("Use 'help' for available commands");
     printf("\n");
@@ -293,7 +189,7 @@ int main(int argc, char *argv[]) {
                         } else if (result->action == COMMAND_ACTION_SHUTDOWN) {
                             command_result_free(result);
                             // 清理并退出
-                            stop_gateway_server();
+                            gateway_stop();
                             agent_cleanup();
                             channels_cleanup();
                             plugin_system_cleanup();
@@ -322,23 +218,8 @@ int main(int argc, char *argv[]) {
     }
 
     // Cleanup
-    stop_gateway_server();
+    gateway_stop();
     agent_stop_worker_thread();
-    
-    // Stop Feishu WebSocket client
-    if (g_feishu_ws_client) {
-        feishu_ws_stop(g_feishu_ws_client);
-        feishu_ws_destroy(g_feishu_ws_client);
-        g_feishu_ws_client = NULL;
-    }
-    
-    // Stop HTTP API server
-    if (g_http_api_server) {
-        http_api_stop(g_http_api_server);
-        http_api_cleanup(g_http_api_server);
-        g_http_api_server = NULL;
-    }
-    
     agent_cleanup();
     channels_cleanup();
     plugin_system_cleanup();
