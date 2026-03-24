@@ -10,29 +10,6 @@
 #include <string.h>
 #include <ctype.h>
 
-// Cross-platform strcasestr implementation (case-insensitive strstr)
-#ifndef HAVE_STRCASESTR
-static char* strcasestr(const char* haystack, const char* needle) {
-    if (!haystack || !needle) return NULL;
-    if (!*needle) return (char*)haystack;
-    
-    char* h = (char*)haystack;
-    while (*h) {
-        if (tolower((unsigned char)*h) == tolower((unsigned char)*needle)) {
-            char* h2 = h + 1;
-            char* n2 = (char*)needle + 1;
-            while (*n2 && tolower((unsigned char)*h2) == tolower((unsigned char)*n2)) {
-                h2++;
-                n2++;
-            }
-            if (!*n2) return h;
-        }
-        h++;
-    }
-    return NULL;
-}
-#endif
-
 #ifdef HAVE_CURL
 #include <curl/curl.h>
 
@@ -256,7 +233,7 @@ static HttpResponse* do_request(const HttpRequest* req, bool stream,
         resp->headers = header_buf.data;
         
         // 提取 Content-Type
-        char* ct_start = strcasestr(header_buf.data, "Content-Type:");
+        char* ct_start = http_strcasestr(header_buf.data, "Content-Type:");
         if (ct_start) {
             ct_start += 13;
             while (*ct_start == ' ') ct_start++;
