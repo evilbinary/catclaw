@@ -12,6 +12,7 @@
 #include "gateway/channels.h"
 #include "gateway/feishu_ws.h"
 #include "agent/agent.h"
+#include "agent/command.h"
 #include "common/plugin.h"
 #include "tool/skill.h"
 #include "common/log.h"
@@ -277,190 +278,64 @@ int main(int argc, char *argv[]) {
         if (strlen(command) > 0) {
             if (command[0] == '/') {
                 // Command mode: input starts with /
+                
+                // CLI 特有命令处理
                 char *cmd = command + 1; // Skip the /
                 
-                if (strcmp(cmd, "help") == 0) {
-                    printf("Available commands:\n");
-                    printf("  /help              - Show this help\n");
-                    printf("  /status            - Show status\n");
-                    printf("  /message <text>    - Send a message to AI\n");
-                    printf("  /model             - List all available models\n");
-                    printf("  /model <name>      - Switch to model by name\n");
-                    printf("  /model <index>     - Switch to model by index\n");
-                    printf("  /model list        - List all available models\n");
-                    printf("  /gateway start     - Start gateway server\n");
-                    printf("  /gateway stop      - Stop gateway server\n");
-                    printf("  /gateway status    - Show gateway status\n");
-                    printf("  /plugin list       - List loaded plugins\n");
-                    printf("  /plugin load <path> - Load a plugin\n");
-                    printf("  /plugin unload <name> - Unload a plugin\n");
-                    printf("  /config list       - List configuration\n");
-                    printf("  /config set <key> <value> - Set configuration\n");
-                    printf("  /config get <key>  - Get configuration\n");
-                    printf("  /channel enable <type> - Enable a channel\n");
-                    printf("  /channel disable <type> - Disable a channel\n");
-                    printf("  /channel connect <type> - Connect a channel\n");
-                    printf("  /channel disconnect <type> - Disconnect a channel\n");
-                    printf("  /model list        - List available AI models\n");
-                    printf("  /model set <model> - Set AI model\n");
-                    printf("  /system restart    - Restart system\n");
-                    printf("  /system shutdown   - Shutdown system\n");
-                    printf("  /skill load <path> - Load a skill\n");
-                    printf("  /skill unload <name> - Unload a skill\n");
-                    printf("  /skill execute <name> [params] - Execute a skill\n");
-                    printf("  /skills list       - List loaded skills\n");
-                    printf("  /skill enable <name> - Enable a skill\n");
-                    printf("  /skill disable <name> - Disable a skill\n");
-                    printf("  /calculate <expr>  - Calculate an expression\n");
-                    printf("  /time              - Get current time\n");
-                    printf("  /reverse string <text> - Reverse a string\n");
-                    printf("  /read file <name>  - Read a file\n");
-                    printf("  /write file <name> <content> - Write to a file\n");
-                    printf("  /search <query>    - Search the web\n");
-                    printf("  /memory save <key> <value> - Save to memory\n");
-                    printf("  /memory load <key> - Load from memory\n");
-                    printf("  /memory clear      - Clear memory\n");
-                    printf("  /step add <desc>|<tool>|<params> - Add a step\n");
-                    printf("  /steps execute     - Execute steps\n");
-                    printf("  /steps pause       - Pause execution\n");
-                    printf("  /steps resume      - Resume execution\n");
-                    printf("  /steps stop        - Stop execution\n");
-                    printf("  /steps clear       - Clear steps\n");
-                    printf("  /steps list        - List steps\n");
-                    printf("  /debug on          - Enable debug mode\n");
-                    printf("  /debug off         - Disable debug mode\n");
-                    printf("  /loglevel <level>  - Set log level (debug, info, warn, error, fatal)\n");
-                    printf("  /health            - Show health check\n");
-                    printf("  /exit              - Exit\n");
-                } else if (strcmp(cmd, "status") == 0) {
-                    printf("🦞 CatClaw Status\n");
-                    printf("─────────────────────────────────────\n\n");
-                    gateway_status();
-                    printf("\n");
-                    agent_status();
-                    printf("\n");
-                    channels_status();
-                } else if (strncmp(cmd, "loglevel", 8) == 0) {
-                    char *level_str = cmd + 9;
-                    if (*level_str) {
-                        while (*level_str == ' ') level_str++;
-                        LogLevel level = LOG_LEVEL_INFO;
-                        bool valid = true;
-                        if (strcmp(level_str, "debug") == 0) level = LOG_LEVEL_DEBUG;
-                        else if (strcmp(level_str, "info") == 0) level = LOG_LEVEL_INFO;
-                        else if (strcmp(level_str, "warn") == 0) level = LOG_LEVEL_WARN;
-                        else if (strcmp(level_str, "error") == 0) level = LOG_LEVEL_ERROR;
-                        else if (strcmp(level_str, "fatal") == 0) level = LOG_LEVEL_FATAL;
-                        else { valid = false; }
-                        if (valid) {
-                            log_set_level(level);
-                            printf("Log level set to: %s\n", level_str);
-                        } else {
-                            printf("Unknown log level: %s (use: debug, info, warn, error, fatal)\n", level_str);
-                        }
-                    } else {
-                        printf("Usage: /loglevel <level>  (debug, info, warn, error, fatal)\n");
-                    }
-                } else if (strcmp(cmd, "health") == 0) {
-                    printf("Health Check\n");
-                    printf("─────────────────────────────────────\n\n");
-                    printf("Gateway: ✓ healthy\n");
-                    
-                    // Model API health check
-                    printf("Model API: ✓ accessible (%s)\n", g_agent.model);
-                    printf("  Response time: 1.2s\n");
-                    printf("  Token: valid\n");
-                    printf("\n");
-                    
-                    // Channels health check
-                    channels_status();
-                    printf("\n");
-                    
-                    // Sessions count
-                    printf("Sessions: 0 active\n");
-                } else if (strcmp(cmd, "exit") == 0) {
-                    break;
-                } else if (strncmp(cmd, "message", 7) == 0) {
+                // /message 命令 - 直接发送消息
+                if (strncmp(cmd, "message ", 8) == 0) {
                     char *message = cmd + 8;
                     if (*message) {
                         agent_send_message(message);
                     } else {
                         printf("Usage: /message <text>\n");
                     }
-                } else if (strcmp(cmd, "gateway start") == 0) {
-                    start_gateway_server();
-                } else if (strcmp(cmd, "gateway stop") == 0) {
-                    stop_gateway_server();
-                } else if (strcmp(cmd, "gateway status") == 0) {
-                    gateway_status();
-                } else if (strcmp(cmd, "plugin list") == 0) {
-                    plugin_list();
-                } else if (strncmp(cmd, "plugin load", 11) == 0) {
-                    char *path = cmd + 12;
+                }
+                // /skill 命令 - CLI 特有
+                else if (strncmp(cmd, "skill load ", 11) == 0) {
+                    char *path = cmd + 11;
                     if (*path) {
-                        plugin_load(path);
+                        agent_load_skill(path);
                     } else {
-                        printf("Usage: /plugin load <path>\n");
+                        printf("Usage: /skill load <path>\n");
                     }
-                } else if (strncmp(cmd, "plugin unload", 13) == 0) {
-                    char *name = cmd + 14;
+                } else if (strncmp(cmd, "skill unload ", 13) == 0) {
+                    char *name = cmd + 13;
                     if (*name) {
-                        plugin_unload(name);
+                        agent_unload_skill(name);
                     } else {
-                        printf("Usage: /plugin unload <name>\n");
+                        printf("Usage: /skill unload <name>\n");
                     }
-                } else if (strcmp(cmd, "config list") == 0) {
-                    config_print();
-                } else if (strncmp(cmd, "config set", 10) == 0) {
-                    char *params = cmd + 11;
-                    char *key = strtok(params, " ");
-                    char *value = strtok(NULL, "");
-                    if (key && value) {
-                        if (config_set(key, value)) {
-                            printf("Config set: %s = %s\n", key, value);
-                        } else {
-                            printf("Error: Invalid config key\n");
-                        }
+                } else if (strncmp(cmd, "skill execute ", 14) == 0) {
+                    char *params = cmd + 14;
+                    char *name = strtok(params, " ");
+                    char *skill_params = strtok(NULL, "");
+                    if (name) {
+                        char *result = agent_execute_skill(name, skill_params);
+                        printf("%s\n", result);
+                        free(result);
                     } else {
-                        printf("Usage: /config set <key> <value>\n");
+                        printf("Usage: /skill execute <name> [params]\n");
                     }
-                } else if (strncmp(cmd, "config get", 10) == 0) {
-                    char *key = cmd + 11;
-                    if (*key) {
-                        const char *value = config_get(key);
-                        if (value) {
-                            printf("Config %s: %s\n", key, value);
-                        } else {
-                            printf("Error: Invalid config key\n");
-                        }
+                } else if (strcmp(cmd, "skills list") == 0) {
+                    agent_list_skills();
+                } else if (strncmp(cmd, "skill enable ", 12) == 0) {
+                    char *name = cmd + 12;
+                    if (*name) {
+                        agent_enable_skill(name);
                     } else {
-                        printf("Usage: /config get <key>\n");
+                        printf("Usage: /skill enable <name>\n");
                     }
-                } else if (strncmp(cmd, "channel enable", 14) == 0) {
-                    char *channel_id = cmd + 15;
-                    if (*channel_id) {
-                        ChannelInstance *ch = channel_find(channel_id);
-                        if (ch) {
-                            channel_enable(ch);
-                        } else {
-                            printf("Error: Channel not found: %s\n", channel_id);
-                        }
+                } else if (strncmp(cmd, "skill disable ", 13) == 0) {
+                    char *name = cmd + 13;
+                    if (*name) {
+                        agent_disable_skill(name);
                     } else {
-                        printf("Usage: /channel enable <id>\n");
+                        printf("Usage: /skill disable <name>\n");
                     }
-                } else if (strncmp(cmd, "channel disable", 15) == 0) {
-                    char *channel_id = cmd + 16;
-                    if (*channel_id) {
-                        ChannelInstance *ch = channel_find(channel_id);
-                        if (ch) {
-                            channel_disable(ch);
-                        } else {
-                            printf("Error: Channel not found: %s\n", channel_id);
-                        }
-                    } else {
-                        printf("Usage: /channel disable <id>\n");
-                    }
-                } else if (strncmp(cmd, "channel connect", 15) == 0) {
+                }
+                // /channel connect/disconnect - CLI 特有
+                else if (strncmp(cmd, "channel connect ", 16) == 0) {
                     char *channel_id = cmd + 16;
                     if (*channel_id) {
                         ChannelInstance *ch = channel_find(channel_id);
@@ -472,8 +347,8 @@ int main(int argc, char *argv[]) {
                     } else {
                         printf("Usage: /channel connect <id>\n");
                     }
-                } else if (strncmp(cmd, "channel disconnect", 18) == 0) {
-                    char *channel_id = cmd + 19;
+                } else if (strncmp(cmd, "channel disconnect ", 18) == 0) {
+                    char *channel_id = cmd + 18;
                     if (*channel_id) {
                         ChannelInstance *ch = channel_find(channel_id);
                         if (ch) {
@@ -484,46 +359,9 @@ int main(int argc, char *argv[]) {
                     } else {
                         printf("Usage: /channel disconnect <id>\n");
                     }
-                } else if (strcmp(cmd, "channel list") == 0) {
-                    channels_status();
-                } else if (strcmp(cmd, "model list") == 0) {
-                    printf("Available models:\n");
-                    printf("  openai/gpt-4o\n");
-                    printf("  openai/gpt-3.5-turbo\n");
-                    printf("  anthropic/claude-3-opus-20240229\n");
-                    printf("  anthropic/claude-3-sonnet-20240229\n");
-                    printf("  gemini/gemini-1.5-pro\n");
-                    printf("  llama/llama3-70b\n");
-                } else if (strncmp(cmd, "model set", 8) == 0) {
-                    char *model = cmd + 9;
-                    if (*model) {
-                        if (config_set("model", model)) {
-                            printf("Model set to: %s\n", model);
-                            printf("Note: You need to restart CatClaw for this change to take effect\n");
-                        } else {
-                            printf("Error: Failed to set model\n");
-                        }
-                    } else {
-                        printf("Usage: /model set <model>\n");
-                    }
-                } else if (strncmp(cmd, "model", 5) == 0 && cmd[5] == ' ') {
-                        // Handle temporary model switching: /model <model_name>
-                        char *model_name = cmd + 6;
-                        if (*model_name) {
-                            // Let agent_parse_command handle model switching
-                            char *result = agent_parse_command(cmd);
-                            if (result) {
-                                printf("%s\n", result);
-                                free(result);
-                            }
-                        } else {
-                            printf("Usage: /model <model_name>\n");
-                        }
-                    } else if (strcmp(cmd, "system restart") == 0) {
-                    printf("Restarting CatClaw...\n");
-                    // TODO: Implement actual restart functionality
-                    printf("Restart functionality not yet implemented\n");
-                } else if (strcmp(cmd, "system shutdown") == 0) {
+                }
+                // /system shutdown - CLI 特有
+                else if (strcmp(cmd, "system shutdown") == 0) {
                     printf("Shutting down CatClaw...\n");
                     // Cleanup and exit
                     stop_gateway_server();
@@ -539,53 +377,24 @@ int main(int argc, char *argv[]) {
                     log_cleanup();
                     printf("CatClaw shutdown\n");
                     exit(0);
-                } else if (strncmp(cmd, "skill load", 10) == 0) {
-                    char *path = cmd + 11;
-                    if (*path) {
-                        agent_load_skill(path);
-                    } else {
-                        printf("Usage: /skill load <path>\n");
-                    }
-                } else if (strncmp(cmd, "skill unload", 12) == 0) {
-                    char *name = cmd + 13;
-                    if (*name) {
-                        agent_unload_skill(name);
-                    } else {
-                        printf("Usage: /skill unload <name>\n");
-                    }
-                } else if (strncmp(cmd, "skill execute", 13) == 0) {
-                    char *params = cmd + 14;
-                    char *name = strtok(params, " ");
-                    char *skill_params = strtok(NULL, "");
-                    if (name) {
-                        char *result = agent_execute_skill(name, skill_params);
-                        printf("%s\n", result);
-                        free(result);
-                    } else {
-                        printf("Usage: /skill execute <name> [params]\n");
-                    }
-                } else if (strcmp(cmd, "skills list") == 0) {
-                    agent_list_skills();
-                } else if (strncmp(cmd, "skill enable", 12) == 0) {
-                    char *name = cmd + 13;
-                    if (*name) {
-                        agent_enable_skill(name);
-                    } else {
-                        printf("Usage: /skill enable <name>\n");
-                    }
-                } else if (strncmp(cmd, "skill disable", 13) == 0) {
-                    char *name = cmd + 14;
-                    if (*name) {
-                        agent_disable_skill(name);
-                    } else {
-                        printf("Usage: /skill disable <name>\n");
-                    }
-                } else {
-                    // Pass other commands to agent_parse_command
-                    char *result = agent_parse_command(cmd);
+                } else if (strcmp(cmd, "system restart") == 0) {
+                    printf("Restarting CatClaw...\n");
+                    printf("Restart functionality not yet implemented\n");
+                }
+                // 使用统一的命令处理器
+                else {
+                    CommandResult* result = command_process(command);
                     if (result) {
-                        printf("%s\n", result);
-                        free(result);
+                        if (result->is_command) {
+                            printf("%s\n", result->response);
+                            
+                            // 处理特殊动作
+                            if (result->action == COMMAND_ACTION_EXIT) {
+                                command_result_free(result);
+                                break;
+                            }
+                        }
+                        command_result_free(result);
                     }
                 }
             } else {

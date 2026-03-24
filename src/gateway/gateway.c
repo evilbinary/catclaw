@@ -62,6 +62,10 @@ void gateway_stop(void) {
     printf("Gateway stopped\n");
 }
 
+bool gateway_is_running(void) {
+    return g_gateway.running;
+}
+
 void gateway_cleanup(void) {
     if (g_gateway.running) {
         gateway_stop();

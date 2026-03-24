@@ -5,20 +5,24 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
+#include <time.h>
 
 #include "command.h"
 #include "common/log.h"
+#include "common/config.h"
+#include "common/plugin.h"
 #include "agent/agent.h"
 #include "gateway/gateway.h"
 #include "gateway/channels.h"
 
 // 创建命令结果
-static CommandResult* result_create(bool is_cmd, bool handled, const char* response) {
+static CommandResult* result_create(bool is_cmd, bool handled, CommandAction action, const char* response) {
     CommandResult* result = (CommandResult*)malloc(sizeof(CommandResult));
     if (!result) return NULL;
     
     result->is_command = is_cmd;
     result->handled = handled;
+    result->action = action;
     result->response = response ? strdup(response) : strdup("");
     
     return result;
@@ -26,25 +30,46 @@ static CommandResult* result_create(bool is_cmd, bool handled, const char* respo
 
 // 处理 help 命令
 static char* cmd_help(void) {
-    size_t size = 2048;
+    size_t size = 4096;
     char* buf = (char*)malloc(size);
     if (!buf) return NULL;
     
-    int offset = 0;
-    offset += snprintf(buf + offset, size - offset,
+    snprintf(buf, size,
         "📋 可用命令:\n"
         "────────────────────────\n"
         "  /help              - 显示帮助\n"
         "  /status            - 显示状态\n"
+        "  /health            - 健康检查\n"
+        "  /time              - 获取当前时间\n"
+        "  /exit              - 退出程序\n"
+        "\n"
+        "模型相关:\n"
         "  /model             - 列出可用模型\n"
         "  /model <name>      - 切换模型\n"
+        "\n"
+        "网关相关:\n"
         "  /gateway status    - 网关状态\n"
+        "  /gateway start     - 启动网关\n"
+        "  /gateway stop      - 停止网关\n"
+        "\n"
+        "频道相关:\n"
         "  /channel list      - 列出频道\n"
-        "  /health            - 健康检查\n"
-        "  /loglevel <level>  - 设置日志级别\n"
-        "  /time              - 获取当前时间\n"
+        "  /channel enable <id>   - 启用频道\n"
+        "  /channel disable <id>  - 禁用频道\n"
+        "\n"
+        "配置相关:\n"
+        "  /config list       - 列出配置\n"
+        "  /config get <key>  - 获取配置\n"
+        "  /config set <key> <value> - 设置配置\n"
+        "\n"
+        "工具命令:\n"
         "  /search <query>    - 搜索网络\n"
-        "  /weather <location>- 获取天气\n");
+        "  /weather <city>    - 获取天气\n"
+        "  /shell <command>   - 执行Shell命令\n"
+        "\n"
+        "调试命令:\n"
+        "  /loglevel <level>  - 设置日志级别\n"
+        "  /debug on/off      - 开启/关闭调试模式\n");
     
     return buf;
 }
@@ -64,7 +89,8 @@ static char* cmd_status(void) {
         agent_get_model() ? agent_get_model() : "未设置");
     
     // Channels status
-    offset += snprintf(buf + offset, size - offset, "\n频道: 飞书/Discord/Telegram\n");
+    offset += snprintf(buf + offset, size - offset, "\n频道:\n");
+    channels_status();
     
     return buf;
 }
@@ -105,12 +131,12 @@ static char* cmd_model(const char* args) {
     char* buf = (char*)malloc(size);
     if (!buf) return NULL;
     
-    if (!args || strlen(args) == 0) {
+    if (!args || strlen(args) == 0 || strcmp(args, "list") == 0) {
         // 列出所有模型
-        int offset = snprintf(buf, size, "🤖 可用模型:\n────────────────────────\n");
-        // 这里可以调用模型列表接口
-        offset += snprintf(buf + offset, size - offset, "当前模型: %s\n",
+        int offset = snprintf(buf, size, "🤖 当前模型: %s\n",
             agent_get_model() ? agent_get_model() : "未设置");
+        offset += snprintf(buf + offset, size - offset, 
+            "使用 /model <name> 切换模型\n");
     } else {
         // 切换模型
         if (agent_set_model(args)) {
@@ -130,11 +156,14 @@ static char* cmd_gateway(const char* args) {
     if (!buf) return NULL;
     
     if (!args || strlen(args) == 0 || strcmp(args, "status") == 0) {
-        snprintf(buf, size, "网关: 使用 /status 查看完整状态");
+        snprintf(buf, size, "网关状态: %s",
+            gateway_is_running() ? "✓ 运行中" : "✗ 未启动");
     } else if (strcmp(args, "start") == 0) {
-        snprintf(buf, size, "网关启动请使用 CLI 命令");
+        gateway_start();
+        snprintf(buf, size, "正在启动网关...");
     } else if (strcmp(args, "stop") == 0) {
-        snprintf(buf, size, "网关停止请使用 CLI 命令");
+        gateway_stop();
+        snprintf(buf, size, "正在停止网关...");
     } else {
         snprintf(buf, size, "未知子命令: gateway %s", args);
     }
@@ -149,10 +178,65 @@ static char* cmd_channel(const char* args) {
     if (!buf) return NULL;
     
     if (!args || strlen(args) == 0 || strcmp(args, "list") == 0) {
-        snprintf(buf, size, "📺 频道列表:\n────────────────────────\n%s",
-            "飞书、Discord、Telegram 等");
+        snprintf(buf, size, "📺 频道列表:\n使用 /status 查看详细状态");
+    } else if (strncmp(args, "enable ", 7) == 0) {
+        const char* id = args + 7;
+        ChannelInstance* ch = channel_find(id);
+        if (ch) {
+            channel_enable(ch);
+            snprintf(buf, size, "✓ 已启用频道: %s", id);
+        } else {
+            snprintf(buf, size, "✗ 未找到频道: %s", id);
+        }
+    } else if (strncmp(args, "disable ", 8) == 0) {
+        const char* id = args + 8;
+        ChannelInstance* ch = channel_find(id);
+        if (ch) {
+            channel_disable(ch);
+            snprintf(buf, size, "✓ 已禁用频道: %s", id);
+        } else {
+            snprintf(buf, size, "✗ 未找到频道: %s", id);
+        }
     } else {
-        snprintf(buf, size, "频道命令: %s", args);
+        snprintf(buf, size, "未知子命令: channel %s", args);
+    }
+    
+    return buf;
+}
+
+// 处理 config 命令
+static char* cmd_config(const char* args) {
+    size_t size = 512;
+    char* buf = (char*)malloc(size);
+    if (!buf) return NULL;
+    
+    if (!args || strlen(args) == 0 || strcmp(args, "list") == 0) {
+        config_print();
+        snprintf(buf, size, "配置已打印到控制台");
+    } else if (strncmp(args, "get ", 4) == 0) {
+        const char* key = args + 4;
+        const char* value = config_get(key);
+        if (value) {
+            snprintf(buf, size, "%s = %s", key, value);
+        } else {
+            snprintf(buf, size, "✗ 未找到配置: %s", key);
+        }
+    } else if (strncmp(args, "set ", 4) == 0) {
+        char* params = strdup(args + 4);
+        char* key = strtok(params, " ");
+        char* value = strtok(NULL, "");
+        if (key && value) {
+            if (config_set(key, value)) {
+                snprintf(buf, size, "✓ 已设置: %s = %s", key, value);
+            } else {
+                snprintf(buf, size, "✗ 设置失败: %s", key);
+            }
+        } else {
+            snprintf(buf, size, "用法: /config set <key> <value>");
+        }
+        free(params);
+    } else {
+        snprintf(buf, size, "未知子命令: config %s", args);
     }
     
     return buf;
@@ -188,15 +272,61 @@ static char* cmd_loglevel(const char* args) {
     return buf;
 }
 
+// 处理 debug 命令
+static char* cmd_debug(const char* args) {
+    size_t size = 64;
+    char* buf = (char*)malloc(size);
+    if (!buf) return NULL;
+    
+    if (strcmp(args, "on") == 0) {
+        agent_set_debug_mode(true);
+        snprintf(buf, size, "✓ 调试模式已开启");
+    } else if (strcmp(args, "off") == 0) {
+        agent_set_debug_mode(false);
+        snprintf(buf, size, "✓ 调试模式已关闭");
+    } else {
+        snprintf(buf, size, "用法: /debug on|off");
+    }
+    
+    return buf;
+}
+
+// 处理 plugin 命令
+static char* cmd_plugin(const char* args) {
+    size_t size = 256;
+    char* buf = (char*)malloc(size);
+    if (!buf) return NULL;
+    
+    if (!args || strlen(args) == 0 || strcmp(args, "list") == 0) {
+        plugin_list();
+        snprintf(buf, size, "插件列表已打印到控制台");
+    } else if (strncmp(args, "load ", 5) == 0) {
+        const char* path = args + 5;
+        if (plugin_load(path)) {
+            snprintf(buf, size, "✓ 已加载插件: %s", path);
+        } else {
+            snprintf(buf, size, "✗ 加载失败: %s", path);
+        }
+    } else if (strncmp(args, "unload ", 7) == 0) {
+        const char* name = args + 7;
+        if (plugin_unload(name)) {
+            snprintf(buf, size, "✓ 已卸载插件: %s", name);
+        } else {
+            snprintf(buf, size, "✗ 卸载失败: %s", name);
+        }
+    } else {
+        snprintf(buf, size, "未知子命令: plugin %s", args);
+    }
+    
+    return buf;
+}
+
 // 处理 search 命令
 static char* cmd_search(const char* args) {
     if (!args || strlen(args) == 0) {
         return strdup("用法: /search <关键词>");
     }
     
-    // 调用 web_search 工具
-    ToolArgs targs = {0};
-    // 这里需要简化调用，实际可以使用 tool_search_web
     char* result = (char*)malloc(256);
     snprintf(result, 256, "🔍 搜索: %s\n（请使用 AI 对话进行搜索）", args);
     return result;
@@ -208,28 +338,57 @@ static char* cmd_weather(const char* args) {
         return strdup("用法: /weather <城市>");
     }
     
-    // 调用 weather 工具
     char* result = (char*)malloc(256);
     snprintf(result, 256, "🌤️ 天气查询: %s\n（请使用 AI 对话查询天气）", args);
     return result;
 }
 
+// 处理 shell 命令
+static char* cmd_shell(const char* args) {
+    if (!args || strlen(args) == 0) {
+        return strdup("用法: /shell <command>");
+    }
+    
+    // 执行 shell 命令
+    FILE* fp = popen(args, "r");
+    if (!fp) {
+        return strdup("✗ 执行命令失败");
+    }
+    
+    size_t size = 2048;
+    char* buf = (char*)malloc(size);
+    if (!buf) {
+        pclose(fp);
+        return strdup("内存分配失败");
+    }
+    
+    int offset = snprintf(buf, size, "💻 执行: %s\n\n", args);
+    
+    char line[256];
+    while (fgets(line, sizeof(line), fp) && offset < (int)(size - 256)) {
+        offset += snprintf(buf + offset, size - offset, "%s", line);
+    }
+    
+    pclose(fp);
+    return buf;
+}
+
 // 主处理函数
 CommandResult* command_process(const char* input) {
     if (!input || strlen(input) == 0) {
-        return result_create(false, false, NULL);
+        return result_create(false, false, COMMAND_ACTION_NONE, NULL);
     }
     
     // 检查是否是命令
     if (input[0] != '/') {
-        return result_create(false, false, NULL);
+        return result_create(false, false, COMMAND_ACTION_NONE, NULL);
     }
     
     // 解析命令
     const char* cmd = input + 1;  // 跳过 /
     char* cmd_copy = strdup(cmd);
     if (!cmd_copy) {
-        return result_create(true, false, "内存分配失败");
+        return result_create(true, false, COMMAND_ACTION_NONE, "内存分配失败");
     }
     
     // 提取命令名和参数
@@ -244,6 +403,7 @@ CommandResult* command_process(const char* input) {
     
     char* response = NULL;
     bool handled = true;
+    CommandAction action = COMMAND_ACTION_NONE;
     
     // 匹配命令
     if (strcmp(cmd_copy, "help") == 0) {
@@ -254,18 +414,29 @@ CommandResult* command_process(const char* input) {
         response = cmd_health();
     } else if (strcmp(cmd_copy, "time") == 0) {
         response = cmd_time();
+    } else if (strcmp(cmd_copy, "exit") == 0 || strcmp(cmd_copy, "quit") == 0) {
+        response = strdup("👋 再见!");
+        action = COMMAND_ACTION_EXIT;
     } else if (strcmp(cmd_copy, "model") == 0) {
         response = cmd_model(args);
     } else if (strcmp(cmd_copy, "gateway") == 0) {
         response = cmd_gateway(args);
     } else if (strcmp(cmd_copy, "channel") == 0) {
         response = cmd_channel(args);
+    } else if (strcmp(cmd_copy, "config") == 0) {
+        response = cmd_config(args);
     } else if (strcmp(cmd_copy, "loglevel") == 0) {
         response = cmd_loglevel(args);
+    } else if (strcmp(cmd_copy, "debug") == 0) {
+        response = cmd_debug(args);
+    } else if (strcmp(cmd_copy, "plugin") == 0) {
+        response = cmd_plugin(args);
     } else if (strcmp(cmd_copy, "search") == 0) {
         response = cmd_search(args);
     } else if (strcmp(cmd_copy, "weather") == 0) {
         response = cmd_weather(args);
+    } else if (strcmp(cmd_copy, "shell") == 0) {
+        response = cmd_shell(args);
     } else {
         handled = false;
         response = strdup("❌ 未知命令，输入 /help 查看帮助");
@@ -273,7 +444,7 @@ CommandResult* command_process(const char* input) {
     
     free(cmd_copy);
     
-    CommandResult* result = result_create(true, handled, response);
+    CommandResult* result = result_create(true, handled, action, response);
     free(response);  // result_create 会复制
     
     return result;

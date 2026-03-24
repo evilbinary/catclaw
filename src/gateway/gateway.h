@@ -19,6 +19,7 @@ extern Gateway g_gateway;
 bool gateway_init(void);
 bool gateway_start(void);
 void gateway_stop(void);
+bool gateway_is_running(void);
 void gateway_cleanup(void);
 void gateway_status(void);
 bool gateway_broadcast_to_webchat(const char *message);
