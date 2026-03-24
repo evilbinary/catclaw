@@ -7,6 +7,7 @@
 #include "common/log.h"
 #include "common/http_client.h"
 #include "common/cJSON.h"
+#include "agent/command.h"
 #include "agent/agent.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -523,22 +524,39 @@ static bool feishu_ws_on_message(WsClient *ws, const char *data, size_t len, voi
                      msg->sender_id ? msg->sender_id : "unknown",
                      msg->content);
             
-            // 构建带有上下文的消息
-            char *context_msg = (char *)malloc(512 + strlen(msg->content));
-            if (context_msg) {
-                snprintf(context_msg, 512 + strlen(msg->content),
-                         "[feishu:%s:%s] %s",
-                         msg->sender_id ? msg->sender_id : "unknown",
-                         msg->chat_id ? msg->chat_id : (msg->message_id ? msg->message_id : "unknown"),
-                         msg->content);
+            // 检查是否是命令（以 / 开头）
+            char* cmd_response = command_handle(msg->content);
+            if (cmd_response) {
+                // 是命令，直接回复结果
+                log_info("[FeishuWS] Command received: %s", msg->content);
                 
-                // 发送到 agent
-                if (agent_send_message(context_msg)) {
-                    log_info("[FeishuWS] Message sent to agent successfully");
+                // 发送命令响应回飞书（使用 chat_id 回复到同一个会话）
+                const char* reply_id = msg->chat_id ? msg->chat_id : msg->sender_id;
+                if (reply_id) {
+                    feishu_reply_to_chat(reply_id, cmd_response);
                 } else {
-                    log_error("[FeishuWS] Failed to send message to agent");
+                    channel_send_message_to_type(CHANNEL_FEISHU, cmd_response);
                 }
-                free(context_msg);
+                free(cmd_response);
+            } else {
+                // 不是命令，发送到 agent 处理
+                // 构建带有上下文的消息
+                char *context_msg = (char *)malloc(512 + strlen(msg->content));
+                if (context_msg) {
+                    snprintf(context_msg, 512 + strlen(msg->content),
+                             "[feishu:%s:%s] %s",
+                             msg->sender_id ? msg->sender_id : "unknown",
+                             msg->chat_id ? msg->chat_id : (msg->message_id ? msg->message_id : "unknown"),
+                             msg->content);
+                    
+                    // 发送到 agent
+                    if (agent_send_message(context_msg)) {
+                        log_info("[FeishuWS] Message sent to agent successfully");
+                    } else {
+                        log_error("[FeishuWS] Failed to send message to agent");
+                    }
+                    free(context_msg);
+                }
             }
             
             feishu_message_free(msg);

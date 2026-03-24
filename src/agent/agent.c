@@ -73,6 +73,23 @@ void agent_set_debug_mode(bool enabled) {
     printf("Debug mode %s\n", enabled ? "enabled" : "disabled");
 }
 
+const char* agent_get_model(void) {
+    return g_agent.model;
+}
+
+bool agent_set_model(const char* model) {
+    if (!model) return false;
+    
+    if (g_agent.model) {
+        free(g_agent.model);
+    }
+    g_agent.model = strdup(model);
+    return g_agent.model != NULL;
+}
+
+
+
+
 
 
 // Tool registration

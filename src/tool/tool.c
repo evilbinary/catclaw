@@ -6,7 +6,14 @@
 #include <errno.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#ifndef _WIN32
+
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <sys/wait.h>
+#include <sys/select.h>
+#include <signal.h>
+#include <fcntl.h>
 #include <pwd.h>
 #endif
 
@@ -937,7 +944,7 @@ int tool_web_fetch(ToolArgs* args, char** result, int* result_len) {
     return 0;
 }
 
-// Shell execute tool - run shell commands
+// Shell execute tool - run shell commands (cross-platform)
 int tool_shell_execute(ToolArgs* args, char** result, int* result_len) {
     const char* cmd = tool_args_get(args, "command");
     if (!cmd) cmd = tool_args_get(args, "cmd");
@@ -949,7 +956,8 @@ int tool_shell_execute(ToolArgs* args, char** result, int* result_len) {
         return -1;
     }
     
-    // Security check: block dangerous commands
+#ifndef _WIN32
+    // Unix: Security check - block dangerous commands
     const char* dangerous[] = {
         "rm -rf /", "mkfs", "dd if=", ":(){:|:&};:",
         "chmod -R 777 /", "chown -R", "> /dev/", NULL
@@ -961,20 +969,12 @@ int tool_shell_execute(ToolArgs* args, char** result, int* result_len) {
             return -1;
         }
     }
+#endif
     
-    // Execute command
-    FILE* fp = popen(cmd, "r");
-    if (!fp) {
-        *result = strdup("Error: Failed to execute command");
-        *result_len = strlen(*result);
-        return -1;
-    }
-    
-    // Read output
-    size_t buf_size = 8192;
+    // Allocate result buffer
+    size_t buf_size = 16384;
     *result = (char*)malloc(buf_size);
     if (!*result) {
-        pclose(fp);
         *result = strdup("Error: Memory allocation failed");
         *result_len = strlen(*result);
         return -1;
@@ -982,12 +982,32 @@ int tool_shell_execute(ToolArgs* args, char** result, int* result_len) {
     
     int offset = snprintf(*result, buf_size, "Command: %s\n\n", cmd);
     
+#ifdef _WIN32
+    // Windows: use _popen
+    FILE* fp = _popen(cmd, "r");
+#else
+    // Unix: use popen with timeout
+    FILE* fp = popen(cmd, "r");
+#endif
+    
+    if (!fp) {
+        free(*result);
+        *result = strdup("Error: Failed to execute command");
+        *result_len = strlen(*result);
+        return -1;
+    }
+    
+    // Read output
     char line[1024];
     while (fgets(line, sizeof(line), fp) && offset < (int)(buf_size - 1024)) {
         offset += snprintf(*result + offset, buf_size - offset, "%s", line);
     }
     
+#ifdef _WIN32
+    int exit_code = _pclose(fp);
+#else
     int exit_code = pclose(fp);
+#endif
     
     if (offset == (int)strlen(cmd) + 11) {
         offset += snprintf(*result + offset, buf_size - offset, "(no output)\n");
