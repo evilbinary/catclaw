@@ -583,16 +583,16 @@ bool agent_init(void) {
     // Register default tools
     agent_register_tool("calculator", "Perform basic arithmetic calculations", NULL, tool_calculate);
     agent_register_tool("time", "Get current time", NULL, tool_get_time);
-    agent_register_tool("reverse_string", "Reverse a string", NULL, tool_reverse_string);
-    agent_register_tool("read_file", "Read a file from disk", NULL, tool_read_file);
-    agent_register_tool("write_file", "Write content to a file", NULL, tool_write_file);
-    agent_register_tool("web_search", "Simulate web search", NULL, tool_search_web);
-    agent_register_tool("memory_save", "Save a key-value pair to memory", NULL, tool_save_memory);
-    agent_register_tool("memory_load", "Load a value from memory by key (no key = list all)", NULL, tool_read_memory);
-    agent_register_tool("memory_delete", "Delete a key-value pair from memory", NULL, tool_delete_memory);
-    agent_register_tool("get_weather", "Get weather information for a location", NULL, tool_get_weather);
-    agent_register_tool("list_directory", "List files and directories in a given path", NULL, tool_list_directory);
-    agent_register_tool("web_fetch", "Fetch content from a URL", NULL, tool_web_fetch);
+    agent_register_tool("reverse-string", "Reverse a string", NULL, tool_reverse_string);
+    agent_register_tool("read-file", "Read a file from disk", NULL, tool_read_file);
+    agent_register_tool("write-file", "Write content to a file", NULL, tool_write_file);
+    agent_register_tool("web-search", "Simulate web search", NULL, tool_search_web);
+    agent_register_tool("memory-save", "Save a key-value pair to memory", NULL, tool_save_memory);
+    agent_register_tool("memory-load", "Load a value from memory by key (no key = list all)", NULL, tool_read_memory);
+    agent_register_tool("memory-delete", "Delete a key-value pair from memory", NULL, tool_delete_memory);
+    agent_register_tool("get-weather", "Get weather information for a location", NULL, tool_get_weather);
+    agent_register_tool("list-directory", "List files and directories in a given path", NULL, tool_list_directory);
+    agent_register_tool("web-fetch", "Fetch content from a URL", NULL, tool_web_fetch);
     agent_register_tool("shell", "Execute shell commands", NULL, tool_shell_execute);
 
     g_agent.running = true;
