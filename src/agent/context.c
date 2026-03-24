@@ -109,12 +109,53 @@ static void stream_end_iterator(ChannelInstance* channel, void* user_data) {
     }
 }
 
+// 检查 tool-calls 是否完整（有闭合的括号）
+// 返回: true=完整或无tool-calls, false=不完整（需要等待）
+static bool tool_calls_is_complete(const char* content) {
+    if (!content) return true;
+    
+    const char* tc_start = strstr(content, "(tool-calls");
+    if (!tc_start) {
+        // 检查是否有不完整的 "(tool" 前缀
+        const char* tool_pos = strstr(content, "(tool");
+        if (tool_pos) {
+            const char* after = tool_pos + 5;  // "(tool" 长度
+            // 如果 "(tool" 后面可能继续（末尾、空格、-、字母），等待更多内容
+            if (*after == '\0' || *after == ' ' || *after == '-' || 
+                (*after >= 'a' && *after <= 'z')) {
+                return false;  // 不完整，等待
+            }
+        }
+        return true;  // 无 tool-calls，可以发送
+    }
+    
+    // 检查 tool-calls 的括号是否闭合
+    int paren_depth = 0;
+    const char* p = tc_start;
+    while (*p) {
+        if (*p == '(') paren_depth++;
+        else if (*p == ')') paren_depth--;
+        p++;
+    }
+    
+    return paren_depth == 0;  // 括号闭合则完整
+}
+
 // AI 流式回调函数：往所有支持流式的 channel 推送任务
 static void stream_callback(const char* chunk, const char* accumulated, void* user_data) {
     (void)chunk;
     (void)user_data;
     
-    int current_len = accumulated ? strlen(accumulated) : 0;
+    // 检查 tool-calls 是否完整，不完整则等待更多内容
+    if (!tool_calls_is_complete(accumulated)) {
+        return;
+    }
+    
+    if (!accumulated || strlen(accumulated) == 0) {
+        return;
+    }
+    
+    int current_len = strlen(accumulated);
     
     // 第一个 chunk：启动所有支持流式的 channel
     if (!g_stream_active) {
