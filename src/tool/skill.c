@@ -82,22 +82,18 @@ static char *get_hub_cache_path(void) {
     return path;
 }
 
-// Auto-load skills from directory with specified source type
-static int skill_auto_load_from_dir(const char *dir_path, SkillSource source) {
-    if (!dir_path) {
+// Internal recursive function to load skills from directory
+static int skill_load_from_dir_recursive(const char *dir_path, SkillSource source, int depth) {
+    if (!dir_path || depth > 5) {  // Max recursion depth
         return 0;
     }
     
-    log_info("[Skill] Scanning directory: %s", dir_path);
-    
     DIR *dir = opendir(dir_path);
     if (!dir) {
-        log_info("[Skill] Cannot open directory: %s (not an error, may not exist)", dir_path);
-        return 0;  // Directory doesn't exist, not an error
+        return 0;
     }
     
     int loaded = 0;
-    int scanned = 0;
     struct dirent *entry;
     
     while ((entry = readdir(dir)) != NULL) {
@@ -106,30 +102,31 @@ static int skill_auto_load_from_dir(const char *dir_path, SkillSource source) {
             continue;
         }
         
-        scanned++;
-        log_debug("[Skill] Found entry: %s", entry->d_name);
-        
-        // Check file extension
-        const char *ext = strrchr(entry->d_name, '.');
-        if (!ext) {
-            log_debug("[Skill] No extension, skipping: %s", entry->d_name);
-            continue;
-        }
-        
-        log_debug("[Skill] Extension: %s for file: %s", ext, entry->d_name);
-        
         // Build full path
         char full_path[MAX_PATH_LEN];
         snprintf(full_path, sizeof(full_path), "%s/%s", dir_path, entry->d_name);
         
-        // Check if file exists and is readable
+        // Check file/directory status
         struct stat st;
         if (stat(full_path, &st) != 0) {
-            log_warn("[Skill] Cannot stat file: %s", full_path);
             continue;
         }
+        
+        // If directory, recurse into it
+        if (S_ISDIR(st.st_mode)) {
+            log_debug("[Skill] Entering subdirectory: %s", full_path);
+            loaded += skill_load_from_dir_recursive(full_path, source, depth + 1);
+            continue;
+        }
+        
+        // Skip non-regular files
         if (!S_ISREG(st.st_mode)) {
-            log_debug("[Skill] Not a regular file: %s", full_path);
+            continue;
+        }
+        
+        // Check file extension
+        const char *ext = strrchr(entry->d_name, '.');
+        if (!ext) {
             continue;
         }
         
@@ -143,8 +140,6 @@ static int skill_auto_load_from_dir(const char *dir_path, SkillSource source) {
             // Markdown skill
             log_info("[Skill] Auto-loading %s markdown: %s", skill_source_name(source), full_path);
             success = skill_load_markdown(full_path, source);
-        } else {
-            log_debug("[Skill] Unknown extension, skipping: %s", ext);
         }
         
         if (success) {
@@ -155,7 +150,20 @@ static int skill_auto_load_from_dir(const char *dir_path, SkillSource source) {
     }
     
     closedir(dir);
-    log_info("[Skill] Scanned %d entries, loaded %d skills from %s", scanned, loaded, dir_path);
+    return loaded;
+}
+
+// Auto-load skills from directory with specified source type (recursive)
+static int skill_auto_load_from_dir(const char *dir_path, SkillSource source) {
+    if (!dir_path) {
+        return 0;
+    }
+    
+    log_info("[Skill] Scanning directory (recursive): %s", dir_path);
+    
+    int loaded = skill_load_from_dir_recursive(dir_path, source, 0);
+    
+    log_info("[Skill] Loaded %d skill(s) from %s", loaded, dir_path);
     return loaded;
 }
 
