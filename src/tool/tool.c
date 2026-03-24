@@ -1020,27 +1020,71 @@ int tool_shell_execute(ToolArgs* args, char** result, int* result_len) {
     return 0;
 }
 
-// Skill search tool - search local skills by query
+// Skill search tool - search local skills by query (empty query = list all)
 int tool_skill_search(ToolArgs* args, char** result, int* result_len) {
     const char* query = tool_args_get(args, "query");
     if (!query) query = tool_args_get(args, "arg");
     
-    if (!query || strlen(query) == 0) {
-        *result = strdup("Error: No search query provided");
-        *result_len = strlen(*result);
-        return -1;
-    }
-    
-    // Get limit parameter (default 10)
+    // Get limit parameter (default 20)
     const char* limit_str = tool_args_get(args, "limit");
-    int limit = 10;
+    int limit = 20;
     if (limit_str) {
         limit = atoi(limit_str);
-        if (limit <= 0) limit = 10;
-        if (limit > 50) limit = 50;
+        if (limit <= 0) limit = 20;
+        if (limit > 100) limit = 100;
     }
     
-    // Search skills
+    // If no query, list all skills
+    if (!query || strlen(query) == 0) {
+        SkillRegistry* registry = skill_get_registry();
+        if (!registry || registry->count == 0) {
+            *result = strdup("No skills loaded");
+            *result_len = strlen(*result);
+            return 0;
+        }
+        
+        size_t buf_size = 8192;
+        *result = (char*)malloc(buf_size);
+        if (!*result) {
+            *result = strdup("Error: Memory allocation failed");
+            *result_len = strlen(*result);
+            return -1;
+        }
+        
+        int offset = snprintf(*result, buf_size,
+            "📋 All loaded skills (%d):\n"
+            "─────────────────────────────────────────────────────────\n",
+            registry->count);
+        
+        int count = 0;
+        for (int i = 0; i < registry->count && count < limit && offset < (int)(buf_size - 256); i++) {
+            Skill* skill = registry->skills[i];
+            if (!skill) continue;
+            
+            offset += snprintf(*result + offset, buf_size - offset,
+                "  %d. %s (%s/%s)\n"
+                "     描述: %s\n"
+                "     分类: %s | 作者: %s\n\n",
+                count + 1,
+                skill->name,
+                skill_source_name(skill->source),
+                skill_type_name(skill->type),
+                skill->description ? skill->description : "无描述",
+                skill->category ? skill->category : "General",
+                skill->author ? skill->author : "Unknown");
+            count++;
+        }
+        
+        if (registry->count > limit) {
+            offset += snprintf(*result + offset, buf_size - offset,
+                "  ... 还有 %d 个技能未显示\n", registry->count - limit);
+        }
+        
+        *result_len = offset;
+        return 0;
+    }
+    
+    // Search with query
     SkillMatchResult* matches = skill_search_local(query, limit);
     if (!matches || matches->count == 0) {
         char* no_result = (char*)malloc(128);
