@@ -2,13 +2,13 @@
 #include "ai_provider_factory.h"
 #include "common/cJSON.h"
 #include "common/log.h"
+#include "common/http_client.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
 
-#ifdef HAVE_CURL
-#include <curl/curl.h>
-#endif
+#define ANTHROPIC_API_PATH "v1/messages"
+#define ANTHROPIC_DEFAULT_BASE_URL "https://api.anthropic.com"
 
 // Anthropic Provider 私有数据
 typedef struct {
@@ -21,6 +21,7 @@ static bool anthropic_init(AIProvider* self) {
     
     data->initialized = true;
     self->impl = data;
+    http_client_init();
     
     log_info("Anthropic Provider initialized: model=%s", 
              self->config.model_name ? self->config.model_name : "claude-3-opus");
@@ -32,48 +33,47 @@ static void anthropic_destroy(AIProvider* self) {
         free(self->impl);
         self->impl = NULL;
     }
+    http_client_cleanup();
 }
 
-#ifdef HAVE_CURL
-static size_t anthropic_write_callback(void* contents, size_t size, size_t nmemb, void* userp) {
-    size_t realsize = size * nmemb;
-    char** buffer = (char**)userp;
-    size_t current_len = *buffer ? strlen(*buffer) : 0;
+// 构建 API URL: base_url + /v1/messages，如果已包含则不重复添加
+static char* anthropic_build_url(const AIProvider* self) {
+    const char* base = self->config.base_url ? self->config.base_url : ANTHROPIC_DEFAULT_BASE_URL;
+    size_t base_len = strlen(base);
+    size_t path_len = strlen(ANTHROPIC_API_PATH);
     
-    char* new_buffer = (char*)realloc(*buffer, current_len + realsize + 1);
-    if (!new_buffer) return 0;
+    // 去掉 base 末尾的 '/'
+    while (base_len > 0 && base[base_len - 1] == '/') {
+        base_len--;
+    }
     
-    memcpy(new_buffer + current_len, contents, realsize);
-    new_buffer[current_len + realsize] = '\0';
-    *buffer = new_buffer;
-    return realsize;
+    // 检查 base 是否已经以 v1/messages 结尾
+    if (base_len >= path_len &&
+        strcmp(base + base_len - path_len, ANTHROPIC_API_PATH) == 0) {
+        // 已经包含路径，直接使用
+        char* url = (char*)malloc(base_len + 1);
+        if (!url) return NULL;
+        strncpy(url, base, base_len);
+        url[base_len] = '\0';
+        return url;
+    }
+    
+    // 拼接 base_url/v1/messages
+    char* url = (char*)malloc(base_len + 1 + path_len + 1);
+    if (!url) return NULL;
+    snprintf(url, base_len + 1 + path_len + 1, "%.*s/%s", (int)base_len, base, ANTHROPIC_API_PATH);
+    return url;
 }
-#endif
 
 static AIProviderResponse* anthropic_send_messages(AIProvider* self,
                                                     MessageList* messages,
                                                     const char* system_prompt) {
-#ifdef HAVE_CURL
-    CURL* curl = curl_easy_init();
-    if (!curl) {
-        return ai_provider_response_create(NULL, false, "Failed to initialize curl");
+    char* url = anthropic_build_url(self);
+    if (!url) {
+        return ai_provider_response_create(NULL, false, "Failed to build API URL");
     }
 
-    char* response_buffer = (char*)calloc(1, 1);
-    
-    const char* url = self->config.base_url ? self->config.base_url :
-                      "https://api.anthropic.com/v1/messages";
-
-    struct curl_slist* headers = NULL;
-    headers = curl_slist_append(headers, "Content-Type: application/json");
-    
-    char auth_header[512];
-    snprintf(auth_header, sizeof(auth_header), "x-api-key: %s",
-             self->config.api_key ? self->config.api_key : "");
-    headers = curl_slist_append(headers, auth_header);
-    headers = curl_slist_append(headers, "anthropic-version: 2023-06-01");
-
-    // 构建请求
+    // 构建请求体
     cJSON* root = cJSON_CreateObject();
     cJSON_AddStringToObject(root, "model", 
         self->config.model_name ? self->config.model_name : "claude-3-opus-20240229");
@@ -100,51 +100,73 @@ static AIProviderResponse* anthropic_send_messages(AIProvider* self,
     char* payload = cJSON_Print(root);
     cJSON_Delete(root);
 
-    curl_easy_setopt(curl, CURLOPT_URL, url);
-    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-    curl_easy_setopt(curl, CURLOPT_POST, 1L);
-    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, payload);
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, anthropic_write_callback);
-    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response_buffer);
-    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
+    // 构建请求头
+    HttpHeaders* headers = http_headers_new();
+    if (self->config.api_key) {
+        http_headers_add(headers, "x-api-key", self->config.api_key);
+    }
+    http_headers_add(headers, "anthropic-version", "2023-06-01");
 
-    CURLcode res = curl_easy_perform(curl);
+    log_debug("[Anthropic] Request URL: %s", url);
+    log_debug("[Anthropic] Request payload: %s", payload);
+
+    HttpResponse* http_resp = http_post_json_with_headers(url, payload, headers);
+    free(payload);
+
+    log_debug("[Anthropic] HTTP status: %d, success: %s",
+        http_resp ? http_resp->status_code : 0,
+        http_resp ? (http_resp->success ? "true" : "false") : "N/A");
+    log_debug("[Anthropic] Response body: %s",
+        http_resp && http_resp->body ? http_resp->body : "(null)");
 
     AIProviderResponse* response = NULL;
-    if (res == CURLE_OK) {
-        cJSON* root = cJSON_Parse(response_buffer);
-        if (root) {
-            cJSON* content = cJSON_GetObjectItem(root, "content");
-            if (content && cJSON_IsArray(content)) {
-                cJSON* item = cJSON_GetArrayItem(content, 0);
-                if (item) {
-                    cJSON* text = cJSON_GetObjectItem(item, "text");
-                    response = ai_provider_response_create(
-                        text && cJSON_IsString(text) ? text->valuestring : NULL, true, NULL);
+    if (http_resp) {
+        if (http_resp->body) {
+            cJSON* resp_root = cJSON_Parse(http_resp->body);
+            if (resp_root) {
+                cJSON* err_type = cJSON_GetObjectItem(resp_root, "error");
+                if (err_type && cJSON_IsObject(err_type)) {
+                    cJSON* err_msg = cJSON_GetObjectItem(err_type, "message");
+                    const char* err_str = err_msg && cJSON_IsString(err_msg) 
+                                          ? err_msg->valuestring : "Unknown error";
+                    log_error("[Anthropic] API error: %s", err_str);
+                    response = ai_provider_response_create(NULL, false, err_str);
+                } else {
+                    cJSON* content = cJSON_GetObjectItem(resp_root, "content");
+                    if (content && cJSON_IsArray(content)) {
+                        cJSON* item = cJSON_GetArrayItem(content, 0);
+                        if (item) {
+                            cJSON* text = cJSON_GetObjectItem(item, "text");
+                            response = ai_provider_response_create(
+                                text && cJSON_IsString(text) ? text->valuestring : NULL, true, NULL);
+                        }
+                    }
+                    if (response) {
+                        log_debug("[Anthropic] Parsed content: %s",
+                            response->content ? response->content : "(null)");
+                    }
                 }
+                cJSON_Delete(resp_root);
             }
-            cJSON_Delete(root);
+            
+            if (!response) {
+                log_error("[Anthropic] Failed to parse response, raw: %s", http_resp->body);
+                response = ai_provider_response_create(NULL, false, "Failed to parse Anthropic response");
+            }
+        } else {
+            char err_msg[128];
+            snprintf(err_msg, sizeof(err_msg), "HTTP %d: empty response body", http_resp->status_code);
+            response = ai_provider_response_create(NULL, false, err_msg);
         }
-        
-        if (!response) {
-            response = ai_provider_response_create(NULL, false, "Failed to parse Anthropic response");
-        }
+        http_response_free(http_resp);
     } else {
-        response = ai_provider_response_create(NULL, false, curl_easy_strerror(res));
+        response = ai_provider_response_create(NULL, false, "HTTP request failed");
     }
 
-    curl_slist_free_all(headers);
-    curl_easy_cleanup(curl);
-    free(payload);
-    free(response_buffer);
+    http_headers_free(headers);
+    free(url);
 
     return response;
-#else
-    char mock[256];
-    snprintf(mock, sizeof(mock), "[Mock Anthropic] Response for %d messages", 
-             messages ? messages->count : 0);
-    return ai_provider_response_create(mock, true, NULL);
-#endif
 }
 
 AIProvider* provider_anthropic_create(const AIProviderConfig* config) {
