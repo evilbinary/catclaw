@@ -13,18 +13,22 @@
 #ifdef _WIN32
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#include <windows.h>
 #pragma comment(lib, "ws2_32.lib")
+#define msleep(ms) Sleep(ms)
+#define SOCKET int
+#define INVALID_SOCKET (-1)
+#define CLOSESOCKET(s) CLOSESOCKET(s)
 #else
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <unistd.h>
-#include <errno.h>
-#define SOCKET int
-#define INVALID_SOCKET (-1)
-#define SOCKET_ERROR (-1)
-#define closesocket close
+#include <time.h>
+#define msleep(ms) do { struct timespec ts = {0, (ms)*1000000L}; nanosleep(&ts, NULL); } while(0)
+#define CLOSESOCKET(s) close(s)
 #endif
+#include <errno.h>
 
 #define BUFFER_SIZE 8192
 #define MAX_HEADERS 4096
@@ -310,7 +314,7 @@ static void handle_connection(int client_socket, HttpServer* server) {
     int bytes_received = recv(client_socket, buffer, sizeof(buffer) - 1, 0);
     
     if (bytes_received <= 0) {
-        closesocket(client_socket);
+        CLOSESOCKET(client_socket);
         return;
     }
     
@@ -324,7 +328,7 @@ static void handle_connection(int client_socket, HttpServer* server) {
                          "Access-Control-Allow-Headers: Content-Type\r\n"
                          "Connection: close\r\n\r\n";
         send(client_socket, response, strlen(response), 0);
-        closesocket(client_socket);
+        CLOSESOCKET(client_socket);
         return;
     }
     
@@ -334,7 +338,7 @@ static void handle_connection(int client_socket, HttpServer* server) {
         SrvResponse* error = srv_response_error(400, "Invalid request");
         send_response_headers(client_socket, error, false);
         srv_response_free(error);
-        closesocket(client_socket);
+        CLOSESOCKET(client_socket);
         return;
     }
     
@@ -401,7 +405,7 @@ static void handle_connection(int client_socket, HttpServer* server) {
                              "{\"error\":\"Unauthorized\",\"status\":401}";
             send(client_socket, response, strlen(response), 0);
             srv_request_free(request);
-            closesocket(client_socket);
+            CLOSESOCKET(client_socket);
             return;
         }
     }
@@ -473,7 +477,7 @@ static void handle_connection(int client_socket, HttpServer* server) {
     }
     
     srv_request_free(request);
-    closesocket(client_socket);
+    CLOSESOCKET(client_socket);
 }
 
 // 服务器线程
@@ -489,14 +493,14 @@ static void* server_thread(void* arg) {
         // Check if socket is valid before using it
         if (server->socket < 0) {
             // Socket is invalid, sleep and continue
-            usleep(100000); // 100ms
+            msleep(100);
             continue;
         }
 
         // Check if socket exceeds FD_SETSIZE (typically 1024)
         if (server->socket >= FD_SETSIZE) {
             log_error("HTTP server socket %d exceeds FD_SETSIZE %d", server->socket, FD_SETSIZE);
-            usleep(100000);
+            msleep(100);
             continue;
         }
 
@@ -513,7 +517,7 @@ static void* server_thread(void* arg) {
                 log_error("HTTP server select error: %d (socket=%d, FD_SETSIZE=%d)", 
                          errno, server->socket, FD_SETSIZE);
                 // Sleep to avoid busy loop on error
-                usleep(100000);
+                msleep(100);
             }
             continue;
         }
@@ -590,7 +594,7 @@ HttpServer* http_server_create(const SrvConfig* config) {
 
     if (bind(server->socket, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
         log_error("Failed to bind HTTP socket to port %d: %s", server->port, strerror(errno));
-        closesocket(server->socket);
+        CLOSESOCKET(server->socket);
         free(server->api_key);
         free(server);
         return NULL;
@@ -599,7 +603,7 @@ HttpServer* http_server_create(const SrvConfig* config) {
     // 监听
     if (listen(server->socket, 10) < 0) {
         log_error("Failed to listen on HTTP socket: %s", strerror(errno));
-        closesocket(server->socket);
+        CLOSESOCKET(server->socket);
         free(server->api_key);
         free(server);
         return NULL;
@@ -634,7 +638,7 @@ void http_server_stop(HttpServer* server) {
     pthread_join(server->thread, NULL);
     
     if (server->socket >= 0) {
-        closesocket(server->socket);
+        CLOSESOCKET(server->socket);
         server->socket = -1;
     }
     
@@ -650,7 +654,7 @@ void http_server_destroy(HttpServer* server) {
     }
     
     if (server->socket >= 0) {
-        closesocket(server->socket);
+        CLOSESOCKET(server->socket);
     }
     
     free(server->api_key);
