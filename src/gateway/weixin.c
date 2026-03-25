@@ -850,7 +850,7 @@ bool weixin_channel_init(ChannelInstance *channel, ChannelConfig *config) {
         weixin_config->bot_token = strdup(config->api_key);
         weixin_config->is_logged_in = true;
         channel->connected = true;
-        log_debug("[Weixin] Using bot_token: %s", weixin_config->bot_token);
+        // log_debug("[Weixin] Using bot_token: %s", weixin_config->bot_token);
     }
     
     weixin_config->base_url = strdup(WEIXIN_ILINK_BASE_URL);
