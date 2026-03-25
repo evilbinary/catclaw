@@ -39,7 +39,7 @@ bool gateway_init(void) {
 
     // Initialize HTTP API server only if enabled
     if (g_config.gateway.http_server_enabled) {
-        g_gateway.http_port = g_config.http_port > 0 ? g_config.http_port : 8080;
+        g_gateway.http_port = g_config.gateway.http_port > 0 ? g_config.gateway.http_port : 8080;
         g_gateway.http_api_server = http_api_init(g_gateway.http_port);
         if (g_gateway.http_api_server) {
             g_gateway.http_initialized = true;

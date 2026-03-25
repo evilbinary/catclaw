@@ -37,6 +37,7 @@ Config g_config = {
     // Gateway config defaults
     .gateway = {
         .port = 18789,
+        .http_port = 8080,
         .browser_enabled = false,
         .http_api_key = NULL,
         .http_auth_enabled = false,
@@ -322,6 +323,11 @@ static void parse_gateway_config(cJSON *gateway) {
     cJSON *port = cJSON_GetObjectItem(gateway, "port");
     if (port && cJSON_IsNumber(port)) {
         g_config.gateway.port = (int)port->valuedouble;
+    }
+    
+    cJSON *http_port = cJSON_GetObjectItem(gateway, "http_port");
+    if (http_port && cJSON_IsNumber(http_port)) {
+        g_config.gateway.http_port = (int)http_port->valuedouble;
     }
     
     cJSON *browser = cJSON_GetObjectItem(gateway, "browser_enabled");
@@ -950,6 +956,7 @@ bool config_load(void) {
     }
     
     g_config.gateway_port = g_config.gateway.port;
+    g_config.http_port = g_config.gateway.http_port;
     g_config.browser_enabled = g_config.gateway.browser_enabled;
     g_config.enable_compaction = g_config.compaction.enabled ? 1 : 0;
     g_config.compaction_threshold = g_config.compaction.threshold;
