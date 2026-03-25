@@ -557,6 +557,8 @@ static void* weixin_polling_thread(void *arg) {
                         // 预先创建流式上下文（保存正确的 context_token，防止被新消息覆盖）
                         if (channel->stream_ctx) {
                             WeixinStreamContext *old_ctx = (WeixinStreamContext *)channel->stream_ctx;
+                            free(old_ctx->from_user_id);
+                            free(old_ctx->context_token);
                             free(old_ctx->accumulated);
                             free(old_ctx);
                         }
@@ -643,10 +645,17 @@ static bool weixin_send_message_ex(const char *bot_token, const char *to_user_id
     char url[256];
     snprintf(url, sizeof(url), "%s/ilink/bot/sendmessage", WEIXIN_ILINK_BASE_URL);
     
+    // 生成 client_id (时间戳 + 随机数)
+    char client_id[64];
+    snprintf(client_id, sizeof(client_id), "catclaw:%ld%04d", 
+             (long)time(NULL), rand() % 10000);
+    
     cJSON *msg = cJSON_CreateObject();
+    cJSON_AddStringToObject(msg, "from_user_id", "");  // 空字符串
     cJSON_AddStringToObject(msg, "to_user_id", to_user_id);
-    cJSON_AddNumberToObject(msg, "message_type", 2);
-    cJSON_AddNumberToObject(msg, "message_state", message_state);  // 1=WRITING, 2=FINISH
+    cJSON_AddStringToObject(msg, "client_id", client_id);
+    cJSON_AddNumberToObject(msg, "message_type", 2);  // BOT
+    cJSON_AddNumberToObject(msg, "message_state", message_state);  // 2=FINISH
     
     if (context_token) {
         cJSON_AddStringToObject(msg, "context_token", context_token);
@@ -654,7 +663,7 @@ static bool weixin_send_message_ex(const char *bot_token, const char *to_user_id
     
     cJSON *item_list = cJSON_CreateArray();
     cJSON *item = cJSON_CreateObject();
-    cJSON_AddNumberToObject(item, "type", 1);
+    cJSON_AddNumberToObject(item, "type", 1);  // TEXT
     
     cJSON *text_item = cJSON_CreateObject();
     cJSON_AddStringToObject(text_item, "text", text);
@@ -663,8 +672,14 @@ static bool weixin_send_message_ex(const char *bot_token, const char *to_user_id
     cJSON_AddItemToArray(item_list, item);
     cJSON_AddItemToObject(msg, "item_list", item_list);
     
+    // 构建完整请求体
     cJSON *root = cJSON_CreateObject();
     cJSON_AddItemToObject(root, "msg", msg);
+    
+    // 添加 base_info (必须!)
+    cJSON *base_info = cJSON_CreateObject();
+    cJSON_AddStringToObject(base_info, "channel_version", "1.0.2");
+    cJSON_AddItemToObject(root, "base_info", base_info);
     
     char *body = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
@@ -694,36 +709,15 @@ static bool weixin_send_message_ex(const char *bot_token, const char *to_user_id
     return success;
 }
 
-// 发送"正在输入"状态
+// 发送"正在输入"状态 (需要先调用 getconfig 获取 typing_ticket，暂时禁用)
 static bool weixin_send_typing(const char *bot_token, const char *to_user_id, const char *context_token) {
-    if (!bot_token || !to_user_id) return false;
-    
-    log_info("[Weixin] Sending typing indicator to %s", to_user_id);
-    
-    char url[256];
-    snprintf(url, sizeof(url), "%s/ilink/bot/sendtyping", WEIXIN_ILINK_BASE_URL);
-    
-    cJSON *root = cJSON_CreateObject();
-    cJSON_AddStringToObject(root, "to_user_id", to_user_id);
-    if (context_token) {
-        cJSON_AddStringToObject(root, "context_token", context_token);
-    }
-    
-    char *body = cJSON_PrintUnformatted(root);
-    cJSON_Delete(root);
-    
-    if (!body) return false;
-    
-    HttpHeaders *headers = build_weixin_headers(bot_token);
-    HttpResponse *resp = http_post_json_with_headers(url, body, headers);
-    http_headers_free(headers);
-    free(body);
-    
-    if (resp) {
-        http_response_free(resp);
-        return true;
-    }
-    return false;
+    // 根据协议，sendtyping 需要 typing_ticket，需要先调用 getconfig 获取
+    // 暂时禁用此功能，直接返回成功
+    (void)bot_token;
+    (void)to_user_id;
+    (void)context_token;
+    log_debug("[Weixin] Typing indicator disabled (requires typing_ticket)");
+    return true;
 }
 
 // 开始流式消息

@@ -220,6 +220,7 @@ static HttpResponse* do_request(const HttpRequest* req, bool stream,
     if (req->body) {
         curl_easy_setopt(curl, CURLOPT_POSTFIELDS, req->body);
         curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, strlen(req->body));
+        // log_debug("[HTTP] Request body: %s", req->body);
     }
     
     // 设置请求头
@@ -280,6 +281,14 @@ static HttpResponse* do_request(const HttpRequest* req, bool stream,
         resp->body = body_buf.data;
         resp->body_len = body_buf.size;
         resp->headers = header_buf.data;
+        
+        // 调试日志：打印响应内容
+        // log_debug("[HTTP] Response: status=%ld, body_len=%zu", status, body_buf.size);
+        // if (body_buf.data && body_buf.size > 0) {
+        //     // 限制打印长度，避免日志过长
+        //     size_t print_len = body_buf.size > 500 ? 500 : body_buf.size;
+        //     log_debug("[HTTP] Response body (first %zu bytes): %.*s", print_len, (int)print_len, body_buf.data);
+        // }
         
         // 提取 Content-Type
         char* ct_start = http_strcasestr(header_buf.data, "Content-Type:");
