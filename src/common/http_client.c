@@ -134,6 +134,55 @@ void http_client_cleanup(void) {
     }
 }
 
+// ==================== HttpHeaders 实现 ====================
+
+#define MAX_HEADERS 32
+#define MAX_HEADER_LEN 1024
+
+typedef struct HttpHeaders {
+    char headers[MAX_HEADERS][MAX_HEADER_LEN];
+    int count;
+} HttpHeaders;
+
+HttpHeaders* http_headers_new(void) {
+    HttpHeaders* h = (HttpHeaders*)calloc(1, sizeof(HttpHeaders));
+    if (h) {
+        h->count = 0;
+    }
+    return h;
+}
+
+void http_headers_add(HttpHeaders* headers, const char* key, const char* value) {
+    if (!headers || !key || !value) return;
+    if (headers->count >= MAX_HEADERS) return;
+    
+    snprintf(headers->headers[headers->count], MAX_HEADER_LEN, "%s: %s", key, value);
+    headers->count++;
+}
+
+void http_headers_free(HttpHeaders* headers) {
+    free(headers);
+}
+
+// 内部使用：转换为curl可用的字符串数组
+static const char** http_headers_to_curl_array(HttpHeaders* headers) {
+    if (!headers || headers->count == 0) return NULL;
+    
+    // 需要NULL结尾的数组
+    const char** arr = (const char**)calloc(headers->count + 1, sizeof(char*));
+    if (!arr) return NULL;
+    
+    for (int i = 0; i < headers->count; i++) {
+        arr[i] = headers->headers[i];
+    }
+    arr[headers->count] = NULL;
+    return arr;
+}
+
+const char** http_headers_to_array(HttpHeaders* headers) {
+    return http_headers_to_curl_array(headers);
+}
+
 // ==================== 内部请求实现 ====================
 
 static HttpResponse* do_request(const HttpRequest* req, bool stream, 
@@ -296,6 +345,20 @@ HttpResponse* http_get(const char* url) {
     return do_request(&req, false, NULL, NULL);
 }
 
+HttpResponse* http_get_with_headers(const char* url, HttpHeaders* headers) {
+    const char** headers_arr = http_headers_to_curl_array(headers);
+    HttpRequest req = {
+        .url = url,
+        .method = "GET",
+        .headers = headers_arr,
+        .follow_redirects = true,
+        .timeout_sec = DEFAULT_TIMEOUT_SEC
+    };
+    HttpResponse* resp = do_request(&req, false, NULL, NULL);
+    free(headers_arr);
+    return resp;
+}
+
 HttpResponse* http_post(const char* url, const char* json_body) {
     HttpRequest req = {
         .url = url,
@@ -306,6 +369,22 @@ HttpResponse* http_post(const char* url, const char* json_body) {
         .timeout_sec = DEFAULT_TIMEOUT_SEC
     };
     return do_request(&req, false, NULL, NULL);
+}
+
+HttpResponse* http_post_json_with_headers(const char* url, const char* json_body, HttpHeaders* headers) {
+    const char** headers_arr = http_headers_to_curl_array(headers);
+    HttpRequest req = {
+        .url = url,
+        .method = "POST",
+        .body = json_body,
+        .content_type = "application/json",
+        .headers = headers_arr,
+        .follow_redirects = true,
+        .timeout_sec = DEFAULT_TIMEOUT_SEC
+    };
+    HttpResponse* resp = do_request(&req, false, NULL, NULL);
+    free(headers_arr);
+    return resp;
 }
 
 HttpResponse* http_post_data(const char* url, const char* body, const char* content_type) {
@@ -493,14 +572,41 @@ bool http_client_init(void) {
 
 void http_client_cleanup(void) {}
 
+// HttpHeaders 存根实现
+typedef struct HttpHeaders {
+    int dummy;
+} HttpHeaders;
+
+HttpHeaders* http_headers_new(void) { return NULL; }
+void http_headers_add(HttpHeaders* headers, const char* key, const char* value) {
+    (void)headers; (void)key; (void)value;
+}
+void http_headers_free(HttpHeaders* headers) { (void)headers; }
+const char** http_headers_to_array(HttpHeaders* headers) {
+    (void)headers;
+    return NULL;
+}
+
 HttpResponse* http_get(const char* url) {
     (void)url;
     log_error("HTTP client not available: curl not compiled in");
     return NULL;
 }
 
+HttpResponse* http_get_with_headers(const char* url, HttpHeaders* headers) {
+    (void)url; (void)headers;
+    log_error("HTTP client not available: curl not compiled in");
+    return NULL;
+}
+
 HttpResponse* http_post(const char* url, const char* json_body) {
     (void)url; (void)json_body;
+    log_error("HTTP client not available: curl not compiled in");
+    return NULL;
+}
+
+HttpResponse* http_post_json_with_headers(const char* url, const char* json_body, HttpHeaders* headers) {
+    (void)url; (void)json_body; (void)headers;
     log_error("HTTP client not available: curl not compiled in");
     return NULL;
 }

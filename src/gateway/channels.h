@@ -14,6 +14,7 @@ typedef enum {
     CHANNEL_SIGNAL,
     CHANNEL_WEBCHAT,
     CHANNEL_FEISHU,      // 飞书
+    CHANNEL_WEIXIN,      // 微信
     CHANNEL_MAX
 } ChannelType;
 

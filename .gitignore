@@ -59,3 +59,8 @@ dkms.conf
 
 # debug information files
 *.dwo
+cli/
+objs/
+skills/
+install.sh
+latest.tar.gz

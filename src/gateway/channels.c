@@ -6,6 +6,7 @@
 #include "telegram.h"
 #include "discord.h"
 #include "feishu.h"
+#include "weixin.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -20,7 +21,8 @@ const char *channel_type_names[] = {
     "Discord",
     "Signal",
     "WebChat",
-    "Feishu"
+    "Feishu",
+    "Weixin"
 };
 
 // Global channel manager
@@ -88,6 +90,9 @@ static ChannelInstance* channel_create(const char *id, ChannelType type, Channel
             break;
         case CHANNEL_FEISHU:
             feishu_channel_init(channel, config);
+            break;
+        case CHANNEL_WEIXIN:
+            weixin_channel_init(channel, config);
             break;
         case CHANNEL_WEBCHAT:
             // WebChat uses default callbacks
