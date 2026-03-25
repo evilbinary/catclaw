@@ -34,9 +34,6 @@ typedef struct {
     char *get_updates_buf;   // 长轮询游标
     bool is_logged_in;       // 是否已登录
     bool stream_mode;        // 是否启用流式输出
-    // 当前回复上下文（用于流式回复）
-    char *current_from_user_id;
-    char *current_context_token;
 } WeixinConfig;
 
 // 初始化微信channel

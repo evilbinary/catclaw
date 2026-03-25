@@ -554,11 +554,18 @@ static void* weixin_polling_thread(void *arg) {
                         log_debug("[Weixin] context_token: %s", 
                                  msg->context_token ? msg->context_token : "null");
                         
-                        // 保存消息上下文（用于流式回复）
-                        free(config->current_from_user_id);
-                        free(config->current_context_token);
-                        config->current_from_user_id = msg->from_user_id ? strdup(msg->from_user_id) : NULL;
-                        config->current_context_token = msg->context_token ? strdup(msg->context_token) : NULL;
+                        // 预先创建流式上下文（保存正确的 context_token，防止被新消息覆盖）
+                        if (channel->stream_ctx) {
+                            WeixinStreamContext *old_ctx = (WeixinStreamContext *)channel->stream_ctx;
+                            free(old_ctx->accumulated);
+                            free(old_ctx);
+                        }
+                        WeixinStreamContext *ctx = (WeixinStreamContext *)calloc(1, sizeof(WeixinStreamContext));
+                        ctx->from_user_id = msg->from_user_id ? strdup(msg->from_user_id) : NULL;
+                        ctx->context_token = msg->context_token ? strdup(msg->context_token) : NULL;
+                        ctx->accumulated = strdup("");
+                        ctx->active = true;
+                        channel->stream_ctx = ctx;
                         
                         ChannelIncomingMessage incoming = {
                             .content = msg->text,
@@ -664,12 +671,14 @@ static bool weixin_send_message_ex(const char *bot_token, const char *to_user_id
     
     if (!body) return false;
     
+    log_debug("[Weixin] Send message request body: %s", body);
+    
     HttpHeaders *headers = build_weixin_headers(bot_token);
     HttpResponse *resp = http_post_json_with_headers(url, body, headers);
     http_headers_free(headers);
 
     log_info("[Weixin] Send response: status=%d, success=%d, body=%s", 
-        resp->status_code, resp->success, resp->body ? resp->body : "null");
+        resp ? resp->status_code : 0, resp ? resp->success : 0, resp && resp->body ? resp->body : "null");
 
         
     free(body);
@@ -720,43 +729,33 @@ static bool weixin_send_typing(const char *bot_token, const char *to_user_id, co
 // 开始流式消息
 static bool weixin_stream_start_callback(ChannelInstance *channel, const char *initial_content) {
     WeixinConfig *config = (WeixinConfig *)channel->user_data;
-    if (!config || !config->bot_token || !config->current_from_user_id) {
-        log_error("[Weixin] Stream start: missing context");
+    if (!config || !config->bot_token) {
+        log_error("[Weixin] Stream start: missing config");
         return false;
     }
     
-    // 清理之前的流式上下文
-    if (channel->stream_ctx) {
-        WeixinStreamContext *old_ctx = (WeixinStreamContext *)channel->stream_ctx;
-        free(old_ctx->accumulated);
-        free(old_ctx);
+    // 使用已创建的流式上下文（在收到消息时已创建并保存了正确的 context_token）
+    WeixinStreamContext *ctx = (WeixinStreamContext *)channel->stream_ctx;
+    if (!ctx || !ctx->from_user_id) {
+        log_error("[Weixin] Stream start: no active stream context");
+        return false;
     }
-    
-    // 创建新的流式上下文
-    WeixinStreamContext *ctx = (WeixinStreamContext *)calloc(1, sizeof(WeixinStreamContext));
-    ctx->from_user_id = config->current_from_user_id;
-    ctx->context_token = config->current_context_token;
-    ctx->accumulated = strdup("");
-    ctx->active = true;
-    channel->stream_ctx = ctx;
     
     log_info("[Weixin] Stream started for user: %s", ctx->from_user_id);
     
     // 发送"正在输入"状态
     weixin_send_typing(config->bot_token, ctx->from_user_id, ctx->context_token);
     
-    // 发送初始内容（流式状态）
+    // 累积初始内容
     if (initial_content && strlen(initial_content) > 0) {
         free(ctx->accumulated);
         ctx->accumulated = strdup(initial_content);
-        return weixin_send_message_ex(config->bot_token, ctx->from_user_id, 
-                                      initial_content, ctx->context_token, 1);  // 1=WRITING
     }
     
     return true;
 }
 
-// 更新流式消息（增量发送）
+// 更新流式消息（只累积内容，不发送）
 static bool weixin_stream_update_callback(ChannelInstance *channel, const char *content) {
     WeixinConfig *config = (WeixinConfig *)channel->user_data;
     if (!config || !channel->stream_ctx) {
@@ -770,7 +769,7 @@ static bool weixin_stream_update_callback(ChannelInstance *channel, const char *
         return false;
     }
     
-    // 累积内容
+    // 累积内容（不发送 WRITING 状态）
     if (content && strlen(content) > 0) {
         char *new_accumulated = NULL;
         if (ctx->accumulated) {
@@ -786,10 +785,6 @@ static bool weixin_stream_update_callback(ChannelInstance *channel, const char *
         if (new_accumulated) {
             free(ctx->accumulated);
             ctx->accumulated = new_accumulated;
-            
-            // 发送累积内容（流式状态）
-            weixin_send_message_ex(config->bot_token, ctx->from_user_id,
-                                   ctx->accumulated, ctx->context_token, 1);  // 1=WRITING
         }
     }
     
@@ -818,6 +813,8 @@ static bool weixin_stream_end_callback(ChannelInstance *channel) {
     }
     
     // 清理上下文
+    free(ctx->from_user_id);
+    free(ctx->context_token);
     free(ctx->accumulated);
     free(ctx);
     channel->stream_ctx = NULL;
@@ -834,8 +831,6 @@ static void weixin_channel_cleanup(ChannelInstance *channel) {
         free(config->bot_token);
         free(config->base_url);
         free(config->get_updates_buf);
-        free(config->current_from_user_id);
-        free(config->current_context_token);
         free(config);
         channel->user_data = NULL;
     }
@@ -843,6 +838,8 @@ static void weixin_channel_cleanup(ChannelInstance *channel) {
     // 清理流式上下文
     if (channel->stream_ctx) {
         WeixinStreamContext *ctx = (WeixinStreamContext *)channel->stream_ctx;
+        free(ctx->from_user_id);
+        free(ctx->context_token);
         free(ctx->accumulated);
         free(ctx);
         channel->stream_ctx = NULL;
@@ -868,13 +865,8 @@ bool weixin_channel_init(ChannelInstance *channel, ChannelConfig *config) {
     
     // 从配置读取token（如果已登录）
     if (config && config->api_key && strlen(config->api_key) > 0) {
-        // api_key 格式可能是 "bot_id:token"，需要提取 token 部分
-        const char *colon = strchr(config->api_key, ':');
-        if (colon) {
-            weixin_config->bot_token = strdup(colon + 1);
-        } else {
-            weixin_config->bot_token = strdup(config->api_key);
-        }
+        // bot_token 是扫码登录后返回的完整字符串，直接使用
+        weixin_config->bot_token = strdup(config->api_key);
         weixin_config->is_logged_in = true;
         channel->connected = true;
         log_debug("[Weixin] Using bot_token: %s", weixin_config->bot_token);
