@@ -160,17 +160,28 @@ static void* websocket_server_thread(void *arg) {
         FD_SET(server->server_socket, &read_fds);
 
         // Add existing connections to the set
+        int max_fd = server->server_socket;
         for (int i = 0; i < server->max_connections; i++) {
             if (server->connections[i].socket != 0) {
                 FD_SET(server->connections[i].socket, &read_fds);
+                if (server->connections[i].socket > max_fd) {
+                    max_fd = server->connections[i].socket;
+                }
             }
         }
 
-        // Wait for activity
-        int activity = select(0, &read_fds, NULL, NULL, NULL);
+        // Wait for activity with timeout
+        struct timeval timeout;
+        timeout.tv_sec = 1;
+        timeout.tv_usec = 0;
+        int activity = select(max_fd + 1, &read_fds, NULL, NULL, &timeout);
         if (activity == SOCKET_ERROR) {
             fprintf(stderr, "select failed: %d\n", WSAGetLastError());
             break;
+        }
+        if (activity == 0) {
+            // Timeout, check if server should continue running
+            continue;
         }
 
         // Check for new connections

@@ -479,48 +479,70 @@ static void handle_connection(int client_socket, HttpServer* server) {
 // 服务器线程
 static void* server_thread(void* arg) {
     HttpServer* server = (HttpServer*)arg;
-    
+
     log_info("HTTP server started on port %d", server->port);
-    
+
     while (server->running) {
         fd_set read_fds;
         struct timeval timeout;
-        
+
+        // Check if socket is valid before using it
+        if (server->socket < 0) {
+            // Socket is invalid, sleep and continue
+            usleep(100000); // 100ms
+            continue;
+        }
+
+        // Check if socket exceeds FD_SETSIZE (typically 1024)
+        if (server->socket >= FD_SETSIZE) {
+            log_error("HTTP server socket %d exceeds FD_SETSIZE %d", server->socket, FD_SETSIZE);
+            usleep(100000);
+            continue;
+        }
+
         FD_ZERO(&read_fds);
         FD_SET(server->socket, &read_fds);
-        
+
         timeout.tv_sec = 1;
         timeout.tv_usec = 0;
-        
+
         int activity = select(server->socket + 1, &read_fds, NULL, NULL, &timeout);
-        
+
         if (activity < 0) {
             if (errno != EINTR) {
-                log_error("HTTP server select error: %d", errno);
+                log_error("HTTP server select error: %d (socket=%d, FD_SETSIZE=%d)", 
+                         errno, server->socket, FD_SETSIZE);
+                // Sleep to avoid busy loop on error
+                usleep(100000);
             }
             continue;
         }
-        
+
+        if (activity == 0) {
+            // Timeout, just continue
+            continue;
+        }
+
         if (!FD_ISSET(server->socket, &read_fds)) {
             continue;
         }
-        
+
         // 接受新连接
         struct sockaddr_in client_addr;
         socklen_t client_len = sizeof(client_addr);
         int client_socket = accept(server->socket, (struct sockaddr*)&client_addr, &client_len);
-        
+
         if (client_socket < 0) {
             log_error("HTTP server accept error: %d", errno);
             continue;
         }
-        
+
         log_debug("HTTP client connected");
-        
+
         // 处理连接 (简单实现：在主线程处理)
         handle_connection(client_socket, server);
     }
-    
+
     log_info("HTTP server stopped");
     return NULL;
 }
@@ -565,23 +587,25 @@ HttpServer* http_server_create(const SrvConfig* config) {
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = INADDR_ANY;
     addr.sin_port = htons(server->port);
-    
+
     if (bind(server->socket, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
-        log_error("Failed to bind HTTP socket to port %d", server->port);
+        log_error("Failed to bind HTTP socket to port %d: %s", server->port, strerror(errno));
         closesocket(server->socket);
+        free(server->api_key);
         free(server);
         return NULL;
     }
-    
+
     // 监听
     if (listen(server->socket, 10) < 0) {
-        log_error("Failed to listen on HTTP socket");
+        log_error("Failed to listen on HTTP socket: %s", strerror(errno));
         closesocket(server->socket);
+        free(server->api_key);
         free(server);
         return NULL;
     }
-    
-    log_info("HTTP server created on port %d", server->port);
+
+    log_info("HTTP server created on port %d (socket=%d)", server->port, server->socket);
     return server;
 }
 
