@@ -2,18 +2,15 @@
 #include "ai_provider_factory.h"
 #include "common/cJSON.h"
 #include "common/log.h"
+#include "common/http_client.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
-
-#ifdef HAVE_CURL
-#include <curl/curl.h>
 
 // 流式上下文
 #define MAX_STREAMING_TOOL_CALLS 8
 
 typedef struct {
-    char** buffer;
     bool streaming;
     char sse_line[4096];
     int sse_line_len;
@@ -37,26 +34,12 @@ static char* build_tool_calls_json(StreamContext* ctx);
 // 外部广播函数
 extern bool gateway_broadcast_to_webchat(const char* message);
 
-// CURL 写回调
-static size_t write_callback(void* contents, size_t size, size_t nmemb, void* userp) {
-    size_t realsize = size * nmemb;
+// 流式数据回调 (供 http_request_stream 使用)
+static bool stream_data_callback(const char* data, size_t len, void* userp) {
     StreamContext* ctx = (StreamContext*)userp;
-    char** buffer = ctx->buffer;
-    size_t current_len = *buffer ? strlen(*buffer) : 0;
-
-    char* new_buffer = (char*)realloc(*buffer, current_len + realsize + 1);
-    if (!new_buffer) {
-        fprintf(stderr, "realloc failed\n");
-        return 0;
-    }
-
-    memcpy(new_buffer + current_len, contents, realsize);
-    new_buffer[current_len + realsize] = '\0';
-    *buffer = new_buffer;
 
     if (ctx->streaming) {
-        char* data = (char*)contents;
-        for (size_t i = 0; i < realsize; i++) {
+        for (size_t i = 0; i < len; i++) {
             char ch = data[i];
             if (ch == '\n' || ctx->sse_line_len >= (int)sizeof(ctx->sse_line) - 1) {
                 ctx->sse_line[ctx->sse_line_len] = '\0';
@@ -70,7 +53,7 @@ static size_t write_callback(void* contents, size_t size, size_t nmemb, void* us
         }
     }
 
-    return realsize;
+    return true;  // 继续接收
 }
 
 static void process_sse_line(const char* line) {
@@ -214,14 +197,9 @@ static char* build_tool_calls_json(StreamContext* ctx) {
     return result;
 }
 
-#endif // HAVE_CURL
-
 // OpenAI Provider 私有数据
 typedef struct {
     bool initialized;
-#ifdef HAVE_CURL
-    // CURL 相关数据
-#endif
 } OpenAIProviderData;
 
 // ==================== 接口实现 ====================
@@ -230,9 +208,7 @@ static bool openai_init(AIProvider* self) {
     OpenAIProviderData* data = (OpenAIProviderData*)calloc(1, sizeof(OpenAIProviderData));
     if (!data) return false;
     
-#ifdef HAVE_CURL
-    curl_global_init(CURL_GLOBAL_ALL);
-#endif
+    http_client_init();
     
     data->initialized = true;
     self->impl = data;
@@ -246,75 +222,70 @@ static void openai_destroy(AIProvider* self) {
     OpenAIProviderData* data = (OpenAIProviderData*)self->impl;
     if (!data) return;
     
-#ifdef HAVE_CURL
-    curl_global_cleanup();
-#endif
+    http_client_cleanup();
     
     free(data);
     self->impl = NULL;
 }
 
-static AIProviderResponse* openai_send_messages(AIProvider* self,
-                                                 MessageList* messages,
-                                                 const char* system_prompt) {
-    if (!self || !self->impl) {
-        return ai_provider_response_create(NULL, false, "Provider not initialized");
+// 构建 API URL: base_url + /v1/chat/completions
+static char* openai_build_url(const AIProvider* self) {
+    const char* base = self->config.base_url;
+    if (!base) {
+        return strdup("https://api.openai.com/v1/chat/completions");
     }
     
-#ifdef HAVE_CURL
-    CURL* curl = curl_easy_init();
-    if (!curl) {
-        return ai_provider_response_create(NULL, false, "Failed to initialize curl");
+    size_t base_len = strlen(base);
+    // 去掉末尾的 '/'
+    while (base_len > 0 && base[base_len - 1] == '/') {
+        base_len--;
     }
-
-    // 准备请求
-    char* response_buffer = (char*)calloc(1, 1);
-    StreamContext stream_ctx;
-    memset(&stream_ctx, 0, sizeof(stream_ctx));
-    stream_ctx.buffer = &response_buffer;
-    stream_ctx.streaming = self->config.stream;
-    stream_ctx.accumulated_content = (char*)calloc(1, 1);  // 初始化累积内容
-    stream_ctx.provider = self;  // 保存 provider 指针
-    g_stream_ctx = &stream_ctx;
-
-    // 构建 URL
-    char url[512];
-    if (self->config.base_url) {
-        size_t base_len = strlen(self->config.base_url);
-        // 检查 base_url 是否已经包含完整路径
-        if (strstr(self->config.base_url, "/chat/completions")) {
-            // base_url 已经包含完整路径，直接使用
-            strncpy(url, self->config.base_url, sizeof(url) - 1);
-        } else if (strstr(self->config.base_url, "/api/")) {
-            // base_url 包含 /api/ 路径（如 Ollama 的 /api/generate），直接使用
-            strncpy(url, self->config.base_url, sizeof(url) - 1);
-        } else if (base_len >= 3 && strcmp(self->config.base_url + base_len - 3, "/v1") == 0) {
-            // base_url 以 /v1 结尾，添加 /chat/completions
-            snprintf(url, sizeof(url), "%s/chat/completions", self->config.base_url);
-        } else if (strstr(self->config.base_url, "/v1/")) {
-            // base_url 包含 /v1/ 但没有 /chat/completions，可能是其他路径
-            strncpy(url, self->config.base_url, sizeof(url) - 1);
-        } else {
-            // base_url 只包含主机地址，添加 /v1/chat/completions
-            snprintf(url, sizeof(url), "%s/v1/chat/completions", self->config.base_url);
-        }
-        url[sizeof(url) - 1] = '\0';
-    } else {
-        strncpy(url, "https://api.openai.com/v1/chat/completions", sizeof(url) - 1);
-        url[sizeof(url) - 1] = '\0';
-    }
-    log_debug("[OpenAI] Request URL: %s", url);
-
-    // 构建请求头
-    struct curl_slist* headers = NULL;
-    headers = curl_slist_append(headers, "Content-Type: application/json");
     
-    char auth_header[512];
-    snprintf(auth_header, sizeof(auth_header), "Authorization: Bearer %s",
-             self->config.api_key ? self->config.api_key : "");
-    headers = curl_slist_append(headers, auth_header);
+    const char* api_path = "chat/completions";
+    size_t path_len = strlen(api_path);
+    
+    // 检查是否已包含 chat/completions
+    if (strstr(base, "/chat/completions")) {
+        char* url = (char*)malloc(base_len + 1);
+        strncpy(url, base, base_len);
+        url[base_len] = '\0';
+        return url;
+    }
+    
+    // 检查是否以 /v1 结尾 (用 strncmp 避免原始字符串尾部 '/' 干扰)
+    const char* v1_suffix = "v1";
+    size_t v1_len = strlen(v1_suffix);
+    if (base_len >= v1_len && strncmp(base + base_len - v1_len, v1_suffix, v1_len) == 0) {
+        char* url = (char*)malloc(base_len + 1 + path_len + 1);
+        snprintf(url, base_len + 1 + path_len + 1, "%.*s/%s", (int)base_len, base, api_path);
+        return url;
+    }
+    
+    // 检查是否包含 /v1/ 路径
+    if (strstr(base, "/v1/")) {
+        char* url = (char*)malloc(base_len + 1);
+        strncpy(url, base, base_len);
+        url[base_len] = '\0';
+        return url;
+    }
+    
+    // 检查是否包含 /api/ 路径 (如 Ollama)
+    if (strstr(base, "/api/")) {
+        char* url = (char*)malloc(base_len + 1);
+        strncpy(url, base, base_len);
+        url[base_len] = '\0';
+        return url;
+    }
+    
+    // 默认: base_url/v1/chat/completions
+    char* url = (char*)malloc(base_len + 4 + path_len + 1);
+    snprintf(url, base_len + 4 + path_len + 1, "%.*s/v1/%s", (int)base_len, base, api_path);
+    return url;
+}
 
-    // 构建请求体
+// 构建请求体
+static char* openai_build_request_body(AIProvider* self, MessageList* messages,
+                                        const char* system_prompt) {
     cJSON* root = cJSON_CreateObject();
     cJSON_AddStringToObject(root, "model", 
         self->config.model_name ? self->config.model_name : "gpt-4");
@@ -362,125 +333,191 @@ static AIProviderResponse* openai_send_messages(AIProvider* self,
 
     char* payload = cJSON_Print(root);
     cJSON_Delete(root);
+    return payload;
+}
 
-    log_debug("OpenAI Request: %s", payload);
+// 构建请求头
+static HttpHeaders* openai_build_headers(AIProvider* self) {
+    HttpHeaders* headers = http_headers_new();
+    
+    char auth_value[1024];
+    snprintf(auth_value, sizeof(auth_value), "Bearer %s",
+             self->config.api_key ? self->config.api_key : "");
+    http_headers_add(headers, "Authorization", auth_value);
+    
+    return headers;
+}
 
-    // 设置 CURL 选项
-    curl_easy_setopt(curl, CURLOPT_URL, url);
-    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-    curl_easy_setopt(curl, CURLOPT_POST, 1L);
-    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, payload);
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
-    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &stream_ctx);
-    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
+// 解析非流式响应
+static AIProviderResponse* openai_parse_non_stream_response(HttpResponse* http_resp) {
+    if (!http_resp || !http_resp->body) {
+        return ai_provider_response_create(NULL, false, 
+            http_resp ? "Empty response body" : "Request failed");
+    }
+    
+    cJSON* root = cJSON_Parse(http_resp->body);
+    if (!root) {
+        return ai_provider_response_create(NULL, false, "Failed to parse response");
+    }
 
-    // 执行请求
-    CURLcode res = curl_easy_perform(curl);
-    g_stream_ctx = NULL;
+    AIProviderResponse* response = NULL;
+    cJSON* choices = cJSON_GetObjectItem(root, "choices");
+    if (choices && cJSON_IsArray(choices)) {
+        cJSON* choice = cJSON_GetArrayItem(choices, 0);
+        if (choice) {
+            cJSON* msg = cJSON_GetObjectItem(choice, "message");
+            if (msg) {
+                cJSON* content = cJSON_GetObjectItem(msg, "content");
+                response = ai_provider_response_create(
+                    content && cJSON_IsString(content) ? content->valuestring : NULL,
+                    true, NULL);
+                
+                // 提取 tool_calls
+                cJSON* tool_calls = cJSON_GetObjectItem(msg, "tool_calls");
+                if (tool_calls && cJSON_IsArray(tool_calls)) {
+                    response->tool_calls = cJSON_Print(tool_calls);
+                }
+            }
+        }
+    }
+    
+    // 检查 API 错误
+    if (!response) {
+        cJSON* err = cJSON_GetObjectItem(root, "error");
+        if (err && cJSON_IsObject(err)) {
+            cJSON* msg = cJSON_GetObjectItem(err, "message");
+            const char* err_str = msg && cJSON_IsString(msg) ? msg->valuestring : "Unknown API error";
+            log_error("[OpenAI] API error: %s", err_str);
+            response = ai_provider_response_create(NULL, false, err_str);
+        } else {
+            response = ai_provider_response_create(NULL, false, "Failed to parse response");
+        }
+    }
+    
+    cJSON_Delete(root);
+    return response;
+}
+
+// 解析流式响应 (从累积内容中提取)
+static AIProviderResponse* openai_parse_stream_response(StreamContext* stream_ctx) {
+    AIProviderResponse* response = ai_provider_response_create(
+        stream_ctx->accumulated_content, true, NULL);
+    
+    // 添加 tool_calls
+    char* tool_calls_json = build_tool_calls_json(stream_ctx);
+    if (tool_calls_json) {
+        response->tool_calls = tool_calls_json;
+    }
+    
+    return response;
+}
+
+static AIProviderResponse* openai_send_messages(AIProvider* self,
+                                                 MessageList* messages,
+                                                 const char* system_prompt) {
+    if (!self || !self->impl) {
+        return ai_provider_response_create(NULL, false, "Provider not initialized");
+    }
+    
+    // 构建 URL
+    char* url = openai_build_url(self);
+    if (!url) {
+        return ai_provider_response_create(NULL, false, "Failed to build API URL");
+    }
+    
+    // 构建请求体
+    char* payload = openai_build_request_body(self, messages, system_prompt);
+    
+    // 构建请求头
+    HttpHeaders* headers = openai_build_headers(self);
+    
+    log_debug("[OpenAI] Request URL: %s", url);
+    log_debug("[OpenAI] Request payload: %s", payload);
 
     AIProviderResponse* response = NULL;
 
-    if (res == CURLE_OK) {
-        log_debug("OpenAI Response: %s", response_buffer);
+    if (self->config.stream) {
+        // ===== 流式请求 =====
+        StreamContext stream_ctx;
+        memset(&stream_ctx, 0, sizeof(stream_ctx));
+        stream_ctx.streaming = true;
+        stream_ctx.accumulated_content = (char*)calloc(1, 1);
+        stream_ctx.provider = self;
+        g_stream_ctx = &stream_ctx;
 
-        if (self->config.stream) {
-            // 解析流式响应
-            char* full_text = (char*)calloc(1, 1);
-            char* buf_copy = strdup(response_buffer);
-            char* line = buf_copy;
-            
-            while (line) {
-                char* line_end = strchr(line, '\n');
-                if (line_end) *line_end = '\0';
+        HttpRequest req = {
+            .url = url,
+            .method = "POST",
+            .body = payload,
+            .content_type = "application/json",
+            .headers = http_headers_to_array(headers),
+            .timeout_sec = 120
+        };
 
-                if (strncmp(line, "data: ", 6) == 0 && strcmp(line + 6, "[DONE]") != 0) {
-                    cJSON* chunk = cJSON_Parse(line + 6);
-                    if (chunk) {
-                        cJSON* choices = cJSON_GetObjectItem(chunk, "choices");
-                        if (choices && cJSON_IsArray(choices)) {
-                            cJSON* choice = cJSON_GetArrayItem(choices, 0);
-                            cJSON* delta = cJSON_GetObjectItem(choice, "delta");
-                            if (delta) {
-                                cJSON* content = cJSON_GetObjectItem(delta, "content");
-                                if (content && cJSON_IsString(content)) {
-                                    size_t old_len = strlen(full_text);
-                                    size_t add_len = strlen(content->valuestring);
-                                    char* tmp = (char*)realloc(full_text, old_len + add_len + 1);
-                                    if (tmp) {
-                                        full_text = tmp;
-                                        memcpy(full_text + old_len, content->valuestring, add_len + 1);
-                                    }
-                                }
+        HttpResponse* stream_resp = http_request_stream(&req, stream_data_callback, &stream_ctx);
+        free((void*)req.headers);  // http_headers_to_array 返回的需要 free
+        g_stream_ctx = NULL;
+
+        if (stream_resp) {
+            log_debug("[OpenAI] Stream response: status=%d, success=%s, body=%s",
+                stream_resp->status_code,
+                stream_resp->success ? "true" : "false",
+                stream_resp->body ? stream_resp->body : "(null)");
+            if (stream_resp->success) {
+                response = openai_parse_stream_response(&stream_ctx);
+            } else {
+                char err_msg[512];
+                snprintf(err_msg, sizeof(err_msg), "Stream request failed: HTTP %d",
+                         stream_resp->status_code);
+                if (stream_resp->body) {
+                    // 尝试从响应体提取 API 错误信息
+                    cJSON* err_root = cJSON_Parse(stream_resp->body);
+                    if (err_root) {
+                        cJSON* err_obj = cJSON_GetObjectItem(err_root, "error");
+                        if (err_obj && cJSON_IsObject(err_obj)) {
+                            cJSON* msg = cJSON_GetObjectItem(err_obj, "message");
+                            if (msg && cJSON_IsString(msg)) {
+                                snprintf(err_msg, sizeof(err_msg), "Stream request failed: %s",
+                                         msg->valuestring);
                             }
                         }
-                        cJSON_Delete(chunk);
+                        cJSON_Delete(err_root);
                     }
                 }
-
-                if (line_end) { *line_end = '\n'; line = line_end + 1; }
-                else break;
+                log_error("[OpenAI] %s", err_msg);
+                response = ai_provider_response_create(NULL, false, err_msg);
             }
-            free(buf_copy);
-
-            response = ai_provider_response_create(full_text, true, NULL);
-            
-            // 添加 tool_calls
-            char* tool_calls_json = build_tool_calls_json(&stream_ctx);
-            if (tool_calls_json) {
-                response->tool_calls = tool_calls_json;
-            }
-            
-            free(full_text);
+            http_response_free(stream_resp);
         } else {
-            // 解析非流式响应
-            cJSON* root = cJSON_Parse(response_buffer);
-            if (root) {
-                cJSON* choices = cJSON_GetObjectItem(root, "choices");
-                if (choices && cJSON_IsArray(choices)) {
-                    cJSON* choice = cJSON_GetArrayItem(choices, 0);
-                    if (choice) {
-                        cJSON* msg = cJSON_GetObjectItem(choice, "message");
-                        if (msg) {
-                            cJSON* content = cJSON_GetObjectItem(msg, "content");
-                            response = ai_provider_response_create(
-                                content && cJSON_IsString(content) ? content->valuestring : NULL,
-                                true, NULL);
-                            
-                            // 提取 tool_calls
-                            cJSON* tool_calls = cJSON_GetObjectItem(msg, "tool_calls");
-                            if (tool_calls && cJSON_IsArray(tool_calls)) {
-                                response->tool_calls = cJSON_Print(tool_calls);
-                            }
-                        }
-                    }
-                }
-                cJSON_Delete(root);
-            }
+            log_error("[OpenAI] Stream request failed: no response");
+            response = ai_provider_response_create(NULL, false, "Stream request failed: no response");
         }
 
-        if (!response) {
-            response = ai_provider_response_create(NULL, false, "Failed to parse response");
-        }
+        reset_tool_calls(&stream_ctx);
+        free(stream_ctx.accumulated_content);
     } else {
-        response = ai_provider_response_create(NULL, false, curl_easy_strerror(res));
+        // ===== 非流式请求 =====
+        HttpResponse* http_resp = http_post_json_with_headers(url, payload, headers);
+        
+        log_debug("[OpenAI] HTTP status: %d, success: %s",
+            http_resp ? http_resp->status_code : 0,
+            http_resp ? (http_resp->success ? "true" : "false") : "N/A");
+        log_debug("[OpenAI] Response body: %s",
+            http_resp && http_resp->body ? http_resp->body : "(null)");
+
+        if (http_resp) {
+            response = openai_parse_non_stream_response(http_resp);
+            http_response_free(http_resp);
+        } else {
+            response = ai_provider_response_create(NULL, false, "HTTP request failed");
+        }
     }
 
-    // 清理
-    reset_tool_calls(&stream_ctx);
-    free(stream_ctx.accumulated_content);
-    curl_slist_free_all(headers);
-    curl_easy_cleanup(curl);
+    http_headers_free(headers);
     free(payload);
-    free(response_buffer);
+    free(url);
 
     return response;
-#else
-    // Mock 响应
-    char mock[256];
-    snprintf(mock, sizeof(mock), "[Mock OpenAI] Response for %d messages", 
-             messages ? messages->count : 0);
-    return ai_provider_response_create(mock, true, NULL);
-#endif
 }
 
 static void openai_free_response(AIProviderResponse* response) {
@@ -499,8 +536,7 @@ AIProvider* provider_openai_create(const AIProviderConfig* config) {
     if (config) {
         provider->config.api_key = config->api_key ? strdup(config->api_key) : NULL;
         provider->config.model_name = config->model_name ? strdup(config->model_name) : strdup("gpt-4");
-        provider->config.base_url = config->base_url ? strdup(config->base_url) : 
-                                    strdup("https://api.openai.com/v1/chat/completions");
+        provider->config.base_url = config->base_url ? strdup(config->base_url) : NULL;
         provider->config.temperature = config->temperature > 0 ? config->temperature : 0.7f;
         provider->config.max_tokens = config->max_tokens > 0 ? config->max_tokens : 4096;
         provider->config.stream = config->stream;

@@ -30,6 +30,7 @@ typedef struct {
 // Gateway configuration
 typedef struct {
     int port;                 // 网关端口
+    int http_port;            // HTTP API 端口 (默认 8080)
     bool browser_enabled;     // 是否启用浏览器
     char *http_api_key;       // HTTP API 授权密钥 (可选)
     bool http_auth_enabled;   // 是否启用 HTTP 授权

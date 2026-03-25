@@ -794,14 +794,15 @@ void* agent_node_worker_thread(void* arg) {
                     session->history->count, max_history);
             // Remove oldest messages
             int remove_count = session->history->count - max_history;
+            // Destroy removed messages first
             for (int i = 0; i < remove_count; i++) {
-                message_destroy(session->history->messages[0]);
-                // Shift remaining messages
-                for (int j = 1; j < session->history->count; j++) {
-                    session->history->messages[j-1] = session->history->messages[j];
-                }
-                session->history->count--;
+                message_destroy(session->history->messages[i]);
             }
+            // Shift remaining messages in one memmove (O(n) instead of O(n²))
+            memmove(session->history->messages,
+                    session->history->messages + remove_count,
+                    sizeof(Message*) * max_history);
+            session->history->count = max_history;
         }
         
         // 4. Build context

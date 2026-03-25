@@ -1121,24 +1121,39 @@ bool feishu_stream_send(const char *channel_id, const char *message, int speed_c
         return false;
     }
     
-    // 分批更新，每10个字符更新一次
-    int batch_size = 10;
-    for (int i = 0; i < len; i += batch_size) {
+    // 分批更新，每20个字符更新一次
+    int batch_size = 20;
+
+    // 创建流式上下文，使 feishu_stream_update 能保存 current_content
+    FeishuStreamContext stream_ctx = {0};
+    stream_ctx.message_id = message_id;
+    stream_ctx.channel_id = strdup(channel_id);
+    stream_ctx.active = true;
+    channel->stream_ctx = &stream_ctx;
+
+    for (int i = 0; i < len; ) {
         int end = (i + batch_size < len) ? i + batch_size : len;
+        // 对齐到 UTF-8 字符边界，避免截断多字节字符
+        while (end > i && (message[end] & 0xC0) == 0x80) {
+            end--;
+        }
+        if (end <= i) break;
         strncpy(partial, message, end);
         partial[end] = '\0';
         
         if (!feishu_stream_update(channel_id, message_id, partial)) {
             log_error("[Feishu] Failed to update stream message at position %d", i);
-            // 继续尝试
         }
         
-        // 等待间隔
-        usleep(interval_us * batch_size);
+        usleep(interval_us * (end - i));
+        i = end;
     }
     
     // 结束流式消息
     bool result = feishu_stream_finish(channel_id, message_id);
+    channel->stream_ctx = NULL;
+    free(stream_ctx.channel_id);
+    free(stream_ctx.current_content);
     free(message_id);
     free(partial);
     

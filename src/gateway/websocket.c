@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <pthread.h>
 
 // Platform-specific includes
 #ifdef _WIN32
@@ -147,34 +148,40 @@ bool websocket_server_init(WebSocketServer *server, int port, int max_connection
     return true;
 }
 
-bool websocket_server_start(WebSocketServer *server) {
-    if (server->running) {
-        printf("WebSocket server is already running\n");
-        return true;
-    }
+// WebSocket server thread function
+static void* websocket_server_thread(void *arg) {
+    WebSocketServer *server = (WebSocketServer *)arg;
 
-    server->running = true;
-    printf("WebSocket server started on port %d\n", server->port);
+    printf("WebSocket server thread started\n");
 
-    // Start server thread
-    // For simplicity, we'll use a blocking approach here
     while (server->running) {
         fd_set read_fds;
         FD_ZERO(&read_fds);
         FD_SET(server->server_socket, &read_fds);
 
         // Add existing connections to the set
+        int max_fd = server->server_socket;
         for (int i = 0; i < server->max_connections; i++) {
             if (server->connections[i].socket != 0) {
                 FD_SET(server->connections[i].socket, &read_fds);
+                if (server->connections[i].socket > max_fd) {
+                    max_fd = server->connections[i].socket;
+                }
             }
         }
 
-        // Wait for activity
-        int activity = select(0, &read_fds, NULL, NULL, NULL);
+        // Wait for activity with timeout
+        struct timeval timeout;
+        timeout.tv_sec = 1;
+        timeout.tv_usec = 0;
+        int activity = select(max_fd + 1, &read_fds, NULL, NULL, &timeout);
         if (activity == SOCKET_ERROR) {
             fprintf(stderr, "select failed: %d\n", WSAGetLastError());
             break;
+        }
+        if (activity == 0) {
+            // Timeout, check if server should continue running
+            continue;
         }
 
         // Check for new connections
@@ -255,6 +262,26 @@ bool websocket_server_start(WebSocketServer *server) {
         }
     }
 
+    printf("WebSocket server thread ended\n");
+    return NULL;
+}
+
+bool websocket_server_start(WebSocketServer *server) {
+    if (server->running) {
+        printf("WebSocket server is already running\n");
+        return true;
+    }
+
+    server->running = true;
+
+    // Create server thread
+    if (pthread_create(&server->thread, NULL, websocket_server_thread, server) != 0) {
+        fprintf(stderr, "Failed to create WebSocket server thread\n");
+        server->running = false;
+        return false;
+    }
+
+    printf("WebSocket server started on port %d\n", server->port);
     return true;
 }
 
@@ -265,6 +292,9 @@ void websocket_server_stop(WebSocketServer *server) {
     }
 
     server->running = false;
+
+    // Wait for thread to finish
+    pthread_join(server->thread, NULL);
 
     // Close all connections
     for (int i = 0; i < server->max_connections; i++) {

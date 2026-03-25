@@ -19,6 +19,14 @@ typedef struct {
     int item_type;           // 1=文本, 2=图片, 3=语音, 4=文件, 5=视频
 } WeixinMessage;
 
+// 微信流式消息上下文
+typedef struct {
+    char *from_user_id;      // 当前回复目标
+    char *context_token;     // 对话关联token
+    char *accumulated;       // 累积的消息内容
+    bool active;             // 是否活跃
+} WeixinStreamContext;
+
 // 微信配置结构
 typedef struct {
     char *bot_token;         // iLink bot token（登录后获取）

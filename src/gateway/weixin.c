@@ -60,6 +60,13 @@ static char* generate_wechat_uin(void) {
 }
 
 // 构建请求头
+static HttpHeaders* build_weixin_headers(const char *bot_token);
+
+// 前向声明
+static bool weixin_send_message_ex(const char *bot_token, const char *to_user_id,
+                                   const char *text, const char *context_token, int message_state);
+
+// 构建请求头实现
 static HttpHeaders* build_weixin_headers(const char *bot_token) {
     HttpHeaders *headers = http_headers_new();
     if (!headers) return NULL;
@@ -233,14 +240,29 @@ bool weixin_get_updates(const char *bot_token, const char *cursor,
         if (resp) http_response_free(resp);
         return false;
     }
-    
+    // 保存响应体用于错误日志（在释放前）
+    char *resp_body_copy = strdup(resp->body);
     cJSON *json = cJSON_Parse(resp->body);
     http_response_free(resp);
     
     if (!json) {
-        log_error("[Weixin] Failed to parse updates response");
+        log_error("[Weixin] Failed to parse updates response: %s", resp_body_copy);
+        free(resp_body_copy);
         return false;
     }
+    
+    cJSON *errcode = cJSON_GetObjectItem(json, "errcode");
+    int code = errcode ? errcode->valueint : 0;
+    
+    if (code < 0) {
+        log_error("[Weixin] Get updates response: %s", resp_body_copy);
+        cJSON_Delete(json);
+        free(resp_body_copy);
+        // errcode -14 表示 session timeout，需要重新登录
+        // 返回 false，调用方应该检测到此错误并触发重新登录
+        return false;
+    }
+    free(resp_body_copy);
     
     // 更新游标
     if (new_cursor) {
@@ -312,64 +334,10 @@ bool weixin_get_updates(const char *bot_token, const char *cursor,
     return true;
 }
 
-// 发送消息
+// 发送消息（完整消息，默认 FINISH 状态）
 bool weixin_send_message(const char *bot_token, const char *to_user_id,
                          const char *text, const char *context_token) {
-    if (!bot_token || !to_user_id || !text) return false;
-    
-    char url[256];
-    snprintf(url, sizeof(url), "%s/ilink/bot/sendmessage", WEIXIN_ILINK_BASE_URL);
-    
-    // 构建消息体
-    cJSON *msg = cJSON_CreateObject();
-    cJSON_AddStringToObject(msg, "to_user_id", to_user_id);
-    cJSON_AddNumberToObject(msg, "message_type", 2);  // BOT发出
-    cJSON_AddNumberToObject(msg, "message_state", 2); // FINISH
-    
-    if (context_token) {
-        cJSON_AddStringToObject(msg, "context_token", context_token);
-    }
-    
-    cJSON *item_list = cJSON_CreateArray();
-    cJSON *item = cJSON_CreateObject();
-    cJSON_AddNumberToObject(item, "type", 1); // 文本
-    
-    cJSON *text_item = cJSON_CreateObject();
-    cJSON_AddStringToObject(text_item, "text", text);
-    cJSON_AddItemToObject(item, "text_item", text_item);
-    
-    cJSON_AddItemToArray(item_list, item);
-    cJSON_AddItemToObject(msg, "item_list", item_list);
-    
-    cJSON *root = cJSON_CreateObject();
-    cJSON_AddItemToObject(root, "msg", msg);
-    
-    char *body = cJSON_PrintUnformatted(root);
-    cJSON_Delete(root);
-    
-    if (!body) return false;
-    
-    HttpHeaders *headers = build_weixin_headers(bot_token);
-    HttpResponse *resp = http_post_json_with_headers(url, body, headers);
-    http_headers_free(headers);
-    free(body);
-    
-    if (!resp || !resp->success) {
-        log_error("[Weixin] Failed to send message");
-        if (resp) http_response_free(resp);
-        return false;
-    }
-    
-    cJSON *json = cJSON_Parse(resp->body);
-    http_response_free(resp);
-    
-    if (!json) return false;
-    
-    cJSON *ret = cJSON_GetObjectItem(json, "ret");
-    bool success = (ret && cJSON_IsNumber(ret) && ret->valueint == 0);
-    
-    cJSON_Delete(json);
-    return success;
+    return weixin_send_message_ex(bot_token, to_user_id, text, context_token, 2);  // 2=FINISH
 }
 
 // 清理消息数组
@@ -457,143 +425,196 @@ static void* weixin_polling_thread(void *arg) {
     
     log_info("[Weixin] Polling thread started");
     
-    // 如果未登录，等待扫码登录
-    if (!config->is_logged_in) {
-        log_info("[Weixin] Waiting for QR code scan login...");
-        
-        // 获取二维码
-        char* qrcode = NULL;
-        char* qrcode_img = NULL;
-        
-        if (weixin_get_qrcode(&qrcode, &qrcode_img)) {
-            log_info("[Weixin] QR code obtained: %s", qrcode);
+    // 主循环：登录 -> 消息轮询 -> session timeout -> 重新登录
+    while (true) {
+        // 如果未登录，等待扫码登录
+        if (!config->is_logged_in) {
+            log_info("[Weixin] Waiting for QR code scan login...");
             
-            // 显示二维码
-            if (qrcode_img) {
-                if (strncmp(qrcode_img, "http", 4) == 0) {
-                    printf("\n========================================\n");
-                    printf("微信登录二维码链接:\n");
-                    printf("%s\n", qrcode_img);
-                    printf("\n请用微信扫描二维码登录...\n");
-                    printf("========================================\n\n");
-                    log_info("[Weixin] QR code URL: %s", qrcode_img);
-                } else {
-                    char qrcode_path[512];
-                    snprintf(qrcode_path, sizeof(qrcode_path), "weixin_qrcode.png");
-                    
-                    if (save_base64_image(qrcode_img, qrcode_path)) {
+            // 获取二维码
+            char* qrcode = NULL;
+            char* qrcode_img = NULL;
+            
+            if (weixin_get_qrcode(&qrcode, &qrcode_img)) {
+                log_info("[Weixin] QR code obtained: %s", qrcode);
+                
+                // 显示二维码
+                if (qrcode_img) {
+                    if (strncmp(qrcode_img, "http", 4) == 0) {
                         printf("\n========================================\n");
-                        printf("微信登录二维码已保存到: %s\n", qrcode_path);
-                        printf("请用微信扫描二维码登录...\n");
+                        printf("微信登录二维码链接:\n");
+                        printf("%s\n", qrcode_img);
+                        printf("\n请用微信扫描二维码登录...\n");
                         printf("========================================\n\n");
-                        log_info("[Weixin] QR code saved to: %s", qrcode_path);
+                        log_info("[Weixin] QR code URL: %s", qrcode_img);
+                    } else {
+                        char qrcode_path[512];
+                        snprintf(qrcode_path, sizeof(qrcode_path), "weixin_qrcode.png");
+                        
+                        if (save_base64_image(qrcode_img, qrcode_path)) {
+                            printf("\n========================================\n");
+                            printf("微信登录二维码已保存到: %s\n", qrcode_path);
+                            printf("请用微信扫描二维码登录...\n");
+                            printf("========================================\n\n");
+                            log_info("[Weixin] QR code saved to: %s", qrcode_path);
+                        }
                     }
                 }
-            }
-            
-            printf("等待扫码中");
-            fflush(stdout);
-            
-            // 轮询等待扫码
-            char* bot_token = NULL;
-            char* base_url = NULL;
-            int max_wait = 120;
-            int waited = 0;
-            
-            while (waited < max_wait && channel->connected) {
-#ifdef _WIN32
-                Sleep(1000);
-#else
-                sleep(1);
-#endif
-                waited++;
                 
-                printf(".");
+                printf("等待扫码中");
                 fflush(stdout);
                 
-                if (weixin_check_qrcode_status(qrcode, &bot_token, &base_url)) {
-                    printf("\n\n========================================\n");
-                    printf("微信登录成功！\n");
-                    printf("========================================\n\n");
-                    log_info("[Weixin] Login successful!");
-                    
-                    config->bot_token = bot_token;
-                    config->base_url = base_url ? base_url : strdup(WEIXIN_ILINK_BASE_URL);
-                    config->is_logged_in = true;
-                    channel->connected = true;
-                    
-                    printf("Bot Token: %s\n", bot_token);
-                    printf("请将此 token 保存到配置文件 ~/.catclaw/config.json 中:\n");
-                    printf("  \"api_key\": \"%s\"\n\n", bot_token);
-                    break;
-                }
-            }
-            
-            if (!config->is_logged_in) {
-                printf("\n\n[Weixin] Login timeout\n");
-                log_warn("[Weixin] Login timeout after %d seconds", max_wait);
-                free(qrcode);
-                free(qrcode_img);
-                return 0;
-            }
-            
-            free(qrcode);
-            free(qrcode_img);
-        } else {
-            log_error("[Weixin] Failed to get QR code");
-            return 0;
-        }
-    }
-    
-    // 开始消息轮询
-    log_info("[Weixin] Starting message polling...");
-    
-    while (channel->connected && config->is_logged_in) {
-        WeixinMessage *messages = NULL;
-        int msg_count = 0;
-        char *new_cursor = NULL;
-        
-        if (weixin_get_updates(config->bot_token, config->get_updates_buf,
-                               &messages, &msg_count, &new_cursor)) {
-            if (new_cursor) {
-                free(config->get_updates_buf);
-                config->get_updates_buf = new_cursor;
-            }
-            
-            for (int i = 0; i < msg_count; i++) {
-                WeixinMessage *msg = &messages[i];
+                // 轮询等待扫码
+                char* bot_token = NULL;
+                char* base_url = NULL;
+                int max_wait = 120;
+                int waited = 0;
                 
-                if (msg->message_type == 1 && msg->text) {
-                    log_info("[Weixin] Message from %s: %s", 
-                             msg->from_user_id, msg->text);
+                while (waited < max_wait) {
+#ifdef _WIN32
+                    Sleep(1000);
+#else
+                    sleep(1);
+#endif
+                    waited++;
                     
-                    ChannelIncomingMessage incoming = {
-                        .content = msg->text,
-                        .sender_id = msg->from_user_id,
-                        .chat_id = msg->from_user_id,
-                        .message_id = NULL,
-                        .extra = msg
-                    };
+                    printf(".");
+                    fflush(stdout);
                     
-                    char* response = NULL;
-                    bool handled = channel_handle_incoming_message(channel, &incoming, &response);
-                    
-                    if (handled && response) {
-                        weixin_send_message(config->bot_token, msg->from_user_id,
-                                           response, msg->context_token);
-                        free(response);
+                    if (weixin_check_qrcode_status(qrcode, &bot_token, &base_url)) {
+                        printf("\n\n========================================\n");
+                        printf("微信登录成功！\n");
+                        printf("========================================\n\n");
+                        log_info("[Weixin] Login successful!");
+                        
+                        free(config->bot_token);  // 释放旧 token
+                        config->bot_token = bot_token;
+                        free(config->base_url);
+                        config->base_url = base_url ? base_url : strdup(WEIXIN_ILINK_BASE_URL);
+                        config->is_logged_in = true;
+                        channel->connected = true;
+                        
+                        printf("Bot Token: %s\n", bot_token);
+                        printf("请将此 token 保存到配置文件 ~/.catclaw/config.json 中:\n");
+                        printf("  \"api_key\": \"%s\"\n\n", bot_token);
+                        break;
                     }
                 }
+                
+                if (!config->is_logged_in) {
+                    printf("\n\n[Weixin] Login timeout, retrying...\n");
+                    log_warn("[Weixin] Login timeout after %d seconds, retrying...", max_wait);
+                    free(qrcode);
+                    free(qrcode_img);
+                    continue;  // 重新尝试登录
+                }
+                
+                free(qrcode);
+                free(qrcode_img);
+            } else {
+                log_error("[Weixin] Failed to get QR code, retrying in 5 seconds...");
+#ifdef _WIN32
+                Sleep(5000);
+#else
+                sleep(5);
+#endif
+                continue;  // 重新尝试登录
             }
-            
-            weixin_free_messages(messages, msg_count);
         }
         
+        // 开始消息轮询
+        log_info("[Weixin] Starting message polling...");
+        
+        int consecutive_failures = 0;
+        const int max_failures = 3;  // 连续失败3次后触发重新登录
+        
+        while (config->is_logged_in) {
+            WeixinMessage *messages = NULL;
+            int msg_count = 0;
+            char *new_cursor = NULL;        
+            if (weixin_get_updates(config->bot_token, config->get_updates_buf,
+                                   &messages, &msg_count, &new_cursor)) {
+                consecutive_failures = 0;  // 重置失败计数
+                
+                if (new_cursor) {
+                    free(config->get_updates_buf);
+                    config->get_updates_buf = new_cursor;
+                }
+                
+                for (int i = 0; i < msg_count; i++) {
+                    WeixinMessage *msg = &messages[i];
+                    
+                    log_debug("[Weixin] Processing msg %d: type=%d, from=%s, text=%s", 
+                             i, msg->message_type, msg->from_user_id ? msg->from_user_id : "null",
+                             msg->text ? msg->text : "null");
+                    
+                    if (msg->message_type == 1 && msg->text) {
+                        log_info("[Weixin] Message from %s to %s: %s", 
+                                 msg->from_user_id, msg->to_user_id, msg->text);
+                        log_debug("[Weixin] context_token: %s", 
+                                 msg->context_token ? msg->context_token : "null");
+                        
+                        // 预先创建流式上下文（保存正确的 context_token，防止被新消息覆盖）
+                        if (channel->stream_ctx) {
+                            WeixinStreamContext *old_ctx = (WeixinStreamContext *)channel->stream_ctx;
+                            free(old_ctx->from_user_id);
+                            free(old_ctx->context_token);
+                            free(old_ctx->accumulated);
+                            free(old_ctx);
+                        }
+                        WeixinStreamContext *ctx = (WeixinStreamContext *)calloc(1, sizeof(WeixinStreamContext));
+                        ctx->from_user_id = msg->from_user_id ? strdup(msg->from_user_id) : NULL;
+                        ctx->context_token = msg->context_token ? strdup(msg->context_token) : NULL;
+                        ctx->accumulated = strdup("");
+                        ctx->active = true;
+                        channel->stream_ctx = ctx;
+                        
+                        ChannelIncomingMessage incoming = {
+                            .content = msg->text,
+                            .sender_id = msg->from_user_id,
+                            .chat_id = msg->from_user_id,
+                            .message_id = NULL,
+                            .extra = msg
+                        };
+                        
+                        char* response = NULL;
+                        bool handled = channel_handle_incoming_message(channel, &incoming, &response);
+                        
+                        log_debug("[Weixin] handle_incoming_message: handled=%d, response=%s", 
+                                 handled, response ? response : "null");
+                        
+                        if (handled && response) {
+                            weixin_send_message(config->bot_token, msg->from_user_id,
+                                               response, msg->context_token);
+                            free(response);
+                        }
+                    }
+                }
+                
+                weixin_free_messages(messages, msg_count);
+            } else {
+                consecutive_failures++;
+                log_warn("[Weixin] Get updates failed (%d/%d)", consecutive_failures, max_failures);
+                
+                if (consecutive_failures >= max_failures) {
+                    log_error("[Weixin] Session may have expired, triggering re-login...");
+                    config->is_logged_in = false;
+                    break;  // 退出轮询，重新进入登录流程
+                }
+            }
+            
 #ifdef _WIN32
-        Sleep(100);
+            Sleep(100);
 #else
-        usleep(100000);
+            usleep(200000);
 #endif
+        }
+        
+        // 如果是 session timeout，继续循环重新登录
+        // 如果程序退出，外部会设置 channel->connected = false
+        if (!channel->connected) {
+            break;  // 程序退出
+        }
     }
     
     log_info("[Weixin] Polling thread stopped");
@@ -607,6 +628,181 @@ static bool weixin_channel_send_message(ChannelInstance *channel, const char *me
     return true;
 }
 
+// ==================== 流式消息回调 ====================
+
+// 发送消息（支持流式状态）
+// message_state: 1=WRITING（正在输入）, 2=FINISH（完成）
+static bool weixin_send_message_ex(const char *bot_token, const char *to_user_id,
+                                   const char *text, const char *context_token, int message_state) {
+    if (!bot_token || !to_user_id || !text) {
+        log_error("[Weixin] send_message_ex: invalid params");
+        return false;
+    }
+    
+    log_info("[Weixin] Sending message to %s (state=%d): %s", to_user_id, message_state, text);
+    log_debug("[Weixin] context_token: %s", context_token ? context_token : "null");
+    
+    char url[256];
+    snprintf(url, sizeof(url), "%s/ilink/bot/sendmessage", WEIXIN_ILINK_BASE_URL);
+    
+    // 生成 client_id (时间戳 + 随机数)
+    char client_id[64];
+    snprintf(client_id, sizeof(client_id), "catclaw:%ld%04d", 
+             (long)time(NULL), rand() % 10000);
+    
+    cJSON *msg = cJSON_CreateObject();
+    cJSON_AddStringToObject(msg, "from_user_id", "");  // 空字符串
+    cJSON_AddStringToObject(msg, "to_user_id", to_user_id);
+    cJSON_AddStringToObject(msg, "client_id", client_id);
+    cJSON_AddNumberToObject(msg, "message_type", 2);  // BOT
+    cJSON_AddNumberToObject(msg, "message_state", message_state);  // 2=FINISH
+    
+    if (context_token) {
+        cJSON_AddStringToObject(msg, "context_token", context_token);
+    }
+    
+    cJSON *item_list = cJSON_CreateArray();
+    cJSON *item = cJSON_CreateObject();
+    cJSON_AddNumberToObject(item, "type", 1);  // TEXT
+    
+    cJSON *text_item = cJSON_CreateObject();
+    cJSON_AddStringToObject(text_item, "text", text);
+    cJSON_AddItemToObject(item, "text_item", text_item);
+    
+    cJSON_AddItemToArray(item_list, item);
+    cJSON_AddItemToObject(msg, "item_list", item_list);
+    
+    // 构建完整请求体
+    cJSON *root = cJSON_CreateObject();
+    cJSON_AddItemToObject(root, "msg", msg);
+    
+    // 添加 base_info (必须!)
+    cJSON *base_info = cJSON_CreateObject();
+    cJSON_AddStringToObject(base_info, "channel_version", "1.0.2");
+    cJSON_AddItemToObject(root, "base_info", base_info);
+    
+    char *body = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    
+    if (!body) return false;
+    
+    log_debug("[Weixin] Send message request body: %s", body);
+    
+    HttpHeaders *headers = build_weixin_headers(bot_token);
+    HttpResponse *resp = http_post_json_with_headers(url, body, headers);
+    http_headers_free(headers);
+
+    log_info("[Weixin] Send response: status=%d, success=%d, body=%s", 
+        resp ? resp->status_code : 0, resp ? resp->success : 0, resp && resp->body ? resp->body : "null");
+
+        
+    free(body);
+    
+    if (!resp) {
+        log_error("[Weixin] Send message: no response");
+        return false;
+    }
+    
+   
+    bool success = resp->success;
+    http_response_free(resp);
+    return success;
+}
+
+// 发送"正在输入"状态 (需要先调用 getconfig 获取 typing_ticket，暂时禁用)
+static bool weixin_send_typing(const char *bot_token, const char *to_user_id, const char *context_token) {
+    // 根据协议，sendtyping 需要 typing_ticket，需要先调用 getconfig 获取
+    // 暂时禁用此功能，直接返回成功
+    (void)bot_token;
+    (void)to_user_id;
+    (void)context_token;
+    log_debug("[Weixin] Typing indicator disabled (requires typing_ticket)");
+    return true;
+}
+
+// 开始流式消息
+static bool weixin_stream_start_callback(ChannelInstance *channel, const char *initial_content) {
+    WeixinConfig *config = (WeixinConfig *)channel->user_data;
+    if (!config || !config->bot_token) {
+        log_error("[Weixin] Stream start: missing config");
+        return false;
+    }
+    
+    // 使用已创建的流式上下文（在收到消息时已创建并保存了正确的 context_token）
+    WeixinStreamContext *ctx = (WeixinStreamContext *)channel->stream_ctx;
+    if (!ctx || !ctx->from_user_id) {
+        log_error("[Weixin] Stream start: no active stream context");
+        return false;
+    }
+    
+    log_info("[Weixin] Stream started for user: %s", ctx->from_user_id);
+    
+    // 发送"正在输入"状态
+    weixin_send_typing(config->bot_token, ctx->from_user_id, ctx->context_token);
+    
+    // 累积初始内容
+    if (initial_content && strlen(initial_content) > 0) {
+        free(ctx->accumulated);
+        ctx->accumulated = strdup(initial_content);
+    }
+    
+    return true;
+}
+
+// 更新流式消息（只累积内容，不发送）
+static bool weixin_stream_update_callback(ChannelInstance *channel, const char *content) {
+    WeixinConfig *config = (WeixinConfig *)channel->user_data;
+    if (!config || !channel->stream_ctx) {
+        log_error("[Weixin] Stream update: no active stream");
+        return false;
+    }
+    
+    WeixinStreamContext *ctx = (WeixinStreamContext *)channel->stream_ctx;
+    if (!ctx->active) {
+        log_error("[Weixin] Stream not active");
+        return false;
+    }
+    
+    // 注意：content 参数已经是完整的累积内容，直接替换而不是追加
+    if (content && strlen(content) > 0) {
+        free(ctx->accumulated);
+        ctx->accumulated = strdup(content);
+    }
+    
+    log_debug("[Weixin] Stream update: accumulated %zu chars", 
+             ctx->accumulated ? strlen(ctx->accumulated) : 0);
+    
+    return true;
+}
+
+// 结束流式消息（发送最终版本）
+static bool weixin_stream_end_callback(ChannelInstance *channel) {
+    WeixinConfig *config = (WeixinConfig *)channel->user_data;
+    if (!config || !channel->stream_ctx) {
+        return true;
+    }
+    
+    WeixinStreamContext *ctx = (WeixinStreamContext *)channel->stream_ctx;
+    bool success = true;
+    
+    // 发送最终消息（FINISH 状态）
+    if (ctx->active && ctx->accumulated && strlen(ctx->accumulated) > 0) {
+        log_info("[Weixin] Stream end: sending final message (%zu chars)", 
+                strlen(ctx->accumulated));
+        success = weixin_send_message_ex(config->bot_token, ctx->from_user_id,
+                                        ctx->accumulated, ctx->context_token, 2);  // 2=FINISH
+    }
+    
+    // 清理上下文
+    free(ctx->from_user_id);
+    free(ctx->context_token);
+    free(ctx->accumulated);
+    free(ctx);
+    channel->stream_ctx = NULL;
+    
+    return success;
+}
+
 // 清理channel
 static void weixin_channel_cleanup(ChannelInstance *channel) {
     channel->connected = false;
@@ -618,6 +814,16 @@ static void weixin_channel_cleanup(ChannelInstance *channel) {
         free(config->get_updates_buf);
         free(config);
         channel->user_data = NULL;
+    }
+    
+    // 清理流式上下文
+    if (channel->stream_ctx) {
+        WeixinStreamContext *ctx = (WeixinStreamContext *)channel->stream_ctx;
+        free(ctx->from_user_id);
+        free(ctx->context_token);
+        free(ctx->accumulated);
+        free(ctx);
+        channel->stream_ctx = NULL;
     }
     
     log_info("[Weixin] Channel cleaned up");
@@ -640,9 +846,11 @@ bool weixin_channel_init(ChannelInstance *channel, ChannelConfig *config) {
     
     // 从配置读取token（如果已登录）
     if (config && config->api_key && strlen(config->api_key) > 0) {
+        // bot_token 是扫码登录后返回的完整字符串，直接使用
         weixin_config->bot_token = strdup(config->api_key);
         weixin_config->is_logged_in = true;
         channel->connected = true;
+        // log_debug("[Weixin] Using bot_token: %s", weixin_config->bot_token);
     }
     
     weixin_config->base_url = strdup(WEIXIN_ILINK_BASE_URL);
@@ -651,6 +859,12 @@ bool weixin_channel_init(ChannelInstance *channel, ChannelConfig *config) {
     channel->user_data = weixin_config;
     channel->send_message = weixin_channel_send_message;
     channel->cleanup = weixin_channel_cleanup;
+    channel->stream_ctx = NULL;
+    
+    // 设置流式消息回调（用于 AI 流式响应）
+    channel->stream_start = weixin_stream_start_callback;
+    channel->stream_update = weixin_stream_update_callback;
+    channel->stream_end = weixin_stream_end_callback;
     
     // 启动轮询线程（线程内会处理登录流程）
 #ifdef _WIN32
