@@ -1131,8 +1131,13 @@ bool feishu_stream_send(const char *channel_id, const char *message, int speed_c
     stream_ctx.active = true;
     channel->stream_ctx = &stream_ctx;
 
-    for (int i = 0; i < len; i += batch_size) {
+    for (int i = 0; i < len; ) {
         int end = (i + batch_size < len) ? i + batch_size : len;
+        // 对齐到 UTF-8 字符边界，避免截断多字节字符
+        while (end > i && (message[end] & 0xC0) == 0x80) {
+            end--;
+        }
+        if (end <= i) break;
         strncpy(partial, message, end);
         partial[end] = '\0';
         
@@ -1140,7 +1145,8 @@ bool feishu_stream_send(const char *channel_id, const char *message, int speed_c
             log_error("[Feishu] Failed to update stream message at position %d", i);
         }
         
-        usleep(interval_us * batch_size);
+        usleep(interval_us * (end - i));
+        i = end;
     }
     
     // 结束流式消息
