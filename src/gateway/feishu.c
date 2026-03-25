@@ -1121,8 +1121,8 @@ bool feishu_stream_send(const char *channel_id, const char *message, int speed_c
         return false;
     }
     
-    // 分批更新，每10个字符更新一次
-    int batch_size = 10;
+    // 分批更新，每20个字符更新一次
+    int batch_size = 20;
     for (int i = 0; i < len; i += batch_size) {
         int end = (i + batch_size < len) ? i + batch_size : len;
         strncpy(partial, message, end);
