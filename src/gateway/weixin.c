@@ -602,8 +602,8 @@ static void* weixin_polling_thread(void *arg) {
                          msg->text ? msg->text : "null");
                 
                 if (msg->message_type == 1 && msg->text) {
-                    log_info("[Weixin] Message from %s: %s", 
-                             msg->from_user_id, msg->text);
+                    log_info("[Weixin] Message from %s to %s: %s", 
+                             msg->from_user_id, msg->to_user_id, msg->text);
                     log_debug("[Weixin] context_token: %s", 
                              msg->context_token ? msg->context_token : "null");
                     
@@ -683,9 +683,16 @@ bool weixin_channel_init(ChannelInstance *channel, ChannelConfig *config) {
     
     // 从配置读取token（如果已登录）
     if (config && config->api_key && strlen(config->api_key) > 0) {
-        weixin_config->bot_token = strdup(config->api_key);
+        // api_key 格式可能是 "bot_id:token"，需要提取 token 部分
+        const char *colon = strchr(config->api_key, ':');
+        if (colon) {
+            weixin_config->bot_token = strdup(colon + 1);
+        } else {
+            weixin_config->bot_token = strdup(config->api_key);
+        }
         weixin_config->is_logged_in = true;
         channel->connected = true;
+        log_debug("[Weixin] Using bot_token: %s", weixin_config->bot_token);
     }
     
     weixin_config->base_url = strdup(WEIXIN_ILINK_BASE_URL);
