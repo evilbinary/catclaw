@@ -18,7 +18,7 @@
 #define msleep(ms) Sleep(ms)
 #define SOCKET int
 #define INVALID_SOCKET (-1)
-#define CLOSESOCKET(s) CLOSESOCKET(s)
+#define CLOSESOCKET(s) closesocket(s)
 #else
 #include <sys/socket.h>
 #include <netinet/in.h>
