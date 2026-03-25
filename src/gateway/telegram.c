@@ -107,8 +107,16 @@ static bool telegram_send_message(ChannelInstance *channel, const char *message)
 }
 
 // 接收消息
-static bool telegram_receive_message(ChannelInstance *channel, const char *message) {
-    printf("[Telegram] Receiving message: %s\n", message);
+static bool telegram_receive_message(ChannelInstance *channel, ChannelIncomingMessage *msg, char **response) {
+    if (!msg || !msg->content) return false;
+
+    printf("[Telegram] Receiving message: %s\n", msg->content);
+
+    // 处理消息并生成响应
+    if (response) {
+        *response = strdup(msg->content);
+    }
+
     return true;
 }
 
