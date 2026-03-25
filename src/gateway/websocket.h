@@ -3,6 +3,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <pthread.h>
 
 // WebSocket connection structure
 typedef struct {
@@ -22,6 +23,7 @@ typedef struct {
     int connection_count;
     int max_connections;
     char* api_key;                      // API 授权密钥
+    pthread_t thread;                   // Server thread
 } WebSocketServer;
 
 // Functions
