@@ -763,23 +763,10 @@ static bool weixin_stream_update_callback(ChannelInstance *channel, const char *
         return false;
     }
     
-    // 累积内容（不发送 WRITING 状态）
+    // 注意：content 参数已经是完整的累积内容，直接替换而不是追加
     if (content && strlen(content) > 0) {
-        char *new_accumulated = NULL;
-        if (ctx->accumulated) {
-            size_t new_len = strlen(ctx->accumulated) + strlen(content) + 1;
-            new_accumulated = (char *)malloc(new_len);
-            if (new_accumulated) {
-                snprintf(new_accumulated, new_len, "%s%s", ctx->accumulated, content);
-            }
-        } else {
-            new_accumulated = strdup(content);
-        }
-        
-        if (new_accumulated) {
-            free(ctx->accumulated);
-            ctx->accumulated = new_accumulated;
-        }
+        free(ctx->accumulated);
+        ctx->accumulated = strdup(content);
     }
     
     log_debug("[Weixin] Stream update: accumulated %zu chars", 
