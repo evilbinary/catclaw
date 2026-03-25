@@ -91,20 +91,24 @@ static AIProviderResponse* ollama_send_messages(AIProvider* self,
         return ai_provider_response_create(NULL, false, "Provider not initialized");
     }
     
-    // 构建 URL
+    // 构建 URL，判断使用 /api/chat 还是 /api/generate
+    bool use_chat_api = false;
     char url[512];
     if (self->config.base_url) {
-        // 检查 base_url 是否已经包含路径
-        if (strstr(self->config.base_url, "/api/generate") ||
-            strstr(self->config.base_url, "/api/chat")) {
+        if (strstr(self->config.base_url, "/api/chat")) {
+            use_chat_api = true;
+            strncpy(url, self->config.base_url, sizeof(url) - 1);
+        } else if (strstr(self->config.base_url, "/api/generate")) {
             strncpy(url, self->config.base_url, sizeof(url) - 1);
         } else {
-            // 默认使用 /api/generate
-            snprintf(url, sizeof(url), "%s/api/generate", self->config.base_url);
+            // 默认使用 /api/chat（支持 messages 格式）
+            use_chat_api = true;
+            snprintf(url, sizeof(url), "%s/api/chat", self->config.base_url);
         }
         url[sizeof(url) - 1] = '\0';
     } else {
-        strncpy(url, "http://localhost:11434/api/generate", sizeof(url) - 1);
+        use_chat_api = true;
+        strncpy(url, "http://localhost:11434/api/chat", sizeof(url) - 1);
         url[sizeof(url) - 1] = '\0';
     }
     log_debug("[Ollama] Request URL: %s", url);
@@ -114,10 +118,39 @@ static AIProviderResponse* ollama_send_messages(AIProvider* self,
     cJSON_AddStringToObject(root, "model", 
         self->config.model_name ? self->config.model_name : "llama3");
     
-    // 构建 prompt
-    char* prompt = build_ollama_prompt(messages, system_prompt);
-    cJSON_AddStringToObject(root, "prompt", prompt);
-    free(prompt);
+    if (use_chat_api) {
+        // /api/chat 格式: 使用 messages 数组
+        cJSON* msg_array = cJSON_CreateArray();
+        
+        if (system_prompt && strlen(system_prompt) > 0) {
+            cJSON* sys_msg = cJSON_CreateObject();
+            cJSON_AddStringToObject(sys_msg, "role", "system");
+            cJSON_AddStringToObject(sys_msg, "content", system_prompt);
+            cJSON_AddItemToArray(msg_array, sys_msg);
+        }
+        
+        for (int i = 0; i < messages->count; i++) {
+            Message* msg = messages->messages[i];
+            if (!msg->content) continue;
+            
+            cJSON* m = cJSON_CreateObject();
+            switch (msg->role) {
+                case ROLE_USER: cJSON_AddStringToObject(m, "role", "user"); break;
+                case ROLE_ASSISTANT: cJSON_AddStringToObject(m, "role", "assistant"); break;
+                case ROLE_SYSTEM: cJSON_AddStringToObject(m, "role", "system"); break;
+                case ROLE_TOOL: cJSON_AddStringToObject(m, "role", "tool"); break;
+            }
+            cJSON_AddStringToObject(m, "content", msg->content);
+            cJSON_AddItemToArray(msg_array, m);
+        }
+        
+        cJSON_AddItemToObject(root, "messages", msg_array);
+    } else {
+        // /api/generate 格式: 使用 prompt 字符串
+        char* prompt = build_ollama_prompt(messages, system_prompt);
+        cJSON_AddStringToObject(root, "prompt", prompt);
+        free(prompt);
+    }
     
     // Ollama 选项
     cJSON* options = cJSON_CreateObject();
@@ -147,7 +180,19 @@ static AIProviderResponse* ollama_send_messages(AIProvider* self,
         // 解析响应
         cJSON* resp_root = cJSON_Parse(http_resp->body);
         if (resp_root) {
-            cJSON* response_text = cJSON_GetObjectItem(resp_root, "response");
+            cJSON* response_text = NULL;
+            
+            // /api/generate 格式: {"response": "..."}
+            response_text = cJSON_GetObjectItem(resp_root, "response");
+            
+            // /api/chat 格式: {"message": {"role": "assistant", "content": "..."}}
+            if (!response_text || !cJSON_IsString(response_text)) {
+                cJSON* message = cJSON_GetObjectItem(resp_root, "message");
+                if (message && cJSON_IsObject(message)) {
+                    response_text = cJSON_GetObjectItem(message, "content");
+                }
+            }
+            
             if (response_text && cJSON_IsString(response_text)) {
                 response = ai_provider_response_create(response_text->valuestring, true, NULL);
             } else {
