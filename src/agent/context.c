@@ -65,6 +65,9 @@ static const char* DEFAULT_SYSTEM_PROMPT =
 "用户：帮我找一个处理天气的技能\n"
 "助手：(tool-calls (skill-match query \"weather\"))\n"
 "\n"
+"用户：获取 https://example.com 的内容\n"
+"助手：(tool-calls (web_fetch url \"https://example.com\"))\n"
+"\n"
 "工具执行后返回格式：[TOOL_RESULT] 结果 [/TOOL_RESULT]\n"
 "看到 [TOOL_RESULT] 后直接回复用户，不要再调用工具！\n";
 #include "common/log.h"

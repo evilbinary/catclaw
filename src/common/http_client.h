@@ -34,6 +34,21 @@ typedef struct {
     bool follow_redirects;     // 是否跟随重定向
 } HttpRequest;
 
+// HTTP Headers 结构 (用于动态构建请求头)
+typedef struct HttpHeaders HttpHeaders;
+
+// 创建新的 headers
+HttpHeaders* http_headers_new(void);
+
+// 添加 header
+void http_headers_add(HttpHeaders* headers, const char* key, const char* value);
+
+// 释放 headers
+void http_headers_free(HttpHeaders* headers);
+
+// 将 headers 转换为字符串数组 (内部使用)
+const char** http_headers_to_array(HttpHeaders* headers);
+
 // ==================== 基础接口 ====================
 
 // 初始化 HTTP 客户端 (程序启动时调用一次)
@@ -47,8 +62,14 @@ void http_client_cleanup(void);
 // HTTP GET 请求
 HttpResponse* http_get(const char* url);
 
+// HTTP GET 请求 (带自定义 headers)
+HttpResponse* http_get_with_headers(const char* url, HttpHeaders* headers);
+
 // HTTP POST 请求 (JSON)
 HttpResponse* http_post(const char* url, const char* json_body);
+
+// HTTP POST 请求 (JSON，带自定义 headers)
+HttpResponse* http_post_json_with_headers(const char* url, const char* json_body, HttpHeaders* headers);
 
 // HTTP POST 请求 (自定义 Content-Type)
 HttpResponse* http_post_data(const char* url, const char* body, 
