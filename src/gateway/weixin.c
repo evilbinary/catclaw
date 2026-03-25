@@ -384,6 +384,63 @@ void weixin_free_messages(WeixinMessage *messages, int count) {
     free(messages);
 }
 
+// 将base64图片保存到文件
+static bool save_base64_image(const char* base64_data, const char* filepath) {
+    if (!base64_data || !filepath) return false;
+    
+    static const int decode_table[256] = {
+        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,62,-1,-1,-1,63,
+        52,53,54,55,56,57,58,59,60,61,-1,-1,-1,-1,-1,-1,
+        -1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9,10,11,12,13,14,
+        15,16,17,18,19,20,21,22,23,24,25,-1,-1,-1,-1,-1,
+        -1,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,
+        41,42,43,44,45,46,47,48,49,50,51,-1,-1,-1,-1,-1,
+        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1
+    };
+    
+    size_t input_len = strlen(base64_data);
+    size_t output_len = input_len / 4 * 3;
+    
+    if (input_len > 0 && base64_data[input_len - 1] == '=') output_len--;
+    if (input_len > 1 && base64_data[input_len - 2] == '=') output_len--;
+    
+    unsigned char* decoded = (unsigned char*)malloc(output_len);
+    if (!decoded) return false;
+    
+    size_t i, j;
+    for (i = 0, j = 0; i < input_len; ) {
+        int a = (base64_data[i] == '=') ? 0 : decode_table[(unsigned char)base64_data[i]]; i++;
+        int b = (base64_data[i] == '=') ? 0 : decode_table[(unsigned char)base64_data[i]]; i++;
+        int c = (base64_data[i] == '=') ? 0 : decode_table[(unsigned char)base64_data[i]]; i++;
+        int d = (base64_data[i] == '=') ? 0 : decode_table[(unsigned char)base64_data[i]]; i++;
+        
+        decoded[j++] = (a << 2) | (b >> 4);
+        if (j < output_len) decoded[j++] = ((b & 0x0f) << 4) | (c >> 2);
+        if (j < output_len) decoded[j++] = ((c & 0x03) << 6) | d;
+    }
+    
+    FILE* fp = fopen(filepath, "wb");
+    if (!fp) {
+        free(decoded);
+        return false;
+    }
+    
+    fwrite(decoded, 1, output_len, fp);
+    fclose(fp);
+    free(decoded);
+    
+    return true;
+}
+
 // 长轮询工作线程
 #ifdef _WIN32
 static DWORD WINAPI weixin_polling_thread(LPVOID arg) {
@@ -393,12 +450,103 @@ static void* weixin_polling_thread(void *arg) {
     ChannelInstance *channel = (ChannelInstance *)arg;
     WeixinConfig *config = (WeixinConfig *)channel->user_data;
     
-    if (!config || !config->bot_token) {
+    if (!config) {
         log_error("[Weixin] Polling thread: not configured");
         return 0;
     }
     
     log_info("[Weixin] Polling thread started");
+    
+    // 如果未登录，等待扫码登录
+    if (!config->is_logged_in) {
+        log_info("[Weixin] Waiting for QR code scan login...");
+        
+        // 获取二维码
+        char* qrcode = NULL;
+        char* qrcode_img = NULL;
+        
+        if (weixin_get_qrcode(&qrcode, &qrcode_img)) {
+            log_info("[Weixin] QR code obtained: %s", qrcode);
+            
+            // 显示二维码
+            if (qrcode_img) {
+                if (strncmp(qrcode_img, "http", 4) == 0) {
+                    printf("\n========================================\n");
+                    printf("微信登录二维码链接:\n");
+                    printf("%s\n", qrcode_img);
+                    printf("\n请用微信扫描二维码登录...\n");
+                    printf("========================================\n\n");
+                    log_info("[Weixin] QR code URL: %s", qrcode_img);
+                } else {
+                    char qrcode_path[512];
+                    snprintf(qrcode_path, sizeof(qrcode_path), "weixin_qrcode.png");
+                    
+                    if (save_base64_image(qrcode_img, qrcode_path)) {
+                        printf("\n========================================\n");
+                        printf("微信登录二维码已保存到: %s\n", qrcode_path);
+                        printf("请用微信扫描二维码登录...\n");
+                        printf("========================================\n\n");
+                        log_info("[Weixin] QR code saved to: %s", qrcode_path);
+                    }
+                }
+            }
+            
+            printf("等待扫码中");
+            fflush(stdout);
+            
+            // 轮询等待扫码
+            char* bot_token = NULL;
+            char* base_url = NULL;
+            int max_wait = 120;
+            int waited = 0;
+            
+            while (waited < max_wait && channel->connected) {
+#ifdef _WIN32
+                Sleep(1000);
+#else
+                sleep(1);
+#endif
+                waited++;
+                
+                printf(".");
+                fflush(stdout);
+                
+                if (weixin_check_qrcode_status(qrcode, &bot_token, &base_url)) {
+                    printf("\n\n========================================\n");
+                    printf("微信登录成功！\n");
+                    printf("========================================\n\n");
+                    log_info("[Weixin] Login successful!");
+                    
+                    config->bot_token = bot_token;
+                    config->base_url = base_url ? base_url : strdup(WEIXIN_ILINK_BASE_URL);
+                    config->is_logged_in = true;
+                    channel->connected = true;
+                    
+                    printf("Bot Token: %s\n", bot_token);
+                    printf("请将此 token 保存到配置文件 ~/.catclaw/config.json 中:\n");
+                    printf("  \"api_key\": \"%s\"\n\n", bot_token);
+                    break;
+                }
+            }
+            
+            if (!config->is_logged_in) {
+                printf("\n\n[Weixin] Login timeout\n");
+                log_warn("[Weixin] Login timeout after %d seconds", max_wait);
+                free(qrcode);
+                free(qrcode_img);
+                return 0;
+            }
+            
+            free(qrcode);
+            free(qrcode_img);
+        } else {
+            log_error("[Weixin] Failed to get QR code");
+            return 0;
+        }
+    }
+    
+    // 开始消息轮询
+    log_info("[Weixin] Starting message polling...");
     
     while (channel->connected && config->is_logged_in) {
         WeixinMessage *messages = NULL;
@@ -407,48 +555,40 @@ static void* weixin_polling_thread(void *arg) {
         
         if (weixin_get_updates(config->bot_token, config->get_updates_buf,
                                &messages, &msg_count, &new_cursor)) {
-            // 更新游标
             if (new_cursor) {
                 free(config->get_updates_buf);
                 config->get_updates_buf = new_cursor;
             }
             
-            // 处理消息
             for (int i = 0; i < msg_count; i++) {
                 WeixinMessage *msg = &messages[i];
                 
-                // 只处理用户消息且有文本内容的
                 if (msg->message_type == 1 && msg->text) {
                     log_info("[Weixin] Message from %s: %s", 
                              msg->from_user_id, msg->text);
                     
-                    // 构建incoming message
                     ChannelIncomingMessage incoming = {
                         .content = msg->text,
                         .sender_id = msg->from_user_id,
-                        .chat_id = msg->from_user_id,  // 微信中chat_id就是sender_id
+                        .chat_id = msg->from_user_id,
                         .message_id = NULL,
-                        .extra = msg  // 保存完整消息以便获取context_token
+                        .extra = msg
                     };
                     
-                    // 使用统一消息处理入口
                     char* response = NULL;
                     bool handled = channel_handle_incoming_message(channel, &incoming, &response);
                     
                     if (handled && response) {
-                        // 发送响应（带上context_token保持对话关联）
                         weixin_send_message(config->bot_token, msg->from_user_id,
                                            response, msg->context_token);
                         free(response);
                     }
-                    // 如果没有handled或没有response，说明是发给agent的，不需要立即回复
                 }
             }
             
             weixin_free_messages(messages, msg_count);
         }
         
-        // 短暂休眠避免CPU占用过高
 #ifdef _WIN32
         Sleep(100);
 #else
@@ -483,66 +623,6 @@ static void weixin_channel_cleanup(ChannelInstance *channel) {
     log_info("[Weixin] Channel cleaned up");
 }
 
-// 将base64图片保存到文件
-static bool save_base64_image(const char* base64_data, const char* filepath) {
-    if (!base64_data || !filepath) return false;
-    
-    // base64解码表
-    static const int decode_table[256] = {
-        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
-        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
-        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,62,-1,-1,-1,63,
-        52,53,54,55,56,57,58,59,60,61,-1,-1,-1,-1,-1,-1,
-        -1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9,10,11,12,13,14,
-        15,16,17,18,19,20,21,22,23,24,25,-1,-1,-1,-1,-1,
-        -1,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,
-        41,42,43,44,45,46,47,48,49,50,51,-1,-1,-1,-1,-1,
-        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
-        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
-        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
-        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
-        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
-        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
-        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
-        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1
-    };
-    
-    size_t input_len = strlen(base64_data);
-    size_t output_len = input_len / 4 * 3;
-    
-    // 调整输出长度（去除填充）
-    if (input_len > 0 && base64_data[input_len - 1] == '=') output_len--;
-    if (input_len > 1 && base64_data[input_len - 2] == '=') output_len--;
-    
-    unsigned char* decoded = (unsigned char*)malloc(output_len);
-    if (!decoded) return false;
-    
-    size_t i, j;
-    for (i = 0, j = 0; i < input_len; ) {
-        int a = (base64_data[i] == '=') ? 0 : decode_table[(unsigned char)base64_data[i]]; i++;
-        int b = (base64_data[i] == '=') ? 0 : decode_table[(unsigned char)base64_data[i]]; i++;
-        int c = (base64_data[i] == '=') ? 0 : decode_table[(unsigned char)base64_data[i]]; i++;
-        int d = (base64_data[i] == '=') ? 0 : decode_table[(unsigned char)base64_data[i]]; i++;
-        
-        decoded[j++] = (a << 2) | (b >> 4);
-        if (j < output_len) decoded[j++] = ((b & 0x0f) << 4) | (c >> 2);
-        if (j < output_len) decoded[j++] = ((c & 0x03) << 6) | d;
-    }
-    
-    // 写入文件
-    FILE* fp = fopen(filepath, "wb");
-    if (!fp) {
-        free(decoded);
-        return false;
-    }
-    
-    fwrite(decoded, 1, output_len, fp);
-    fclose(fp);
-    free(decoded);
-    
-    return true;
-}
-
 // 初始化微信channel
 bool weixin_channel_init(ChannelInstance *channel, ChannelConfig *config) {
     if (!channel) {
@@ -552,7 +632,6 @@ bool weixin_channel_init(ChannelInstance *channel, ChannelConfig *config) {
     
     log_info("[Weixin] Initializing channel...");
     
-    // 分配配置结构
     WeixinConfig *weixin_config = (WeixinConfig *)calloc(1, sizeof(WeixinConfig));
     if (!weixin_config) {
         log_error("[Weixin] Memory allocation failed");
@@ -563,81 +642,26 @@ bool weixin_channel_init(ChannelInstance *channel, ChannelConfig *config) {
     if (config && config->api_key && strlen(config->api_key) > 0) {
         weixin_config->bot_token = strdup(config->api_key);
         weixin_config->is_logged_in = true;
+        channel->connected = true;
     }
     
     weixin_config->base_url = strdup(WEIXIN_ILINK_BASE_URL);
     weixin_config->stream_mode = config ? config->stream_mode : false;
     
-    // 设置channel数据
     channel->user_data = weixin_config;
     channel->send_message = weixin_channel_send_message;
     channel->cleanup = weixin_channel_cleanup;
     
-    if (weixin_config->is_logged_in) {
-        channel->connected = true;
-        
-        // 启动长轮询线程
+    // 启动轮询线程（线程内会处理登录流程）
 #ifdef _WIN32
-        HANDLE thread = CreateThread(NULL, 0, weixin_polling_thread, channel, 0, NULL);
-        if (thread) CloseHandle(thread);
+    HANDLE thread = CreateThread(NULL, 0, weixin_polling_thread, channel, 0, NULL);
+    if (thread) CloseHandle(thread);
 #else
-        pthread_t thread;
-        pthread_create(&thread, NULL, weixin_polling_thread, channel);
-        pthread_detach(thread);
+    pthread_t thread;
+    pthread_create(&thread, NULL, weixin_polling_thread, channel);
+    pthread_detach(thread);
 #endif
-        
-        log_info("[Weixin] Channel initialized and polling started");
-    } else {
-        // 未登录，获取二维码
-        log_info("[Weixin] Not logged in, fetching QR code...");
-        
-        char* qrcode = NULL;
-        char* qrcode_img = NULL;
-        
-        if (weixin_get_qrcode(&qrcode, &qrcode_img)) {
-            log_info("[Weixin] QR code obtained: %s", qrcode);
-            
-            // 显示二维码
-            if (qrcode_img) {
-                // 检查是否是URL（以http开头）
-                if (strncmp(qrcode_img, "http", 4) == 0) {
-                    // 是URL，直接显示
-                    printf("\n========================================\n");
-                    printf("微信登录二维码链接:\n");
-                    printf("%s\n", qrcode_img);
-                    printf("\n请复制链接到浏览器打开，或直接扫描二维码\n");
-                    printf("========================================\n\n");
-                    log_info("[Weixin] QR code URL: %s", qrcode_img);
-                } else {
-                    // 是base64数据，保存到文件
-                    char qrcode_path[512];
-                    snprintf(qrcode_path, sizeof(qrcode_path), "weixin_qrcode.png");
-                    
-                    if (save_base64_image(qrcode_img, qrcode_path)) {
-                        log_info("[Weixin] QR code saved to: %s", qrcode_path);
-                        printf("\n========================================\n");
-                        printf("微信登录二维码已保存到: %s\n", qrcode_path);
-                        printf("请用微信扫描二维码登录\n");
-                        printf("========================================\n\n");
-                    } else {
-                        log_error("[Weixin] Failed to save QR code image");
-                    }
-                }
-            }
-            
-            // 在控制台显示qrcode（备用）
-            printf("\n微信登录 qrcode: %s\n", qrcode ? qrcode : "N/A");
-            printf("\n");
-            
-            free(qrcode);
-            free(qrcode_img);
-        } else {
-            log_error("[Weixin] Failed to get QR code");
-        }
-        
-        log_info("[Weixin] Channel initialized (waiting for login)");
-        log_info("[Weixin] Use '/weixin login' after scanning QR code");
-    }
     
+    log_info("[Weixin] Channel initialized");
     return true;
 }
