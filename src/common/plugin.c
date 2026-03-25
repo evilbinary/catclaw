@@ -9,11 +9,20 @@
 #define PLUGIN_EXT ".dll"
 #define dlsym GetProcAddress
 #define dlclose FreeLibrary
-#define dlerror GetLastError
+
+// Helper function to get Windows error message
+static char *win32_dlerror(void) {
+    static char buf[256];
+    DWORD err = GetLastError();
+    FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+                   NULL, err, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+                   buf, sizeof(buf), NULL);
+    return buf;
+}
+#define dlerror win32_dlerror
 #else
 #include <dlfcn.h>
 #define PLUGIN_EXT ".so"
-#define RTLD_LAZY 1
 #endif
 
 // Plugin registry
