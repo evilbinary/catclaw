@@ -82,9 +82,10 @@ HttpResponse* http_request(const HttpRequest* req);
 
 // 流式请求 (SSE/流式 API)
 // 回调函数会在接收到数据时被调用
-bool http_request_stream(const HttpRequest* req, 
-                          HttpStreamCallback callback, 
-                          void* user_data);
+// 返回 HttpResponse*，调用方需要用 http_response_free 释放
+HttpResponse* http_request_stream(const HttpRequest* req, 
+                                  HttpStreamCallback callback, 
+                                  void* user_data);
 
 // ==================== 响应处理 ====================
 

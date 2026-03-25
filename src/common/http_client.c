@@ -391,16 +391,10 @@ HttpResponse* http_request(const HttpRequest* req) {
     return do_request(req, false, NULL, NULL);
 }
 
-bool http_request_stream(const HttpRequest* req, 
+HttpResponse* http_request_stream(const HttpRequest* req, 
                           HttpStreamCallback callback, 
                           void* user_data) {
-    HttpResponse* resp = do_request(req, true, callback, user_data);
-    if (resp) {
-        bool success = resp->success;
-        http_response_free(resp);
-        return success;
-    }
-    return false;
+    return do_request(req, true, callback, user_data);
 }
 
 // ==================== 响应处理 ====================
@@ -609,10 +603,10 @@ HttpResponse* http_request(const HttpRequest* req) {
     return NULL;
 }
 
-bool http_request_stream(const HttpRequest* req, HttpStreamCallback callback, void* user_data) {
+HttpResponse* http_request_stream(const HttpRequest* req, HttpStreamCallback callback, void* user_data) {
     (void)req; (void)callback; (void)user_data;
     log_error("HTTP client not available: curl not compiled in");
-    return false;
+    return NULL;
 }
 
 void http_response_free(HttpResponse* resp) {
