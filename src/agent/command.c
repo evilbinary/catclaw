@@ -15,6 +15,7 @@
 #include "gateway/gateway.h"
 #include "gateway/channels.h"
 #include "tool/skill.h"
+#include "model/ai_model.h"
 
 // 创建命令结果
 static CommandResult* result_create(bool is_cmd, bool handled, CommandAction action, const char* response) {
@@ -173,22 +174,127 @@ static char* cmd_time(void) {
 
 // 处理 model 命令
 static char* cmd_model(const char* args) {
-    size_t size = 1024;
+    size_t size = 4096;
     char* buf = (char*)malloc(size);
     if (!buf) return NULL;
     
+    // 列出模型
     if (!args || strlen(args) == 0 || strcmp(args, "list") == 0) {
-        // 列出所有模型
-        int offset = snprintf(buf, size, "🤖 当前模型: %s\n",
-            agent_get_model() ? agent_get_model() : "未设置");
-        offset += snprintf(buf + offset, size - offset, 
-            "使用 /model <name> 切换模型\n");
+        int offset = snprintf(buf, size,
+            "🤖 可用模型列表:\n"
+            "─────────────────────────────────────────────────\n");
+        
+        // 获取模型列表
+        extern Config g_config;
+        int count = g_config.models.count;
+        
+        if (count == 0) {
+            offset += snprintf(buf + offset, size - offset,
+                "  暂无可用模型，请在配置文件中添加模型\n");
+        } else {
+            for (int i = 0; i < count && offset < (int)(size - 256); i++) {
+                ModelConfig *model = &g_config.models.models[i];
+                
+                // 当前模型和默认模型标记
+                const char* current_mark = (i == g_config.models.current_index) ? " ← 当前" : "";
+                const char* default_mark = "";
+                if (g_config.models.default_model && model->name &&
+                    strcmp(model->name, g_config.models.default_model) == 0) {
+                    default_mark = " [默认]";
+                }
+                
+                offset += snprintf(buf + offset, size - offset,
+                    "  %d. %s%s%s\n"
+                    "     Provider: %s | Model: %s\n\n",
+                    i,
+                    model->name ? model->name : "(未命名)",
+                    default_mark,
+                    current_mark,
+                    model->provider ? model->provider : "default",
+                    model->model_name ? model->model_name : "default");
+            }
+            
+            offset += snprintf(buf + offset, size - offset,
+                "─────────────────────────────────────────────────\n"
+                "使用 /model <序号|名称> 切换模型\n"
+                "示例: /model 0 或 /model gpt-4");
+        }
     } else {
         // 切换模型
-        if (agent_set_model(args)) {
-            snprintf(buf, size, "✓ 已切换到模型: %s", args);
+        extern Config g_config;
+        
+        // 尝试解析为数字序号
+        bool is_index = true;
+        for (const char* p = args; *p; p++) {
+            if (*p < '0' || *p > '9') {
+                is_index = false;
+                break;
+            }
+        }
+        
+        bool success = false;
+        const char* switched_name = NULL;
+        
+        if (is_index) {
+            // 通过序号切换
+            int index = atoi(args);
+            if (index >= 0 && index < g_config.models.count) {
+                success = config_switch_model_by_index(index);
+                if (success) {
+                    switched_name = g_config.models.models[index].name;
+                    
+                    // 更新 AI model config
+                    AIModelConfig model_config = {0};
+                    model_config.provider = g_config.model.provider;
+                    model_config.model_name = g_config.model.model_name;
+                    model_config.api_key = g_config.model.api_key;
+                    model_config.base_url = g_config.model.base_url;
+                    model_config.temperature = g_config.model.temperature > 0 ? g_config.model.temperature : 0.7f;
+                    model_config.max_tokens = g_config.model.max_tokens > 0 ? g_config.model.max_tokens : 1024;
+                    model_config.stream = g_config.model.stream;
+                    ai_model_set_config(&model_config);
+                    
+                    // 更新 agent model
+                    if (g_config.model.name) {
+                        agent_set_model(g_config.model.name);
+                    }
+                }
+            }
         } else {
-            snprintf(buf, size, "✗ 切换模型失败: %s", args);
+            // 通过名称切换
+            success = config_switch_model(args);
+            if (success) {
+                switched_name = args;
+                
+                // 更新 AI model config
+                AIModelConfig model_config = {0};
+                model_config.provider = g_config.model.provider;
+                model_config.model_name = g_config.model.model_name;
+                model_config.api_key = g_config.model.api_key;
+                model_config.base_url = g_config.model.base_url;
+                model_config.temperature = g_config.model.temperature > 0 ? g_config.model.temperature : 0.7f;
+                model_config.max_tokens = g_config.model.max_tokens > 0 ? g_config.model.max_tokens : 1024;
+                model_config.stream = g_config.model.stream;
+                ai_model_set_config(&model_config);
+                
+                if (g_config.model.name) {
+                    agent_set_model(g_config.model.name);
+                }
+            }
+        }
+        
+        if (success) {
+            snprintf(buf, size,
+                "✓ 已切换到模型: %s\n"
+                "  Provider: %s\n"
+                "  Model: %s",
+                switched_name ? switched_name : args,
+                g_config.model.provider ? g_config.model.provider : "default",
+                g_config.model.model_name ? g_config.model.model_name : "default");
+        } else {
+            snprintf(buf, size,
+                "✗ 切换模型失败: %s\n"
+                "使用 /model 查看可用模型列表", args);
         }
     }
     

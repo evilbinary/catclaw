@@ -879,6 +879,9 @@ bool config_load(void) {
             cJSON_Delete(root);
         } else {
             fprintf(stderr, "Error parsing config.json: %s\n", cJSON_GetErrorPtr());
+            fprintf(stderr, "Please fix the JSON syntax in ~/.catclaw/config.json\n");
+            free(config_content);
+            return false;
         }
         free(config_content);
     } else {

@@ -233,12 +233,17 @@ bool weixin_get_updates(const char *bot_token, const char *cursor,
         if (resp) http_response_free(resp);
         return false;
     }
-    
     cJSON *json = cJSON_Parse(resp->body);
     http_response_free(resp);
     
     if (!json) {
         log_error("[Weixin] Failed to parse updates response");
+        return false;
+    }
+    int code=cJSON_GetObjectItem(json, "errcode")->valueint;
+    if(code<0){
+        log_error("[Weixin] Get updates response: %s", resp->body);
+        free(json);
         return false;
     }
     
@@ -585,8 +590,7 @@ static void* weixin_polling_thread(void *arg) {
     while (channel->connected && config->is_logged_in) {
         WeixinMessage *messages = NULL;
         int msg_count = 0;
-        char *new_cursor = NULL;
-        
+        char *new_cursor = NULL;        
         if (weixin_get_updates(config->bot_token, config->get_updates_buf,
                                &messages, &msg_count, &new_cursor)) {
             if (new_cursor) {
@@ -635,7 +639,7 @@ static void* weixin_polling_thread(void *arg) {
 #ifdef _WIN32
         Sleep(100);
 #else
-        usleep(100000);
+        usleep(200000);
 #endif
     }
     
