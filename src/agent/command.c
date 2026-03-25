@@ -325,50 +325,74 @@ static char* cmd_gateway(const char* args) {
 
 // 处理 channel 命令
 static char* cmd_channel(const char* args) {
-    size_t size = 512;
+    size_t size = 2048;
     char* buf = (char*)malloc(size);
     if (!buf) return NULL;
     
     if (!args || strlen(args) == 0 || strcmp(args, "list") == 0) {
-        snprintf(buf, size, "📺 频道列表:\n使用 /status 查看详细状态");
+        char* status = channels_status_string();
+        if (status) {
+            snprintf(buf, size, "📺 频道列表:\n%s\n"
+                "  /channel enable <id>   - 启用\n"
+                "  /channel disable <id>  - 禁用\n"
+                "  /channel connect <id>  - 连接\n"
+                "  /channel disconnect <id> - 断开", status);
+            free(status);
+        } else {
+            snprintf(buf, size, "📺 暂无频道");
+        }
     } else if (strncmp(args, "enable ", 7) == 0) {
         const char* id = args + 7;
+        while (*id == ' ') id++;
         ChannelInstance* ch = channel_find(id);
         if (ch) {
             channel_enable(ch);
-            snprintf(buf, size, "✓ 已启用频道: %s", id);
+            snprintf(buf, size, "✓ 已启用频道: %s (%s)", id, ch->name);
         } else {
             snprintf(buf, size, "✗ 未找到频道: %s", id);
         }
     } else if (strncmp(args, "disable ", 8) == 0) {
         const char* id = args + 8;
+        while (*id == ' ') id++;
         ChannelInstance* ch = channel_find(id);
         if (ch) {
             channel_disable(ch);
-            snprintf(buf, size, "✓ 已禁用频道: %s", id);
+            snprintf(buf, size, "✓ 已禁用频道: %s (%s)", id, ch->name);
         } else {
             snprintf(buf, size, "✗ 未找到频道: %s", id);
         }
     } else if (strncmp(args, "connect ", 8) == 0) {
         const char* id = args + 8;
+        while (*id == ' ') id++;
         ChannelInstance* ch = channel_find(id);
         if (ch) {
-            channel_connect(ch);
-            snprintf(buf, size, "✓ 已连接频道: %s", id);
+            if (ch->enabled) {
+                bool ok = channel_connect(ch);
+                snprintf(buf, size, "%s 频道 %s (%s)",
+                    ok ? "✓ 已连接" : "✗ 连接失败", id, ch->name);
+            } else {
+                snprintf(buf, size, "✗ 频道 %s 未启用，请先 /channel enable %s", id, id);
+            }
         } else {
             snprintf(buf, size, "✗ 未找到频道: %s", id);
         }
     } else if (strncmp(args, "disconnect ", 11) == 0) {
         const char* id = args + 11;
+        while (*id == ' ') id++;
         ChannelInstance* ch = channel_find(id);
         if (ch) {
-            channel_disconnect(ch);
-            snprintf(buf, size, "✓ 已断开频道: %s", id);
+            if (ch->connected) {
+                channel_disconnect(ch);
+                snprintf(buf, size, "✓ 已断开频道: %s (%s)", id, ch->name);
+            } else {
+                snprintf(buf, size, "✗ 频道 %s 未连接", id);
+            }
         } else {
             snprintf(buf, size, "✗ 未找到频道: %s", id);
         }
     } else {
-        snprintf(buf, size, "未知子命令: channel %s", args);
+        snprintf(buf, size, "未知子命令: channel %s\n"
+            "可用: list, enable <id>, disable <id>, connect <id>, disconnect <id>", args);
     }
     
     return buf;
