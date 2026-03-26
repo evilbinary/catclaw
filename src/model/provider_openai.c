@@ -393,7 +393,17 @@ static AIProviderResponse* openai_parse_non_stream_response(HttpResponse* http_r
             log_error("[OpenAI] API error: %s", err_str);
             response = ai_provider_response_create(NULL, false, err_str);
         } else {
-            response = ai_provider_response_create(NULL, false, "Failed to parse response");
+            cJSON* code = cJSON_GetObjectItem(root, "code");
+            cJSON* msg = cJSON_GetObjectItem(root, "msg");
+            if (code && msg && cJSON_IsString(msg)) {
+                char err_buf[512];
+                snprintf(err_buf, sizeof(err_buf), "API Error (code %d): %s", 
+                         code->valueint, msg->valuestring);
+                log_error("[OpenAI] %s", err_buf);
+                response = ai_provider_response_create(NULL, false, err_buf);
+            } else {
+                response = ai_provider_response_create(NULL, false, "Failed to parse response");
+            }
         }
     }
     
@@ -469,10 +479,10 @@ static AIProviderResponse* openai_send_messages(AIProvider* self,
             if (stream_resp->success) {
                 response = openai_parse_stream_response(&stream_ctx);
             } else {
-                char err_msg[512];
+                char err_msg[1024];
                 snprintf(err_msg, sizeof(err_msg), "Stream request failed: HTTP %d",
                          stream_resp->status_code);
-                if (stream_resp->body) {
+                if (stream_resp->body && strlen(stream_resp->body) > 0) {
                     log_error("[OpenAI] Response body: %s", stream_resp->body);
                     cJSON* err_root = cJSON_Parse(stream_resp->body);
                     if (err_root) {
@@ -480,11 +490,21 @@ static AIProviderResponse* openai_send_messages(AIProvider* self,
                         if (err_obj && cJSON_IsObject(err_obj)) {
                             cJSON* msg = cJSON_GetObjectItem(err_obj, "message");
                             if (msg && cJSON_IsString(msg)) {
-                                snprintf(err_msg, sizeof(err_msg), "Stream request failed: %s",
-                                         msg->valuestring);
+                                snprintf(err_msg, sizeof(err_msg), "API Error: %s", msg->valuestring);
+                            }
+                        } else {
+                            cJSON* code = cJSON_GetObjectItem(err_root, "code");
+                            cJSON* msg = cJSON_GetObjectItem(err_root, "msg");
+                            if (code && msg && cJSON_IsString(msg)) {
+                                snprintf(err_msg, sizeof(err_msg), "API Error (code %d): %s", 
+                                         code->valueint, msg->valuestring);
                             }
                         }
                         cJSON_Delete(err_root);
+                    } else {
+                        if (strlen(stream_resp->body) < sizeof(err_msg) - 20) {
+                            snprintf(err_msg, sizeof(err_msg), "API Error: %s", stream_resp->body);
+                        }
                     }
                 }
                 log_error("[OpenAI] %s", err_msg);
@@ -509,7 +529,39 @@ static AIProviderResponse* openai_send_messages(AIProvider* self,
             http_resp && http_resp->body ? http_resp->body : "(null)");
 
         if (http_resp) {
-            response = openai_parse_non_stream_response(http_resp);
+            if (http_resp->success) {
+                response = openai_parse_non_stream_response(http_resp);
+            } else {
+                char err_msg[1024];
+                snprintf(err_msg, sizeof(err_msg), "Request failed: HTTP %d", http_resp->status_code);
+                if (http_resp->body && strlen(http_resp->body) > 0) {
+                    log_error("[OpenAI] Response body: %s", http_resp->body);
+                    cJSON* err_root = cJSON_Parse(http_resp->body);
+                    if (err_root) {
+                        cJSON* err_obj = cJSON_GetObjectItem(err_root, "error");
+                        if (err_obj && cJSON_IsObject(err_obj)) {
+                            cJSON* msg = cJSON_GetObjectItem(err_obj, "message");
+                            if (msg && cJSON_IsString(msg)) {
+                                snprintf(err_msg, sizeof(err_msg), "API Error: %s", msg->valuestring);
+                            }
+                        } else {
+                            cJSON* code = cJSON_GetObjectItem(err_root, "code");
+                            cJSON* msg = cJSON_GetObjectItem(err_root, "msg");
+                            if (code && msg && cJSON_IsString(msg)) {
+                                snprintf(err_msg, sizeof(err_msg), "API Error (code %d): %s", 
+                                         code->valueint, msg->valuestring);
+                            }
+                        }
+                        cJSON_Delete(err_root);
+                    } else {
+                        if (strlen(http_resp->body) < sizeof(err_msg) - 20) {
+                            snprintf(err_msg, sizeof(err_msg), "API Error: %s", http_resp->body);
+                        }
+                    }
+                }
+                log_error("[OpenAI] %s", err_msg);
+                response = ai_provider_response_create(NULL, false, err_msg);
+            }
             http_response_free(http_resp);
         } else {
             response = ai_provider_response_create(NULL, false, "HTTP request failed");

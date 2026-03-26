@@ -27,6 +27,7 @@ typedef struct {
 typedef struct {
     HttpStreamCallback callback;
     void* user_data;
+    ResponseBuffer* body_buf;
 } StreamContext;
 
 // ==================== 内部辅助函数 ====================
@@ -57,9 +58,25 @@ static size_t stream_callback(void* contents, size_t size, size_t nmemb, void* u
     size_t total_size = size * nmemb;
     StreamContext* ctx = (StreamContext*)userp;
     
+    if (ctx->body_buf) {
+        ResponseBuffer* buf = ctx->body_buf;
+        size_t new_size = buf->size + total_size + 1;
+        if (new_size > buf->capacity) {
+            size_t new_capacity = buf->capacity * 2;
+            if (new_capacity < new_size) new_capacity = new_size;
+            char* new_data = (char*)realloc(buf->data, new_capacity);
+            if (!new_data) return 0;
+            buf->data = new_data;
+            buf->capacity = new_capacity;
+        }
+        memcpy(buf->data + buf->size, contents, total_size);
+        buf->size += total_size;
+        buf->data[buf->size] = '\0';
+    }
+    
     if (ctx->callback) {
         if (!ctx->callback((const char*)contents, total_size, ctx->user_data)) {
-            return 0;  // 用户中断
+            return 0;
         }
     }
     return total_size;
@@ -253,7 +270,7 @@ static HttpResponse* do_request(const HttpRequest* req, bool stream,
     
     // 设置回调
     if (stream && callback) {
-        StreamContext ctx = {callback, user_data};
+        StreamContext ctx = {callback, user_data, &body_buf};
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, stream_callback);
         curl_easy_setopt(curl, CURLOPT_WRITEDATA, &ctx);
     } else {

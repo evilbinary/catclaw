@@ -882,7 +882,7 @@ char* feishu_stream_create(const char *channel_id, const char *receive_id, const
         return NULL;
     }
     
-    log_info("[Feishu] Stream create response: status=%d, body=%s", 
+    log_debug("[Feishu] Stream create response: status=%d, body=%s", 
              resp->status_code, resp->body ? resp->body : "(null)");
     
     // 解析响应获取 message_id
