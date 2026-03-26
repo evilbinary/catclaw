@@ -515,12 +515,12 @@ static bool feishu_ws_on_message(WsClient *ws, const char *data, size_t len, voi
         }
         
         // 处理事件
-        log_info("[FeishuWS] Event payload: %.*s", (int)frame.payload_len, frame.payload);
+        log_debug("[FeishuWS] Event payload: %.*s", (int)frame.payload_len, frame.payload);
 
         // 解析事件并使用统一消息处理
         FeishuMessage *msg = feishu_parse_message((const char *)frame.payload);
         if (msg && msg->content) {
-            log_info("[FeishuWS] Message from %s: %s",
+            log_debug("[FeishuWS] Message from %s: %s",
                      msg->sender_id ? msg->sender_id : "unknown",
                      msg->content);
 
