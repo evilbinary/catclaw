@@ -252,10 +252,13 @@ static char* openai_build_url(const AIProvider* self) {
         return url;
     }
     
-    // 检查是否以 /v1 结尾 (用 strncmp 避免原始字符串尾部 '/' 干扰)
+    // 检查是否以 /v1 或 /v3 结尾 (用 strncmp 避免原始字符串尾部 '/' 干扰)
     const char* v1_suffix = "v1";
+    const char* v3_suffix = "v3";
     size_t v1_len = strlen(v1_suffix);
-    if (base_len >= v1_len && strncmp(base + base_len - v1_len, v1_suffix, v1_len) == 0) {
+    size_t v3_len = strlen(v3_suffix);
+    if ((base_len >= v1_len && strncmp(base + base_len - v1_len, v1_suffix, v1_len) == 0) ||
+        (base_len >= v3_len && strncmp(base + base_len - v3_len, v3_suffix, v3_len) == 0)) {
         char* url = (char*)malloc(base_len + 1 + path_len + 1);
         snprintf(url, base_len + 1 + path_len + 1, "%.*s/%s", (int)base_len, base, api_path);
         return url;
@@ -470,7 +473,7 @@ static AIProviderResponse* openai_send_messages(AIProvider* self,
                 snprintf(err_msg, sizeof(err_msg), "Stream request failed: HTTP %d",
                          stream_resp->status_code);
                 if (stream_resp->body) {
-                    // 尝试从响应体提取 API 错误信息
+                    log_error("[OpenAI] Response body: %s", stream_resp->body);
                     cJSON* err_root = cJSON_Parse(stream_resp->body);
                     if (err_root) {
                         cJSON* err_obj = cJSON_GetObjectItem(err_root, "error");
