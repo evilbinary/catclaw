@@ -124,6 +124,14 @@ char *skill_preview(const char *name, int max_lines);
 // Get skill prompt template (for markdown skills)
 const char *skill_get_prompt_template(const char *name);
 
+// Watcher functions (auto-reload skills on file changes)
+bool skill_watcher_start(void);
+void skill_watcher_stop(void);
+bool skill_watcher_is_running(void);
+
+// Reload all skills from watched directories
+bool skill_reload_all(void);
+
 // Utility functions
 const char *skill_source_name(SkillSource source);
 const char *skill_type_name(SkillType type);

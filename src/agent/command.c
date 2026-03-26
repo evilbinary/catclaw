@@ -73,6 +73,7 @@ static char* cmd_help(void) {
         "  /skill execute <name> [params] - 执行技能\n"
         "  /skill enable <name> - 启用技能\n"
         "  /skill disable <name> - 禁用技能\n"
+        "  /skill reload       - 重新加载所有技能\n"
         "\n"
         "插件相关:\n"
         "  /plugin list       - 列出插件\n"
@@ -630,6 +631,12 @@ static char* cmd_skill(const char* args) {
             snprintf(buf, size, "✓ 已禁用技能: %s", name);
         } else {
             snprintf(buf, size, "✗ 禁用失败: %s", name);
+        }
+    } else if (strcmp(args, "reload") == 0) {
+        if (skill_reload_all()) {
+            snprintf(buf, size, "✓ 技能已重新加载");
+        } else {
+            snprintf(buf, size, "✗ 技能重载失败");
         }
     } else {
         snprintf(buf, size, "未知子命令: skill %s", args);

@@ -432,7 +432,7 @@ static bool feishu_stream_start_callback(ChannelInstance *channel, const char *i
     ctx->active = true;
     channel->stream_ctx = ctx;
     
-    log_info("[Feishu] Stream started: message_id=%s", message_id);
+    log_debug("[Feishu] Stream started: message_id=%s", message_id);
     
     // 发送初始内容
     if (initial_content && strlen(initial_content) > 0) {
@@ -895,7 +895,7 @@ char* feishu_stream_create(const char *channel_id, const char *receive_id, const
                 cJSON *msg_id = cJSON_GetObjectItem(data, "message_id");
                 if (msg_id && cJSON_IsString(msg_id)) {
                     message_id = strdup(msg_id->valuestring);
-                    log_info("[Feishu] Stream message created: %s", message_id);
+                    log_debug("[Feishu] Stream message created: %s", message_id);
                 }
             }
             cJSON_Delete(root);
