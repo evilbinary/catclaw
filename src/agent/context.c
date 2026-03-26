@@ -923,6 +923,7 @@ void* agent_node_worker_thread(void* arg) {
                             if (g_config.debug) {
                                 log_debug("Tool result: %s\n", result ? result : "(null)");
                             }
+                            printf("\n[Tool %s]: %s\n", call->name, result ? result : "(null)");
                             Message* tool_msg = message_create_tool(call->id, call->name, result ? result : "Error executing tool");
                             session_add_message(session, tool_msg);
                             
