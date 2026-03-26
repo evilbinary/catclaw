@@ -109,3 +109,61 @@ char* http_strcasestr(const char* haystack, const char* needle) {
     }
     return NULL;
 }
+
+static bool is_valid_utf8_cont(unsigned char c) {
+    return (c & 0xC0) == 0x80;
+}
+
+char* sanitize_utf8(const char* input) {
+    if (!input) return NULL;
+    
+    size_t len = strlen(input);
+    char* output = (char*)malloc(len + 1);
+    if (!output) return NULL;
+    
+    size_t i = 0, j = 0;
+    while (i < len) {
+        unsigned char c = (unsigned char)input[i];
+        
+        if ((c & 0x80) == 0) {
+            output[j++] = input[i++];
+        } else if ((c & 0xE0) == 0xC0) {
+            if (i + 1 < len && is_valid_utf8_cont((unsigned char)input[i + 1])) {
+                output[j++] = input[i++];
+                output[j++] = input[i++];
+            } else {
+                output[j++] = '?';
+                i++;
+            }
+        } else if ((c & 0xF0) == 0xE0) {
+            if (i + 2 < len && 
+                is_valid_utf8_cont((unsigned char)input[i + 1]) &&
+                is_valid_utf8_cont((unsigned char)input[i + 2])) {
+                output[j++] = input[i++];
+                output[j++] = input[i++];
+                output[j++] = input[i++];
+            } else {
+                output[j++] = '?';
+                i++;
+            }
+        } else if ((c & 0xF8) == 0xF0) {
+            if (i + 3 < len &&
+                is_valid_utf8_cont((unsigned char)input[i + 1]) &&
+                is_valid_utf8_cont((unsigned char)input[i + 2]) &&
+                is_valid_utf8_cont((unsigned char)input[i + 3])) {
+                output[j++] = input[i++];
+                output[j++] = input[i++];
+                output[j++] = input[i++];
+                output[j++] = input[i++];
+            } else {
+                output[j++] = '?';
+                i++;
+            }
+        } else {
+            output[j++] = '?';
+            i++;
+        }
+    }
+    output[j] = '\0';
+    return output;
+}
