@@ -1036,8 +1036,9 @@ int tool_skill_search(ToolArgs* args, char** result, int* result_len) {
         if (limit > 100) limit = 100;
     }
     
-    // If no query, list all skills
-    if (!query || strlen(query) == 0) {
+    // If no query, or query is "all"/"*", list all skills
+    if (!query || strlen(query) == 0 ||
+        strcasecmp(query, "all") == 0 || strcmp(query, "*") == 0) {
         SkillRegistry* registry = skill_get_registry();
         if (!registry || registry->count == 0) {
             *result = strdup("No skills loaded");
