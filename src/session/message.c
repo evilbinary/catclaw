@@ -4,7 +4,6 @@
 #include <time.h>
 
 #include "common/log.h"
-#include "common/utils.h"
 #include "message.h"
 #include "common/cJSON.h"
 
@@ -16,12 +15,7 @@ Message* message_create(MessageRole role, const char* content) {
     }
     
     message->role = role;
-    if (content) {
-        char* clean = sanitize_utf8(content);
-        message->content = clean ? clean : strdup(content);
-    } else {
-        message->content = NULL;
-    }
+    message->content = content ? strdup(content) : NULL;
     message->tool_name = NULL;
     message->tool_call_id = NULL;
     message->timestamp = time(NULL) * 1000; // Milliseconds
@@ -37,24 +31,9 @@ Message* message_create_tool(const char* tool_call_id, const char* tool_name, co
     }
     
     message->role = ROLE_TOOL;
-    if (content) {
-        char* clean = sanitize_utf8(content);
-        message->content = clean ? clean : strdup(content);
-    } else {
-        message->content = NULL;
-    }
-    if (tool_name) {
-        char* clean = sanitize_utf8(tool_name);
-        message->tool_name = clean ? clean : strdup(tool_name);
-    } else {
-        message->tool_name = NULL;
-    }
-    if (tool_call_id) {
-        char* clean = sanitize_utf8(tool_call_id);
-        message->tool_call_id = clean ? clean : strdup(tool_call_id);
-    } else {
-        message->tool_call_id = NULL;
-    }
+    message->content = content ? strdup(content) : NULL;
+    message->tool_name = tool_name ? strdup(tool_name) : NULL;
+    message->tool_call_id = tool_call_id ? strdup(tool_call_id) : NULL;
     message->timestamp = time(NULL) * 1000; // Milliseconds
     
     return message;

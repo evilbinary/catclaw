@@ -56,8 +56,8 @@ static void log_internal(LogLevel level, const char *format, va_list args) {
     char time_str[20];
     strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", tm_info);
     
-    // Format log message
-    char buffer[1024];
+    // Format log message (use larger buffer for big payloads)
+    char buffer[16384];
     vsnprintf(buffer, sizeof(buffer), format, args);
     
     // Print to console
