@@ -265,6 +265,7 @@ static SrvResponse* handle_model_switch(const SrvRequest* request, void* user_da
         model_config.temperature = g_config.model.temperature;
         model_config.max_tokens = g_config.model.max_tokens;
         model_config.stream = g_config.model.stream;
+        model_config.reasoning_effort = g_config.model.reasoning_effort;
         
         if (ai_model_set_config(&model_config)) {
             if (g_agent.model) free(g_agent.model);

@@ -211,6 +211,11 @@ static void parse_single_model(cJSON *model_json, int index) {
         model->stream = cJSON_IsTrue(stream);
     }
     
+    cJSON *reasoning_effort = cJSON_GetObjectItem(model_json, "reasoning_effort");
+    if (reasoning_effort && cJSON_IsString(reasoning_effort) && strlen(reasoning_effort->valuestring) > 0) {
+        model->reasoning_effort = strdup(reasoning_effort->valuestring);
+    }
+    
     g_config.models.count++;
 }
 
@@ -296,6 +301,7 @@ static void sync_current_model(void) {
     free(dst->model_name);
     free(dst->base_url);
     free(dst->api_key);
+    free(dst->reasoning_effort);
     
     // Copy new values
     dst->name = src->name ? strdup(src->name) : NULL;
@@ -308,6 +314,7 @@ static void sync_current_model(void) {
     dst->temperature = src->temperature;
     dst->max_tokens = src->max_tokens;
     dst->stream = src->stream;
+    dst->reasoning_effort = src->reasoning_effort ? strdup(src->reasoning_effort) : NULL;
 }
 
 // Legacy function for backward compatibility
@@ -1030,6 +1037,7 @@ void config_cleanup(void) {
             free(g_config.models.models[i].model_name);
             free(g_config.models.models[i].base_url);
             free(g_config.models.models[i].api_key);
+            free(g_config.models.models[i].reasoning_effort);
         }
         free(g_config.models.models);
     }
@@ -1043,6 +1051,7 @@ void config_cleanup(void) {
     free(g_config.model.model_name);
     free(g_config.model.base_url);
     free(g_config.model.api_key);
+    free(g_config.model.reasoning_effort);
     
     // Cleanup workspace config
     free(g_config.workspace.path);

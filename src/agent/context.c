@@ -950,6 +950,9 @@ void* agent_node_worker_thread(void* arg) {
                         free(tool_call_list->calls);
                         free(tool_call_list);
                         
+                        // End any active stream (tool calls may have partially started streaming)
+                        end_stream_message(&stream_state);
+                        
                         // Continue loop to get model's response to tool results
                         // (context already updated with assistant_msg and tool results above)
                         ai_model_free_response(response);
@@ -969,6 +972,11 @@ void* agent_node_worker_thread(void* arg) {
                         // 只有非流式模式才发送完整消息
                         // 流式模式下消息已经在回调中发送
                         if (!used_stream) {
+                            log_debug("[Agent] Sending non-stream response (len=%zu, first_bytes=%02x%02x%02x)",
+                                      response->content ? strlen(response->content) : 0,
+                                      response->content ? (unsigned char)response->content[0] : 0,
+                                      response->content && response->content[0] ? (unsigned char)response->content[1] : 0,
+                                      response->content && response->content[0] && response->content[1] ? (unsigned char)response->content[2] : 0);
                             channel_send_message_to_all(response->content);
                         }
 
