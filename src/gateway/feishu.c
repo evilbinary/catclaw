@@ -472,7 +472,7 @@ static bool feishu_stream_end_callback(ChannelInstance *channel) {
     
     if (ctx->active && ctx->message_id) {
         success = feishu_stream_finish(channel->id, ctx->message_id);
-        log_info("[Feishu] Stream ended: message_id=%s", ctx->message_id);
+        log_debug("[Feishu] Stream ended: message_id=%s", ctx->message_id);
     }
     
     // 清理上下文
@@ -1077,7 +1077,7 @@ bool feishu_stream_finish(const char *channel_id, const char *message_id) {
         return false;
     }
     
-    log_info("[Feishu] Stream finished: message_id=%s, status=%d", message_id, resp->status_code);
+    log_debug("[Feishu] Stream finished: message_id=%s, status=%d", message_id, resp->status_code);
     
     bool success = resp->success && resp->status_code == 200;
     if (!success) {
