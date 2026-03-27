@@ -84,6 +84,9 @@ run: $(TARGET)
 gdb: $(TARGET)
 	gdb -x  gdb.gdb ./catclaw
 
+lldb: $(TARGET)
+	lldb -s lldb.lldb ./catclaw
+
 clean:
 	rm -rf $(OBJ_DIR) $(TARGET) $(SKILL_DIR)
 

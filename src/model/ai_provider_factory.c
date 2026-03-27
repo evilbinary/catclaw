@@ -53,6 +53,7 @@ void ai_provider_destroy(AIProvider* provider) {
     free(provider->config.api_key);
     free(provider->config.model_name);
     free(provider->config.base_url);
+    free(provider->config.reasoning_effort);
     free(provider);
 }
 

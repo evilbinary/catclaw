@@ -984,8 +984,10 @@ int tool_shell_execute(ToolArgs* args, char** result, int* result_len) {
     int offset = snprintf(*result, buf_size, "Command: %s\n\n", cmd);
     
 #ifdef _WIN32
-    // Windows: use _popen
-    FILE* fp = _popen(cmd, "r");
+    // Windows: prepend chcp 65001 to set UTF-8 code page
+    char full_cmd[2048];
+    snprintf(full_cmd, sizeof(full_cmd), "chcp 65001 >nul && %s", cmd);
+    FILE* fp = _popen(full_cmd, "r");
 #else
     // Unix: use popen with timeout
     FILE* fp = popen(cmd, "r");

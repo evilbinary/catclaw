@@ -15,6 +15,7 @@ typedef struct {
     float temperature;        // 温度参数
     int max_tokens;           // 最大生成 token 数
     bool stream;              // 是否启用流式响应（打字机效果）
+    char *reasoning_effort;   // 思考模型推理强度 (low/medium/high)，NULL 表示不启用
 } ModelConfig;
 
 // Models array configuration

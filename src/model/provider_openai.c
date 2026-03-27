@@ -290,6 +290,8 @@ static char* openai_build_url(const AIProvider* self) {
 // 构建请求体
 static char* openai_build_request_body(AIProvider* self, MessageList* messages,
                                         const char* system_prompt) {
+    bool is_reasoning = self->config.reasoning_effort && strlen(self->config.reasoning_effort) > 0;
+    
     cJSON* root = cJSON_CreateObject();
     cJSON_AddStringToObject(root, "model", 
         self->config.model_name ? self->config.model_name : "gpt-4");
@@ -297,9 +299,10 @@ static char* openai_build_request_body(AIProvider* self, MessageList* messages,
     cJSON* msg_arr = cJSON_CreateArray();
     
     // 添加 system prompt
+    // 思考模型使用 "developer" role 替代 "system" role
     if (system_prompt && strlen(system_prompt) > 0) {
         cJSON* sys_msg = cJSON_CreateObject();
-        cJSON_AddStringToObject(sys_msg, "role", "system");
+        cJSON_AddStringToObject(sys_msg, "role", is_reasoning ? "developer" : "system");
         cJSON_AddStringToObject(sys_msg, "content", system_prompt);
         cJSON_AddItemToArray(msg_arr, sys_msg);
     }
@@ -313,7 +316,7 @@ static char* openai_build_request_body(AIProvider* self, MessageList* messages,
             switch (msg->role) {
                 case ROLE_USER: role = "user"; break;
                 case ROLE_ASSISTANT: role = "assistant"; break;
-                case ROLE_SYSTEM: role = "system"; break;
+                case ROLE_SYSTEM: role = is_reasoning ? "developer" : "system"; break;
                 case ROLE_TOOL: role = "tool"; break;
             }
             cJSON_AddStringToObject(msg_obj, "role", role);
@@ -331,8 +334,16 @@ static char* openai_build_request_body(AIProvider* self, MessageList* messages,
     }
     
     cJSON_AddItemToObject(root, "messages", msg_arr);
-    cJSON_AddNumberToObject(root, "temperature", self->config.temperature);
-    cJSON_AddNumberToObject(root, "max_tokens", self->config.max_tokens);
+    
+    if (is_reasoning) {
+        // 思考模型: 使用 reasoning_effort 和 max_completion_tokens
+        cJSON_AddStringToObject(root, "reasoning_effort", self->config.reasoning_effort);
+        cJSON_AddNumberToObject(root, "max_completion_tokens", self->config.max_tokens);
+    } else {
+        // 普通模型: 使用 temperature 和 max_tokens
+        cJSON_AddNumberToObject(root, "temperature", self->config.temperature);
+        cJSON_AddNumberToObject(root, "max_tokens", self->config.max_tokens);
+    }
     cJSON_AddBoolToObject(root, "stream", self->config.stream);
 
     char* payload = cJSON_Print(root);
@@ -596,6 +607,7 @@ AIProvider* provider_openai_create(const AIProviderConfig* config) {
         provider->config.temperature = config->temperature > 0 ? config->temperature : 0.7f;
         provider->config.max_tokens = config->max_tokens > 0 ? config->max_tokens : 4096;
         provider->config.stream = config->stream;
+        provider->config.reasoning_effort = config->reasoning_effort ? strdup(config->reasoning_effort) : NULL;
     }
     
     // 设置接口方法

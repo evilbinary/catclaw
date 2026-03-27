@@ -1,0 +1,6 @@
+settings set use-color true
+settings set prompt "(lldb) "
+settings set stop-disassembly-count 8
+run
+bt all
+quit

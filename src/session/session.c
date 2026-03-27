@@ -237,7 +237,7 @@ bool session_save(Session* session, const char* sessions_dir) {
         return false;
     }
     
-    log_debug("JSONL content: %s\n", jsonl);
+    // log_debug("JSONL content: %s\n", jsonl);
     
     FILE* fp = fopen(history_file, "a");
     if (!fp) {

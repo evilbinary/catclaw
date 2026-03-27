@@ -182,6 +182,7 @@ bool agent_init(void) {
     model_config.temperature = g_config.model.temperature > 0 ? g_config.model.temperature : 0.7f;
     model_config.max_tokens = g_config.model.max_tokens > 0 ? g_config.model.max_tokens : 1024;
     model_config.stream = g_config.model.stream;
+    model_config.reasoning_effort = g_config.model.reasoning_effort;
 
     if (!ai_model_init(&model_config)) {
         log_error("Failed to initialize AI model\n");

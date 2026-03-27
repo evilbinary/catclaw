@@ -17,6 +17,7 @@ typedef struct {
     float temperature;
     int max_tokens;
     bool stream;
+    char* reasoning_effort;   // 思考模型推理强度 (low/medium/high)，NULL 表示不启用
     AIStreamCallback stream_callback;  // 流式回调
     void* stream_user_data;            // 流式回调用户数据
 } AIProviderConfig;

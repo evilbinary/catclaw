@@ -873,9 +873,10 @@ void* agent_node_worker_thread(void* arg) {
                     // 6.2 Check if content contains JSON tool_calls (for display control)
                     bool has_tool_calls_in_content = response_has_json_tool_calls(response->content);
                     
-                    // 6.3 Act: Add assistant message to session
+                    // 6.3 Act: Add assistant message to session and context
                     Message* assistant_msg = message_create(ROLE_ASSISTANT, response->content);
                     session_add_message(session, assistant_msg);
+                    message_list_append(context, assistant_msg);
                     
                     // Only print response if it's not a tool_calls JSON
                     if (!has_tool_calls_in_content && !strstr(response->content ? response->content : "", "(tool-calls")) {
@@ -926,6 +927,7 @@ void* agent_node_worker_thread(void* arg) {
                             printf("\n[Tool %s]: %s\n", call->name, result ? result : "(null)");
                             Message* tool_msg = message_create_tool(call->id, call->name, result ? result : "Error executing tool");
                             session_add_message(session, tool_msg);
+                            message_list_append(context, tool_msg);
                             
                             if (result) {
                                 free(result);
@@ -948,14 +950,11 @@ void* agent_node_worker_thread(void* arg) {
                         free(tool_call_list->calls);
                         free(tool_call_list);
                         
-                        // Update context for next iteration
-                        message_list_destroy(context);
-                        context = message_list_create();
-                        for (int i = 0; i < session->history->count; i++) {
-                            message_list_append(context, session->history->messages[i]);
-                        }
+                        // End any active stream (tool calls may have partially started streaming)
+                        end_stream_message(&stream_state);
                         
                         // Continue loop to get model's response to tool results
+                        // (context already updated with assistant_msg and tool results above)
                         ai_model_free_response(response);
                         continue;
                     } else {
@@ -973,6 +972,11 @@ void* agent_node_worker_thread(void* arg) {
                         // 只有非流式模式才发送完整消息
                         // 流式模式下消息已经在回调中发送
                         if (!used_stream) {
+                            log_debug("[Agent] Sending non-stream response (len=%zu, first_bytes=%02x%02x%02x)",
+                                      response->content ? strlen(response->content) : 0,
+                                      response->content ? (unsigned char)response->content[0] : 0,
+                                      response->content && response->content[0] ? (unsigned char)response->content[1] : 0,
+                                      response->content && response->content[0] && response->content[1] ? (unsigned char)response->content[2] : 0);
                             channel_send_message_to_all(response->content);
                         }
 
