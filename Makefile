@@ -43,8 +43,8 @@ TARGET = catclaw
 # Check for curl availability
 ifeq ($(OS),Windows_NT)
     # Windows with MSYS2
-    LDFLAGS += -L/E/soft/msys2/mingw64/lib -lcurl
-    CFLAGS += -I/E/soft/msys2/mingw64/include -DHAVE_CURL
+    LDFLAGS += -L/mingw64/lib -lcurl
+    CFLAGS += -I/mingw64/include -DHAVE_CURL
 else
     # Linux or other Unix-like systems
     # Check if curl is available
