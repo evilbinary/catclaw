@@ -12,18 +12,6 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #pragma comment(lib, "ws2_32.lib")
-// Windows doesn't have ntohll/htonll, implement them
-#include <stdint.h>
-static uint64_t ntohll(uint64_t value) {
-    // Check if system is little endian
-    const int one = 1;
-    if (*(char*)&one == 1) {
-        // Little endian: swap bytes
-        return ((uint64_t)ntohl((uint32_t)(value & 0xFFFFFFFF)) << 32) | ntohl((uint32_t)(value >> 32));
-    }
-    return value;
-}
-#define htonll ntohll
 #else
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -39,6 +27,23 @@ static uint64_t ntohll(uint64_t value) {
 #define WSAGetLastError() errno
 #define closesocket close
 #endif
+
+#include <stdint.h>
+
+// ntohll/htonll implementation for all platforms
+static uint64_t ntohll(uint64_t value) {
+    const int one = 1;
+    if (*(char*)&one == 1) {
+        // Little endian: swap bytes
+        return ((uint64_t)ntohl((uint32_t)(value & 0xFFFFFFFF)) << 32) | 
+               (uint64_t)ntohl((uint32_t)(value >> 32));
+    }
+    return value;
+}
+
+static uint64_t htonll(uint64_t value) {
+    return ntohll(value);
+}
 
 // Check endianness
 static bool is_little_endian(void) {
@@ -598,8 +603,8 @@ static bool websocket_parse_frame(WebSocketConnection *conn, char **message, int
     int offset = 0;
 
     // First byte: FIN and opcode
-    bool fin = (buffer[offset] & 0x80) != 0;
-    uint8_t opcode = buffer[offset++] & 0x0F;
+    (void)(buffer[offset] & 0x80);  // FIN bit (unused)
+    (void)(buffer[offset++] & 0x0F);  // opcode (unused)
 
     // Second byte: Mask and payload length
     bool mask = (buffer[offset] & 0x80) != 0;
@@ -630,7 +635,7 @@ static bool websocket_parse_frame(WebSocketConnection *conn, char **message, int
     }
 
     // Payload
-    if (conn->buffer_len < offset + payload_len) {
+    if ((uint64_t)conn->buffer_len < offset + payload_len) {
         return false;
     }
 
