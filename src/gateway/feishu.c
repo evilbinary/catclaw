@@ -432,7 +432,7 @@ static bool feishu_stream_start_callback(ChannelInstance *channel, const char *i
     ctx->active = true;
     channel->stream_ctx = ctx;
     
-    log_debug("[Feishu] Stream started: message_id=%s", message_id);
+    log_info("[Feishu] Stream started: message_id=%s", message_id);
     
     // 发送初始内容
     if (initial_content && strlen(initial_content) > 0) {
@@ -472,7 +472,7 @@ static bool feishu_stream_end_callback(ChannelInstance *channel) {
     
     if (ctx->active && ctx->message_id) {
         success = feishu_stream_finish(channel->id, ctx->message_id);
-        log_debug("[Feishu] Stream ended: message_id=%s", ctx->message_id);
+        log_info("[Feishu] Stream ended: message_id=%s", ctx->message_id);
     }
     
     // 清理上下文
@@ -857,7 +857,7 @@ char* feishu_stream_create(const char *channel_id, const char *receive_id, const
     char *body_str = cJSON_PrintUnformatted(body);
     cJSON_Delete(body);
     
-    log_debug("[Feishu] Creating stream message with body: %s", body_str);
+    log_info("[Feishu] Creating stream message with body: %s", body_str);
     
     // 构建请求头
     char auth_header[512];
@@ -895,7 +895,7 @@ char* feishu_stream_create(const char *channel_id, const char *receive_id, const
                 cJSON *msg_id = cJSON_GetObjectItem(data, "message_id");
                 if (msg_id && cJSON_IsString(msg_id)) {
                     message_id = strdup(msg_id->valuestring);
-                    log_debug("[Feishu] Stream message created: %s", message_id);
+                    log_info("[Feishu] Stream message created: %s", message_id);
                 }
             }
             cJSON_Delete(root);
@@ -1077,7 +1077,7 @@ bool feishu_stream_finish(const char *channel_id, const char *message_id) {
         return false;
     }
     
-    log_debug("[Feishu] Stream finished: message_id=%s, status=%d", message_id, resp->status_code);
+    log_info("[Feishu] Stream finished: message_id=%s, status=%d", message_id, resp->status_code);
     
     bool success = resp->success && resp->status_code == 200;
     if (!success) {
