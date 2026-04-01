@@ -5,6 +5,7 @@
 #include "common/log.h"
 #include "agent/command.h"
 #include "agent/agent.h"
+#include "channels.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -438,6 +439,22 @@ static void* weixin_polling_thread(void *arg) {
             if (weixin_get_qrcode(&qrcode, &qrcode_img)) {
                 log_info("[Weixin] QR code obtained: %s", qrcode);
                 
+                // 构建登录消息
+                char login_msg[1024];
+                if (qrcode_img && strncmp(qrcode_img, "http", 4) == 0) {
+                    snprintf(login_msg, sizeof(login_msg), 
+                        "📱 微信登录提醒\n\n"
+                        "请用微信扫描二维码登录：\n%s\n\n"
+                        "等待扫码中...", qrcode_img);
+                } else {
+                    snprintf(login_msg, sizeof(login_msg), 
+                        "📱 微信登录提醒\n\n"
+                        "请在控制台扫描二维码登录，或查看 weixin_qrcode.png 文件");
+                }
+                
+                // 发送登录消息到其他已连接的 channel
+                channel_send_message_to_all(login_msg);
+                
                 // 显示二维码
                 if (qrcode_img) {
                     if (strncmp(qrcode_img, "http", 4) == 0) {
@@ -497,6 +514,9 @@ static void* weixin_polling_thread(void *arg) {
                         printf("Bot Token: %s\n", bot_token);
                         printf("请将此 token 保存到配置文件 ~/.catclaw/config.json 中:\n");
                         printf("  \"api_key\": \"%s\"\n\n", bot_token);
+                        
+                        // 发送登录成功消息到其他 channel
+                        channel_send_message_to_all("✅ 微信登录成功！");
                         break;
                     }
                 }
@@ -504,6 +524,10 @@ static void* weixin_polling_thread(void *arg) {
                 if (!config->is_logged_in) {
                     printf("\n\n[Weixin] Login timeout, retrying...\n");
                     log_warn("[Weixin] Login timeout after %d seconds, retrying...", max_wait);
+                    
+                    // 发送超时消息
+                    channel_send_message_to_all("⏰ 微信登录超时，正在重新获取二维码...");
+                    
                     free(qrcode);
                     free(qrcode_img);
                     continue;  // 重新尝试登录

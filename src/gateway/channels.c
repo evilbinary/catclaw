@@ -599,12 +599,6 @@ bool channels_load_from_config(void) {
     for (int i = 0; i < g_config.channels.count; i++) {
         ChannelConfigEntry *entry = &g_config.channels.channels[i];
         
-        // Skip if not enabled
-        if (!entry->enabled) {
-            printf("[Channel] Skipping disabled channel '%s'\n", entry->id);
-            continue;
-        }
-        
         // Determine channel type
         ChannelType type = channel_name_to_type(entry->type);
         if (type == CHANNEL_MAX) {
@@ -637,9 +631,14 @@ bool channels_load_from_config(void) {
         // Add channel
         ChannelInstance *channel = channel_add(entry->id, type, &config);
         if (channel) {
+            // Set enabled state from config
+            channel->enabled = entry->enabled;
+            
             // Connect if enabled
             if (entry->enabled) {
                 channel_connect(channel);
+            } else {
+                printf("[Channel] Loaded disabled channel '%s'\n", entry->id);
             }
             loaded++;
         }
