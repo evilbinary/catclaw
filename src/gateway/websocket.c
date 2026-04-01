@@ -30,20 +30,23 @@
 
 #include <stdint.h>
 
-// ntohll/htonll implementation for all platforms
+// ntohll/htonll: use platform macros if available, otherwise provide fallback
+#ifndef ntohll
 static uint64_t ntohll(uint64_t value) {
     const int one = 1;
     if (*(char*)&one == 1) {
-        // Little endian: swap bytes
         return ((uint64_t)ntohl((uint32_t)(value & 0xFFFFFFFF)) << 32) | 
                (uint64_t)ntohl((uint32_t)(value >> 32));
     }
     return value;
 }
+#endif
 
+#ifndef htonll
 static uint64_t htonll(uint64_t value) {
     return ntohll(value);
 }
+#endif
 
 // Check endianness
 static bool is_little_endian(void) {
