@@ -9,11 +9,23 @@
 #include <dirent.h>
 #include <sys/stat.h>
 #include <ctype.h>
+#include <pthread.h>
+#include <errno.h>
+#include <time.h>
 
 // Windows compatibility
 #ifdef _WIN32
   #include <direct.h>
+  #include <windows.h>
   #define mkdir(path, mode) _mkdir(path)
+#elif defined(__APPLE__)
+  #include <sys/event.h>
+  #include <fcntl.h>
+  #include <unistd.h>
+#elif defined(__linux__)
+  #include <sys/inotify.h>
+  #include <unistd.h>
+  #include <poll.h>
 #endif
 
 // Cross-platform strndup (Windows doesn't have it)
@@ -231,11 +243,17 @@ bool skill_system_init(void) {
     }
     
     log_info("[Skill] System initialized with %d skill(s)", total_loaded);
+    
+    // Start directory watcher for auto-reload
+    skill_watcher_start();
+    
     return true;
 }
 
 // Cleanup skill system
 void skill_system_cleanup(void) {
+    skill_watcher_stop();
+    
     for (int i = 0; i < g_skill_registry.count; i++) {
         skill_free(g_skill_registry.skills[i]);
     }
@@ -1329,4 +1347,461 @@ bool skill_hub_install(const char *skill_id) {
     }
     
     return success;
+}
+
+// ============================================================
+// Skill directory watcher - auto-reload on file changes
+// ============================================================
+
+#define WATCHER_DEBOUNCE_MS  2000  // 2 seconds debounce
+#define WATCHER_POLL_INTERVAL 3     // 3 seconds for polling fallback
+
+// Watched directory entry
+typedef struct {
+    char path[MAX_PATH_LEN];
+    SkillSource source;
+    time_t last_mtime;  // For polling mode
+} WatchedDir;
+
+// Watcher state
+static struct {
+    pthread_t thread;
+    volatile bool running;
+    volatile bool started;
+    
+    WatchedDir dirs[8];
+    int dir_count;
+    
+    // Debounce state per directory
+    pthread_mutex_t debounce_mutex;
+    time_t last_change_time[8];
+    bool change_pending[8];
+} g_watcher = {
+    .running = false,
+    .started = false,
+    .dir_count = 0
+};
+
+// Remove all skills from a specific source
+static void skill_remove_by_source(SkillSource source) {
+    int i = 0;
+    while (i < g_skill_registry.count) {
+        Skill *skill = g_skill_registry.skills[i];
+        if (skill && skill->source == source) {
+            log_debug("[SkillWatcher] Removing skill '%s' from source %s",
+                      skill->name ? skill->name : "(null)",
+                      skill_source_name(source));
+            skill_free(skill);
+            // Shift remaining skills
+            for (int j = i; j < g_skill_registry.count - 1; j++) {
+                g_skill_registry.skills[j] = g_skill_registry.skills[j + 1];
+            }
+            g_skill_registry.count--;
+        } else {
+            i++;
+        }
+    }
+}
+
+// Reload skills from a specific watched directory
+static void skill_reload_from_dir(WatchedDir *dir) {
+    log_info("[SkillWatcher] Reloading skills from %s (source: %s)",
+             dir->path, skill_source_name(dir->source));
+    
+    // Remove existing skills from this source
+    skill_remove_by_source(dir->source);
+    
+    // Re-scan and load
+    int loaded = skill_auto_load_from_dir(dir->path, dir->source);
+    log_info("[SkillWatcher] Reloaded %d skill(s) from %s", loaded, dir->path);
+}
+
+// Add a directory to watch
+static bool watcher_add_dir(const char *path, SkillSource source) {
+    if (!path || g_watcher.dir_count >= 8) return false;
+    
+    // Check if directory exists
+    struct stat st;
+    if (stat(path, &st) != 0 || !S_ISDIR(st.st_mode)) {
+        return false;
+    }
+    
+    WatchedDir *dir = &g_watcher.dirs[g_watcher.dir_count];
+    strncpy(dir->path, path, MAX_PATH_LEN - 1);
+    dir->path[MAX_PATH_LEN - 1] = '\0';
+    dir->source = source;
+    dir->last_mtime = st.st_mtime;
+    g_watcher.last_change_time[g_watcher.dir_count] = 0;
+    g_watcher.change_pending[g_watcher.dir_count] = false;
+    g_watcher.dir_count++;
+    
+    log_debug("[SkillWatcher] Watching directory: %s (source: %s)",
+              path, skill_source_name(source));
+    return true;
+}
+
+// Get directory mtime (deepest mtime from all entries) - used by polling fallback only
+#if !defined(__APPLE__) && !defined(__linux__)
+static time_t get_dir_mtime_recursive(const char *path) {
+    time_t max_mtime = 0;
+    DIR *dir = opendir(path);
+    if (!dir) return 0;
+    
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != NULL) {
+        if (entry->d_name[0] == '.') continue;
+        
+        char full_path[MAX_PATH_LEN];
+        snprintf(full_path, sizeof(full_path), "%s/%s", path, entry->d_name);
+        
+        struct stat st;
+        if (stat(full_path, &st) != 0) continue;
+        
+        if (st.st_mtime > max_mtime) {
+            max_mtime = st.st_mtime;
+        }
+        
+        // Recurse into subdirectories (max depth 3)
+        if (S_ISDIR(st.st_mode)) {
+            time_t sub_mtime = get_dir_mtime_recursive(full_path);
+            if (sub_mtime > max_mtime) {
+                max_mtime = sub_mtime;
+            }
+        }
+    }
+    
+    closedir(dir);
+    return max_mtime;
+}
+#endif // !__APPLE__ && !__linux__
+
+// Handle detected change for a directory (with debounce)
+static void watcher_handle_change(int dir_index) {
+    pthread_mutex_lock(&g_watcher.debounce_mutex);
+    
+    g_watcher.change_pending[dir_index] = true;
+    g_watcher.last_change_time[dir_index] = time(NULL);
+    
+    // Calculate debounce end time
+    struct timespec ts;
+    ts.tv_sec = WATCHER_DEBOUNCE_MS / 1000;
+    ts.tv_nsec = (WATCHER_DEBOUNCE_MS % 1000) * 1000000L;
+    
+    // Wait for debounce period, but wake up if more changes come
+    while (g_watcher.running) {
+        struct timespec now;
+        clock_gettime(CLOCK_REALTIME, &now);
+        
+        time_t elapsed = (now.tv_sec - g_watcher.last_change_time[dir_index]) * 1000 +
+                         now.tv_nsec / 1000000 - 
+                         (g_watcher.last_change_time[dir_index] % 1000);
+        
+        if (elapsed >= WATCHER_DEBOUNCE_MS) {
+            // Debounce period elapsed, no more recent changes
+            break;
+        }
+        
+        // Sleep a bit and recheck
+        struct timespec sleep_ts;
+        sleep_ts.tv_sec = 0;
+        sleep_ts.tv_nsec = 200000000L;  // 200ms
+        nanosleep(&sleep_ts, NULL);
+    }
+    
+    if (!g_watcher.running) {
+        pthread_mutex_unlock(&g_watcher.debounce_mutex);
+        return;
+    }
+    
+    if (g_watcher.change_pending[dir_index]) {
+        g_watcher.change_pending[dir_index] = false;
+        pthread_mutex_unlock(&g_watcher.debounce_mutex);
+        
+        // Reload skills from the changed directory
+        skill_reload_from_dir(&g_watcher.dirs[dir_index]);
+    } else {
+        pthread_mutex_unlock(&g_watcher.debounce_mutex);
+    }
+}
+
+#ifdef __APPLE__
+// macOS: kqueue-based watcher
+static void *watcher_thread_kqueue(void *arg) {
+    (void)arg;
+    
+    int kq = kqueue();
+    if (kq < 0) {
+        log_error("[SkillWatcher] Failed to create kqueue: %s", strerror(errno));
+        return NULL;
+    }
+    
+    // Add watches for all directories
+    int *fds = malloc(sizeof(int) * g_watcher.dir_count);
+    int *dir_indices = malloc(sizeof(int) * g_watcher.dir_count);
+    int watch_count = 0;
+    
+    for (int i = 0; i < g_watcher.dir_count; i++) {
+        int fd = open(g_watcher.dirs[i].path, O_RDONLY);
+        if (fd < 0) {
+            log_warn("[SkillWatcher] Cannot open %s: %s", g_watcher.dirs[i].path, strerror(errno));
+            continue;
+        }
+        
+        struct kevent change;
+        EV_SET(&change, fd, EVFILT_VNODE,
+               EV_ADD | EV_ENABLE | EV_CLEAR,
+               NOTE_WRITE | NOTE_ATTRIB | NOTE_RENAME | NOTE_DELETE,
+               0, NULL);
+        
+        if (kevent(kq, &change, 1, NULL, 0, NULL) < 0) {
+            log_warn("[SkillWatcher] Cannot watch %s: %s", g_watcher.dirs[i].path, strerror(errno));
+            close(fd);
+            continue;
+        }
+        
+        fds[watch_count] = fd;
+        dir_indices[watch_count] = i;
+        watch_count++;
+    }
+    
+    log_info("[SkillWatcher] kqueue watcher started, monitoring %d directories", watch_count);
+    
+    struct kevent event;
+    while (g_watcher.running) {
+        struct timespec timeout;
+        timeout.tv_sec = 1;
+        timeout.tv_nsec = 0;
+        
+        int nev = kevent(kq, NULL, 0, &event, 1, &timeout);
+        if (nev < 0) {
+            if (errno == EINTR) continue;
+            log_error("[SkillWatcher] kevent error: %s", strerror(errno));
+            break;
+        }
+        if (nev == 0) continue;  // timeout
+        
+        // Find which directory this event belongs to
+        int event_fd = (int)event.ident;
+        for (int i = 0; i < watch_count; i++) {
+            if (fds[i] == event_fd) {
+                log_debug("[SkillWatcher] Change detected in %s", g_watcher.dirs[dir_indices[i]].path);
+                watcher_handle_change(dir_indices[i]);
+                break;
+            }
+        }
+    }
+    
+    // Cleanup
+    for (int i = 0; i < watch_count; i++) {
+        close(fds[i]);
+    }
+    free(fds);
+    free(dir_indices);
+    close(kq);
+    
+    log_info("[SkillWatcher] kqueue watcher stopped");
+    return NULL;
+}
+
+#elif defined(__linux__)
+// Linux: inotify-based watcher
+static void *watcher_thread_inotify(void *arg) {
+    (void)arg;
+    
+    int inotify_fd = inotify_init();
+    if (inotify_fd < 0) {
+        log_error("[SkillWatcher] Failed to create inotify: %s", strerror(errno));
+        return NULL;
+    }
+    
+    // Add watches for all directories (recursive via IN_CREATE|IN_MOVED_TO)
+    int watch_count = 0;
+    int wd_to_index[256];
+    
+    for (int i = 0; i < g_watcher.dir_count; i++) {
+        uint32_t mask = IN_CREATE | IN_DELETE | IN_MODIFY | IN_MOVED_FROM | IN_MOVED_TO | IN_ATTRIB;
+        int wd = inotify_add_watch(inotify_fd, g_watcher.dirs[i].path, mask);
+        if (wd < 0) {
+            log_warn("[SkillWatcher] Cannot watch %s: %s", g_watcher.dirs[i].path, strerror(errno));
+            continue;
+        }
+        wd_to_index[wd % 256] = i;
+        watch_count++;
+    }
+    
+    log_info("[SkillWatcher] inotify watcher started, monitoring %d directories", watch_count);
+    
+    char buf[4096] __attribute__((aligned(__alignof__(struct inotify_event))));
+    
+    while (g_watcher.running) {
+        struct pollfd pfd = { .fd = inotify_fd, .events = POLLIN };
+        int ret = poll(&pfd, 1, 1000);
+        
+        if (ret < 0) {
+            if (errno == EINTR) continue;
+            log_error("[SkillWatcher] poll error: %s", strerror(errno));
+            break;
+        }
+        if (ret == 0) continue;  // timeout
+        
+        // Read events
+        ssize_t len = read(inotify_fd, buf, sizeof(buf));
+        if (len < 0) {
+            if (errno == EAGAIN) continue;
+            log_error("[SkillWatcher] read error: %s", strerror(errno));
+            break;
+        }
+        
+        // Process events and track which directories changed
+        bool dir_changed[8] = {false};
+        
+        char *ptr = buf;
+        while (ptr < buf + len) {
+            struct inotify_event *event = (struct inotify_event *)ptr;
+            
+            if (event->wd >= 0 && event->wd < 256) {
+                int idx = wd_to_index[event->wd];
+                dir_changed[idx] = true;
+            }
+            
+            ptr += sizeof(struct inotify_event) + event->len;
+        }
+        
+        // Handle changes with debounce
+        for (int i = 0; i < g_watcher.dir_count; i++) {
+            if (dir_changed[i]) {
+                log_debug("[SkillWatcher] Change detected in %s", g_watcher.dirs[i].path);
+                watcher_handle_change(i);
+            }
+        }
+    }
+    
+    close(inotify_fd);
+    log_info("[SkillWatcher] inotify watcher stopped");
+    return NULL;
+}
+
+#else
+// Fallback: polling-based watcher (Windows / other)
+static void *watcher_thread_poll(void *arg) {
+    (void)arg;
+    
+    // Store initial mtimes
+    for (int i = 0; i < g_watcher.dir_count; i++) {
+        g_watcher.dirs[i].last_mtime = get_dir_mtime_recursive(g_watcher.dirs[i].path);
+    }
+    
+    log_info("[SkillWatcher] Polling watcher started, monitoring %d directories (interval: %ds)",
+             g_watcher.dir_count, WATCHER_POLL_INTERVAL);
+    
+    while (g_watcher.running) {
+        // Sleep in small increments so we can check g_watcher.running
+        for (int s = 0; s < WATCHER_POLL_INTERVAL && g_watcher.running; s++) {
+            sleep(1);
+        }
+        if (!g_watcher.running) break;
+        
+        // Check each directory for changes
+        for (int i = 0; i < g_watcher.dir_count; i++) {
+            time_t current_mtime = get_dir_mtime_recursive(g_watcher.dirs[i].path);
+            
+            if (current_mtime != g_watcher.dirs[i].last_mtime) {
+                log_debug("[SkillWatcher] Change detected in %s", g_watcher.dirs[i].path);
+                g_watcher.dirs[i].last_mtime = current_mtime;
+                watcher_handle_change(i);
+            }
+        }
+    }
+    
+    log_info("[SkillWatcher] Polling watcher stopped");
+    return NULL;
+}
+#endif
+
+// Start the skill directory watcher
+bool skill_watcher_start(void) {
+    if (g_watcher.started) {
+        return true;  // Already running
+    }
+    
+    g_watcher.dir_count = 0;
+    pthread_mutex_init(&g_watcher.debounce_mutex, NULL);
+    
+    // Register directories to watch (same order as skill_system_init)
+    watcher_add_dir(SKILL_DIR_PLUGIN, SKILL_SOURCE_PLUGIN);
+    watcher_add_dir(SKILL_DIR_LOCAL, SKILL_SOURCE_LOCAL);
+    
+    char *workspace_path = get_workspace_skills_path();
+    if (workspace_path) {
+        watcher_add_dir(workspace_path, SKILL_SOURCE_WORKSPACE);
+        free(workspace_path);
+    }
+    
+    if (g_watcher.dir_count == 0) {
+        log_warn("[SkillWatcher] No directories to watch");
+        pthread_mutex_destroy(&g_watcher.debounce_mutex);
+        return false;
+    }
+    
+    g_watcher.running = true;
+    g_watcher.started = true;
+    
+    // Start watcher thread (platform-specific)
+#ifdef __APPLE__
+    pthread_create(&g_watcher.thread, NULL, watcher_thread_kqueue, NULL);
+#elif defined(__linux__)
+    pthread_create(&g_watcher.thread, NULL, watcher_thread_inotify, NULL);
+#else
+    pthread_create(&g_watcher.thread, NULL, watcher_thread_poll, NULL);
+#endif
+    
+    return true;
+}
+
+// Stop the skill directory watcher
+void skill_watcher_stop(void) {
+    if (!g_watcher.started) return;
+    
+    log_info("[SkillWatcher] Stopping...");
+    g_watcher.running = false;
+    
+    pthread_join(g_watcher.thread, NULL);
+    pthread_mutex_destroy(&g_watcher.debounce_mutex);
+    
+    g_watcher.started = false;
+    g_watcher.dir_count = 0;
+    
+    log_info("[SkillWatcher] Stopped");
+}
+
+// Check if watcher is running
+bool skill_watcher_is_running(void) {
+    return g_watcher.started && g_watcher.running;
+}
+
+// Reload all skills from all watched directories
+bool skill_reload_all(void) {
+    log_info("[Skill] Reloading all skills...");
+    
+    int total = 0;
+    
+    // Remove and reload each source
+    skill_remove_by_source(SKILL_SOURCE_PLUGIN);
+    int plugin_skills = skill_auto_load_from_dir(SKILL_DIR_PLUGIN, SKILL_SOURCE_PLUGIN);
+    total += plugin_skills;
+    
+    skill_remove_by_source(SKILL_SOURCE_LOCAL);
+    int local_skills = skill_auto_load_from_dir(SKILL_DIR_LOCAL, SKILL_SOURCE_LOCAL);
+    total += local_skills;
+    
+    char *workspace_path = get_workspace_skills_path();
+    if (workspace_path) {
+        skill_remove_by_source(SKILL_SOURCE_WORKSPACE);
+        int workspace_skills = skill_auto_load_from_dir(workspace_path, SKILL_SOURCE_WORKSPACE);
+        total += workspace_skills;
+        free(workspace_path);
+    }
+    
+    log_info("[Skill] Reload complete, %d skill(s) loaded", total);
+    return true;
 }

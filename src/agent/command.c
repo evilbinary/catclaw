@@ -73,6 +73,7 @@ static char* cmd_help(void) {
         "  /skill execute <name> [params] - 执行技能\n"
         "  /skill enable <name> - 启用技能\n"
         "  /skill disable <name> - 禁用技能\n"
+        "  /skill reload       - 重新加载所有技能\n"
         "\n"
         "插件相关:\n"
         "  /plugin list       - 列出插件\n"
@@ -217,8 +218,51 @@ static char* cmd_model(const char* args) {
             offset += snprintf(buf + offset, size - offset,
                 "─────────────────────────────────────────────────\n"
                 "使用 /model <序号|名称> 切换模型\n"
-                "示例: /model 0 或 /model gpt-4");
+                "使用 /model name <model_name> 修改当前模型的 model_name\n"
+                "示例: /model 0 或 /model gpt-4 或 /model name gpt-4o-mini");
         }
+    } else if (strncmp(args, "name ", 5) == 0) {
+        // 修改当前模型的 model_name
+        extern Config g_config;
+        const char* new_model_name = args + 5;
+        while (*new_model_name == ' ') new_model_name++;
+
+        if (strlen(new_model_name) == 0) {
+            snprintf(buf, size, "用法: /model name <model_name>");
+            return buf;
+        }
+
+        free(g_config.model.model_name);
+        free(g_config.model_name);
+        g_config.model.model_name = strdup(new_model_name);
+        g_config.model_name = strdup(new_model_name);
+
+        // 同步到 models 数组中的当前模型
+        int idx = g_config.models.current_index;
+        if (idx >= 0 && idx < g_config.models.count) {
+            free(g_config.models.models[idx].model_name);
+            g_config.models.models[idx].model_name = strdup(new_model_name);
+        }
+
+        // 更新 AI model config
+        AIModelConfig model_config = {0};
+        model_config.provider = g_config.model.provider;
+        model_config.model_name = g_config.model.model_name;
+        model_config.api_key = g_config.model.api_key;
+        model_config.base_url = g_config.model.base_url;
+        model_config.temperature = g_config.model.temperature > 0 ? g_config.model.temperature : 0.7f;
+        model_config.max_tokens = g_config.model.max_tokens > 0 ? g_config.model.max_tokens : 1024;
+        model_config.stream = g_config.model.stream;
+        model_config.reasoning_effort = g_config.model.reasoning_effort;
+        ai_model_set_config(&model_config);
+
+        snprintf(buf, size,
+            "✓ 已修改当前模型 model_name: %s\n"
+            "  Provider: %s\n"
+            "  Model: %s",
+            g_config.model.name ? g_config.model.name : "default",
+            g_config.model.provider ? g_config.model.provider : "default",
+            g_config.model.model_name ? g_config.model.model_name : "default");
     } else {
         // 切换模型
         extern Config g_config;
@@ -630,6 +674,12 @@ static char* cmd_skill(const char* args) {
             snprintf(buf, size, "✓ 已禁用技能: %s", name);
         } else {
             snprintf(buf, size, "✗ 禁用失败: %s", name);
+        }
+    } else if (strcmp(args, "reload") == 0) {
+        if (skill_reload_all()) {
+            snprintf(buf, size, "✓ 技能已重新加载");
+        } else {
+            snprintf(buf, size, "✗ 技能重载失败");
         }
     } else {
         snprintf(buf, size, "未知子命令: skill %s", args);
