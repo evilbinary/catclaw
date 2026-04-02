@@ -39,6 +39,10 @@ typedef struct {
 // 初始化微信channel
 bool weixin_channel_init(ChannelInstance *channel, ChannelConfig *config);
 
+// 连接/断开
+void weixin_connect(ChannelInstance *channel);
+void weixin_disconnect(ChannelInstance *channel);
+
 // 登录相关
 bool weixin_get_qrcode(char **qrcode, char **qrcode_img);
 bool weixin_check_qrcode_status(const char *qrcode, char **bot_token, char **base_url);

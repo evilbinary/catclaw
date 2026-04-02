@@ -881,6 +881,8 @@ bool weixin_channel_init(ChannelInstance *channel, ChannelConfig *config) {
     weixin_config->stream_mode = config ? config->stream_mode : false;
     
     channel->user_data = weixin_config;
+    channel->connect = weixin_connect;
+    channel->disconnect = weixin_disconnect;
     channel->send_message = weixin_channel_send_message;
     channel->cleanup = weixin_channel_cleanup;
     channel->stream_ctx = NULL;
@@ -889,6 +891,16 @@ bool weixin_channel_init(ChannelInstance *channel, ChannelConfig *config) {
     channel->stream_start = weixin_stream_start_callback;
     channel->stream_update = weixin_stream_update_callback;
     channel->stream_end = weixin_stream_end_callback;
+    
+    log_info("[Weixin] Channel initialized");
+    return true;
+}
+
+// 连接渠道（启动轮询线程）
+void weixin_connect(ChannelInstance *channel) {
+    if (!channel) return;
+    
+    log_info("[Weixin] Connecting channel...");
     
     // 启动轮询线程（线程内会处理登录流程）
 #ifdef _WIN32
@@ -899,7 +911,12 @@ bool weixin_channel_init(ChannelInstance *channel, ChannelConfig *config) {
     pthread_create(&thread, NULL, weixin_polling_thread, channel);
     pthread_detach(thread);
 #endif
+}
+
+// 断开渠道
+void weixin_disconnect(ChannelInstance *channel) {
+    if (!channel) return;
     
-    log_info("[Weixin] Channel initialized");
-    return true;
+    log_info("[Weixin] Disconnecting channel...");
+    channel->connected = false;
 }
