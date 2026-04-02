@@ -481,6 +481,13 @@ export CATCLAW_DEBUG=1
 ./catclaw
 ```
 
+```
+# 设置环境变量后直接运行 bash
+$env:MSYSTEM = "MINGW64"
+& "e:\soft\msys2\usr\bin\bash.exe" -l
+./catclaw
+```
+
 ## 常见问题
 
 ### Q: 如何切换模型？

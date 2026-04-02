@@ -18,6 +18,7 @@
   #include <direct.h>
   #include <windows.h>
   #define mkdir(path, mode) _mkdir(path)
+  #define sleep(sec) Sleep((sec) * 1000)
 #elif defined(__APPLE__)
   #include <sys/event.h>
   #include <fcntl.h>
