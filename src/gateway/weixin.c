@@ -427,7 +427,7 @@ static void* weixin_polling_thread(void *arg) {
     log_info("[Weixin] Polling thread started");
     
     // 主循环：登录 -> 消息轮询 -> session timeout -> 重新登录
-    while (true) {
+    while (channel->enabled) {
         // 如果未登录，等待扫码登录
         if (!config->is_logged_in) {
             log_info("[Weixin] Waiting for QR code scan login...");
@@ -487,7 +487,7 @@ static void* weixin_polling_thread(void *arg) {
                 int max_wait = 120;
                 int waited = 0;
                 
-                while (waited < max_wait) {
+                while (waited < max_wait && channel->enabled) {
 #ifdef _WIN32
                     Sleep(1000);
 #else
@@ -552,7 +552,7 @@ static void* weixin_polling_thread(void *arg) {
         int consecutive_failures = 0;
         const int max_failures = 3;  // 连续失败3次后触发重新登录
         
-        while (config->is_logged_in) {
+        while (config->is_logged_in && channel->enabled) {
             WeixinMessage *messages = NULL;
             int msg_count = 0;
             char *new_cursor = NULL;        
