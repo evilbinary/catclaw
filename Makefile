@@ -8,7 +8,7 @@ OS_NAME := $(shell echo $(UNAME_S) | tr '[A-Z]' '[a-z]')
 # Platform-specific flags
 ifeq ($(findstring mingw32_nt,$(OS_NAME)),mingw32_nt)
     # MinGW32 environment
-    LDFLAGS = -lpthread -lws2_32 -lole32
+    LDFLAGS = -lpthread -lws2_32 -lole32 -luserenv
     CFLAGS += -D_WIN32 -DMINGW32
     
     # Use MinGW32 paths
@@ -16,7 +16,7 @@ ifeq ($(findstring mingw32_nt,$(OS_NAME)),mingw32_nt)
     LDFLAGS += -L$(MINGW_PREFIX)/lib
 else ifeq ($(findstring mingw64_nt,$(OS_NAME)),mingw64_nt)
     # MinGW64 environment
-    LDFLAGS = -lpthread -lws2_32 -lole32
+    LDFLAGS = -lpthread -lws2_32 -lole32 -luserenv
     CFLAGS += -D_WIN32 -DMINGW64
     
     # Use MinGW64 paths
@@ -24,7 +24,7 @@ else ifeq ($(findstring mingw64_nt,$(OS_NAME)),mingw64_nt)
     LDFLAGS += -L/mingw64/lib
 else ifeq ($(findstring msys_nt,$(OS_NAME)),msys_nt)
     # MSYS2 environment
-    LDFLAGS = -lpthread -lws2_32 -lole32
+    LDFLAGS = -lpthread -lws2_32 -lole32 -luserenv
     CFLAGS += -D_WIN32 -DMSYS
     
     # Use MinGW64 paths

@@ -1,0 +1,12 @@
+{
+    "files.associations": {
+        "cmath": "c",
+        "algorithm": "c",
+        "random": "c",
+        "ostream": "c",
+        "utility": "c",
+        "cstdio": "c",
+        "plugin.h": "c",
+        "windows.h": "c"
+    }
+}
