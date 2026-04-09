@@ -3,7 +3,8 @@ CFLAGS = -Wall -Wextra -g -I. -I./src
 
 # Platform-specific flags
 ifeq ($(OS),Windows_NT)
-    LDFLAGS = -lpthread -lws2_32
+    LDFLAGS = -lpthread -lws2_32 -lole32
+    CFLAGS += -D_WIN32
 else
     LDFLAGS = -lpthread
 endif
