@@ -1,29 +1,11 @@
 #include "plugin.h"
+#include "platform.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-// Platform-specific includes for dynamic loading
-#ifdef _WIN32
-#include <windows.h>
-#define PLUGIN_EXT ".dll"
-#define dlsym GetProcAddress
-#define dlclose FreeLibrary
-
-// Helper function to get Windows error message
-static char *win32_dlerror(void) {
-    static char buf[256];
-    DWORD err = GetLastError();
-    FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
-                   NULL, err, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
-                   buf, sizeof(buf), NULL);
-    return buf;
-}
-#define dlerror win32_dlerror
-#else
-#include <dlfcn.h>
-#define PLUGIN_EXT ".so"
-#endif
+// Plugin file extension
+#define PLUGIN_EXT platform_get_plugin_ext()
 
 // Plugin registry
 static PluginRegistry *registry = NULL;
@@ -124,14 +106,9 @@ bool plugin_load(const char *path) {
     }
     
     // Load plugin library using original path
-    void *handle;
-#ifdef _WIN32
-    handle = LoadLibraryA(path);
-#else
-    handle = dlopen(path, RTLD_LAZY);
-#endif
+    void *handle = platform_load_library(path);
     if (!handle) {
-        fprintf(stderr, "Failed to load plugin %s: %s\n", path, dlerror());
+        fprintf(stderr, "Failed to load plugin %s: %s\n", path, platform_dlerror());
         free(path_copy);
         free(name_copy);
         return false;
@@ -141,7 +118,7 @@ bool plugin_load(const char *path) {
     Plugin *plugin = (Plugin *)malloc(sizeof(Plugin));
     if (!plugin) {
         fprintf(stderr, "Memory allocation failed\n");
-        dlclose(handle);
+        platform_unload_library(handle);
         free(path_copy);
         free(name_copy);
         return false;
@@ -156,9 +133,9 @@ bool plugin_load(const char *path) {
     plugin->loaded = false;
     
     // Get plugin initialization function
-    plugin->init = (bool (*)(void))dlsym(handle, "plugin_init");
-    plugin->cleanup = (void (*)(void))dlsym(handle, "plugin_cleanup");
-    plugin->get_function = (void *(*)(const char *))dlsym(handle, "plugin_get_function");
+    plugin->init = (bool (*)(void))platform_get_function(handle, "plugin_init");
+    plugin->cleanup = (void (*)(void))platform_get_function(handle, "plugin_cleanup");
+    plugin->get_function = (void *(*)(const char *))platform_get_function(handle, "plugin_get_function");
     
     // Detect plugin type by checking available functions
     if (plugin->get_function) {

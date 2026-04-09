@@ -1,16 +1,12 @@
+#include "common/platform.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#ifndef _WIN32
 #include <sys/stat.h>
 #include <errno.h>
-
-#ifdef _WIN32
-#include <windows.h>
-#define MKDIR(path) CreateDirectoryA(path, NULL)
-#else
-#include <sys/types.h>
-#define MKDIR(path) mkdir(path, 0755)
 #endif
 
 #include "session.h"
@@ -112,79 +108,23 @@ static bool create_directory_recursive(const char* path) {
     printf("Converted path: %s\n", dir);
 #endif
     
-    // Create directories recursively
-    char temp_path[512];
-    strcpy(temp_path, dir);
-
-#ifdef _WIN32
-    p = temp_path;
-    // Skip the drive letter and colon (e.g., "E:\")
-    if (strlen(temp_path) > 2 && temp_path[1] == ':') {
-        p += 2;
-    }
-
-    // Skip any leading backslashes
-    while (*p == '\\') {
-        p++;
-    }
-
-    while ((p = strchr(p, '\\')) != NULL) {
-#else
-    char *p = temp_path;
-    // Skip any leading slashes
-    while (*p == '/') {
-        p++;
-    }
-
-    while ((p = strchr(p, '/')) != NULL) {
-#endif
-        *p = '\0';
-
-#ifdef _WIN32
-        // Only create if it's not just the drive letter
-        if (strlen(temp_path) > 2 || (strlen(temp_path) == 2 && temp_path[1] != ':')) {
-#else
-        if (strlen(temp_path) > 0) {
-#endif
-            printf("Creating directory: %s\n", temp_path);
-            if (stat(temp_path, &(struct stat){}) != 0) {
-                if (MKDIR(temp_path) != 0) {
-                    printf("Error creating directory: %s. Error code: %d\n", temp_path, errno);
-                    perror("MKDIR");
-                    free(dir);
-                    return false;
-                } else {
-                    printf("Successfully created directory: %s\n", temp_path);
-                }
-            } else {
-                printf("Directory already exists: %s\n", temp_path);
-            }
-        }
-#ifdef _WIN32
-        *p = '\\';
-#else
-        *p = '/';
-#endif
-        p++;
+    // Create directory recursively using platform-agnostic function
+    printf("Creating directory: %s\n", dir);
+    if (platform_exists(dir)) {
+        printf("Directory already exists: %s\n", dir);
+        free(dir);
+        return true;
     }
     
-    // Create the final directory
-    printf("Creating final directory: %s\n", dir);
-    if (stat(dir, &(struct stat){}) != 0) {
-        if (MKDIR(dir) != 0) {
-            printf("Error creating final directory: %s. Error code: %d\n", dir, errno);
-            perror("MKDIR");
-            free(dir);
-            return false;
-        } else {
-            printf("Successfully created final directory: %s\n", dir);
-        }
+    if (platform_mkdir_p(dir)) {
+        printf("Successfully created directory: %s\n", dir);
+        free(dir);
+        return true;
     } else {
-        printf("Final directory already exists: %s\n", dir);
+        printf("Error creating directory: %s\n", dir);
+        free(dir);
+        return false;
     }
-    
-    free(dir);
-    return true;
 }
 
 bool session_save(Session* session, const char* sessions_dir) {
@@ -211,8 +151,7 @@ bool session_save(Session* session, const char* sessions_dir) {
     const char* actual_dir = expanded_dir ? expanded_dir : sessions_dir;
     
     // Create sessions directory if it doesn't exist
-    struct stat st;
-    if (stat(actual_dir, &st) != 0) {
+    if (!platform_exists(actual_dir)) {
         printf("Creating sessions directory: %s\n", actual_dir);
         if (!create_directory_recursive(actual_dir)) {
             printf("Error: Failed to create sessions directory\n");

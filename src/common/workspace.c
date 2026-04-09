@@ -1,55 +1,22 @@
 #include "workspace.h"
+#include "platform.h"
 #include <stdio.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 
-#ifdef _WIN32
-#include <windows.h>
-#define MKDIR(path) CreateDirectory(path, NULL)
-#define ACCESS(path, mode) access(path, mode)
-#else
-#include <unistd.h>
-#define MKDIR(path) mkdir(path, 0755)
-#define ACCESS(path, mode) access(path, mode)
-#endif
-
 static char* g_workspace_path = NULL;
 
 // Create directory if it doesn't exist
 static bool create_directory(const char* path) {
-    if (ACCESS(path, 0) == 0) {
+    if (platform_exists(path)) {
         // Directory exists
         return true;
     }
     
-    // Create directory
-    if (MKDIR(path) == 0) {
-        return true;
-    }
-    
-    // Try to create parent directories
-    char* parent_path = strdup(path);
-    if (!parent_path) {
-        return false;
-    }
-    
-    char* last_slash = strrchr(parent_path, '/');
-    if (!last_slash) {
-        free(parent_path);
-        return false;
-    }
-    
-    *last_slash = '\0';
-    bool result = create_directory(parent_path);
-    free(parent_path);
-    
-    if (result) {
-        return MKDIR(path) == 0;
-    }
-    
-    return false;
+    // Create directory recursively
+    return platform_mkdir_p(path);
 }
 
 // Initialize workspace

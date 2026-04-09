@@ -2,29 +2,7 @@
  * WebSocket Client Implementation
  */
 // Platform-specific includes
-#ifdef _WIN32
-#include <winsock2.h>
-#include <ws2tcpip.h>
-#include <windows.h>
-#pragma comment(lib, "ws2_32.lib")
-// Define sleep macro for Windows
-#define sleep(seconds) Sleep((seconds) * 1000)
-#else
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <netdb.h>
-#include <unistd.h>
-#include <errno.h>
-#include <pthread.h>
-#include <fcntl.h>
-// Define Windows equivalents for Linux
-#define SOCKET int
-#define INVALID_SOCKET (-1)
-#define SOCKET_ERROR (-1)
-#define WSAGetLastError() errno
-#define closesocket close
-#endif
+#include "platform.h"
 
 // OpenSSL for SSL/TLS support
 #ifdef HAVE_OPENSSL
@@ -39,6 +17,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <pthread.h>
+#include <fcntl.h>
 
 // WebSocket opcodes
 #define WS_OPCODE_CONTINUATION 0x0
@@ -460,13 +440,10 @@ bool ws_client_connect(WsClient *client) {
     
     int result = connect(client->socket, (struct sockaddr *)&addr, sizeof(addr));
     
-#ifdef _WIN32
-    if (result == SOCKET_ERROR && WSAGetLastError() != WSAEWOULDBLOCK) {
-#else
-    if (result < 0 && errno != EINPROGRESS) {
-#endif
-        log_error("[WSClient] Connect failed: %d", WSAGetLastError());
-        closesocket(client->socket);
+    int error = platform_get_last_error();
+    if (result == SOCKET_ERROR && error != WSAEWOULDBLOCK && error != EINPROGRESS) {
+        log_error("[WSClient] Connect failed: %d", error);
+        CLOSESOCKET(client->socket);
         client->socket = INVALID_SOCKET;
         client->state = WS_CLIENT_ERROR;
         return false;
@@ -484,18 +461,18 @@ bool ws_client_connect(WsClient *client) {
     result = select(client->socket + 1, NULL, &write_fds, NULL, &timeout);
     if (result <= 0) {
         log_error("[WSClient] Connect timeout or error");
-        closesocket(client->socket);
+        CLOSESOCKET(client->socket);
         client->socket = INVALID_SOCKET;
         client->state = WS_CLIENT_ERROR;
         return false;
     }
     
     // Check for connection errors
-    int error = 0;
-    socklen_t len = sizeof(error);
-    if (getsockopt(client->socket, SOL_SOCKET, SO_ERROR, (char *)&error, &len) < 0 || error != 0) {
-        log_error("[WSClient] Connect failed: %d", error);
-        closesocket(client->socket);
+    int sock_error = 0;
+    socklen_t len = sizeof(sock_error);
+    if (getsockopt(client->socket, SOL_SOCKET, SO_ERROR, (char *)&sock_error, &len) < 0 || sock_error != 0) {
+        log_error("[WSClient] Connect failed: %d", sock_error);
+        CLOSESOCKET(client->socket);
         client->socket = INVALID_SOCKET;
         client->state = WS_CLIENT_ERROR;
         return false;
@@ -513,7 +490,7 @@ bool ws_client_connect(WsClient *client) {
         SSL_CTX *ssl_ctx = SSL_CTX_new(TLS_client_method());
         if (!ssl_ctx) {
             log_error("[WSClient] Failed to create SSL context");
-            closesocket(client->socket);
+            CLOSESOCKET(client->socket);
             client->socket = INVALID_SOCKET;
             client->state = WS_CLIENT_ERROR;
             return false;
@@ -523,7 +500,7 @@ bool ws_client_connect(WsClient *client) {
         if (!ssl) {
             log_error("[WSClient] Failed to create SSL structure");
             SSL_CTX_free(ssl_ctx);
-            closesocket(client->socket);
+            CLOSESOCKET(client->socket);
             client->socket = INVALID_SOCKET;
             client->state = WS_CLIENT_ERROR;
             return false;

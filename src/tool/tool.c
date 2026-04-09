@@ -1,11 +1,15 @@
+#include "common/platform.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 #include <dirent.h>
+#ifndef _WIN32
 #include <errno.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#endif
 
 #ifdef _WIN32
 #include <windows.h>
@@ -834,19 +838,14 @@ int tool_list_directory(ToolArgs* args, char** result, int* result_len) {
             *result = new_result;
         }
         
-        // Append entry type indicator using stat
+        // Append entry type indicator
         char full_path[1024];
         snprintf(full_path, sizeof(full_path), "%s/%s", resolved_path, entry->d_name);
         
-        struct stat st;
-        if (stat(full_path, &st) == 0) {
-            if (S_ISDIR(st.st_mode)) {
-                strcat(*result, "[DIR]  ");
-            } else {
-                strcat(*result, "[FILE] ");
-            }
+        if (platform_is_dir(full_path)) {
+            strcat(*result, "[DIR]  ");
         } else {
-            strcat(*result, "[?]    ");
+            strcat(*result, "[FILE] ");
         }
         strcat(*result, entry->d_name);
         strcat(*result, "\n");

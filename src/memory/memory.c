@@ -1,16 +1,12 @@
+#include "common/platform.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#ifndef _WIN32
 #include <sys/stat.h>
 #include <errno.h>
-
-#ifdef _WIN32
-#include <windows.h>
-#define MKDIR(path) CreateDirectoryA(path, NULL)
-#else
-#include <sys/types.h>
-#define MKDIR(path) mkdir(path, 0755)
 #endif
 
 #include "memory.h"
@@ -22,46 +18,12 @@ static bool mkdir_recursive(const char* path) {
     if (!path || strlen(path) == 0) return false;
     
     // Check if directory already exists
-    struct stat st;
-    if (stat(path, &st) == 0) {
+    if (platform_exists(path)) {
         return true;  // Directory already exists
     }
     
-    // Find parent directory
-    char* parent = strdup(path);
-    if (!parent) return false;
-    
-    // Remove trailing slashes
-    size_t len = strlen(parent);
-    while (len > 0 && (parent[len-1] == '/' || parent[len-1] == '\\')) {
-        parent[len-1] = '\0';
-        len--;
-    }
-    
-    // Find last separator
-    char* last_slash = strrchr(parent, '/');
-#ifdef _WIN32
-    char* last_backslash = strrchr(parent, '\\');
-    if (last_backslash > last_slash) last_slash = last_backslash;
-#endif
-    
-    if (last_slash && last_slash != parent) {
-        // Recursively create parent directories
-        *last_slash = '\0';
-        if (!mkdir_recursive(parent)) {
-            free(parent);
-            return false;
-        }
-    }
-    
-    free(parent);
-    
-    // Create this directory
-    if (MKDIR(path) != 0 && errno != EEXIST) {
-        return false;
-    }
-    
-    return true;
+    // Create directory recursively
+    return platform_mkdir_p(path);
 }
 
 // Initialize memory manager

@@ -1,3 +1,4 @@
+#include "common/platform.h"
 #include "weixin.h"
 #include "common/http_client.h"
 #include "common/cJSON.h"

@@ -117,6 +117,25 @@ bool platform_exists(const char* path) {
 }
 
 /**
+ * Check if path is a directory
+ * 
+ * @param path Path to check
+ * @return true if directory, false otherwise
+ */
+bool platform_is_dir(const char* path) {
+    if (!path) return false;
+    
+#ifdef _WIN32
+    DWORD attrs = GetFileAttributesA(path);
+    return (attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY));
+#else
+    struct stat st;
+    if (stat(path, &st) != 0) return false;
+    return S_ISDIR(st.st_mode);
+#endif
+}
+
+/**
  * Get current working directory
  * 
  * @param buf Buffer to store current working directory
@@ -131,5 +150,123 @@ char* platform_getcwd(char* buf, size_t size) {
     return buf;
     #else
     return getcwd(buf, size);
+    #endif
+}
+
+/**
+ * Initialize platform-specific network functionality
+ * 
+ * @return true on success, false on failure
+ */
+bool platform_network_init(void) {
+    #ifdef _WIN32
+    WSADATA wsaData;
+    if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
+        fprintf(stderr, "WSAStartup failed: %d\n", WSAGetLastError());
+        return false;
+    }
+    #endif
+    return true;
+}
+
+/**
+ * Cleanup platform-specific network functionality
+ */
+void platform_network_cleanup(void) {
+    #ifdef _WIN32
+    WSACleanup();
+    #endif
+}
+
+/**
+ * Get last network error
+ * 
+ * @return Error code
+ */
+int platform_get_last_error(void) {
+    return WSAGetLastError();
+}
+  
+#ifdef _WIN32
+// Helper function to get Windows error message
+static char *win32_dlerror(void) {
+    static char buf[256];
+    DWORD err = GetLastError();
+    FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+                   NULL, err, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+                   buf, sizeof(buf), NULL);
+    return buf;
+}
+#endif
+
+/**
+ * Load dynamic library
+ * 
+ * @param path Library path
+ * @return Library handle, or NULL on failure
+ */
+void* platform_load_library(const char* path) {
+    #ifdef _WIN32
+    return LoadLibraryA(path);
+    #else
+    return dlopen(path, RTLD_LAZY);
+    #endif
+}
+
+/**
+ * Unload dynamic library
+ * 
+ * @param handle Library handle
+ */
+void platform_unload_library(void* handle) {
+    if (handle) {
+        #ifdef _WIN32
+        FreeLibrary((HMODULE)handle);
+        #else
+        dlclose(handle);
+        #endif
+    }
+}
+
+/**
+ * Get function from dynamic library
+ * 
+ * @param handle Library handle
+ * @param name Function name
+ * @return Function pointer, or NULL on failure
+ */
+void* platform_get_function(void* handle, const char* name) {
+    if (!handle || !name) return NULL;
+    
+    #ifdef _WIN32
+    return GetProcAddress((HMODULE)handle, name);
+    #else
+    return dlsym(handle, name);
+    #endif
+}
+
+/**
+ * Get dynamic library error message
+ * 
+ * @return Error message
+ */
+const char* platform_dlerror(void) {
+    #ifdef _WIN32
+    return win32_dlerror();
+    #else
+    return dlerror();
+    #endif
+}
+
+/**
+ * Get plugin file extension
+ * 
+ * @return Plugin file extension (e.g., ".dll" or ".so")
+ */
+const char* platform_get_plugin_ext(void) {
+    #ifdef _WIN32
+    return ".dll";
+    #else
+    return ".so";
     #endif
 }

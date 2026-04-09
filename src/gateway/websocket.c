@@ -1,23 +1,5 @@
 // Platform-specific includes
-#ifdef _WIN32
-#include <winsock2.h>
-#include <ws2tcpip.h>
-#pragma comment(lib, "ws2_32.lib")
-#else
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <netdb.h>
-#include <unistd.h>
-#include <errno.h>
-// Define Windows equivalents for Linux
-#define SOCKET int
-#define INVALID_SOCKET (-1)
-#define SOCKET_ERROR (-1)
-#define MAKEWORD(a, b) ((a) | ((b) << 8))
-#define WSAGetLastError() errno
-#define closesocket close
-#endif
+#include "common/platform.h"
 
 #include "websocket.h"
 #include "channels.h"
@@ -54,29 +36,13 @@ static bool is_little_endian(void) {
 }
 
 // Platform-specific initialization and cleanup
-#ifdef _WIN32
 static bool platform_init(void) {
-    WSADATA wsaData;
-    if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
-        fprintf(stderr, "WSAStartup failed: %d\n", WSAGetLastError());
-        return false;
-    }
-    return true;
+    return platform_network_init();
 }
 
 static void platform_cleanup(void) {
-    WSACleanup();
+    platform_network_cleanup();
 }
-#else
-static bool platform_init(void) {
-    // No initialization needed for Linux
-    return true;
-}
-
-static void platform_cleanup(void) {
-    // No cleanup needed for Linux
-}
-#endif
 
 static bool websocket_handshake(WebSocketConnection *conn, WebSocketServer *server);
 static bool websocket_parse_frame(WebSocketConnection *conn, char **message, int *message_len);
@@ -181,11 +147,7 @@ static void* websocket_server_thread(void *arg) {
         struct timeval timeout;
         timeout.tv_sec = 1;
         timeout.tv_usec = 0;
-#ifdef _WIN32
-        int activity = select(max_fd + 1, &read_fds, NULL, NULL, (PTIMEVAL)&timeout);
-#else
         int activity = select(max_fd + 1, &read_fds, NULL, NULL, &timeout);
-#endif
         if (activity == SOCKET_ERROR) {
             fprintf(stderr, "select failed: %d\n", WSAGetLastError());
             break;

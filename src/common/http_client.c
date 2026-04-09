@@ -1,6 +1,17 @@
 /**
  * HTTP Client 实现 - 基于 libcurl
  */
+#ifdef _WIN32
+// 防止 sys/socket.h 等头文件被包含
+#define _SYS_SOCKET_H_
+#define _SOCKET_H
+#define _SELECT_H
+#define __SYS_SOCKET_H__
+#define __SOCKET_H__
+#define __SELECT_H__
+#endif
+#include "platform.h"
+
 #include "http_client.h"
 #include "log.h"
 #include "cJSON.h"
@@ -10,12 +21,14 @@
 #include <string.h>
 #include <ctype.h>
 
-#ifdef _WIN32
-// 直接定义 SOCKET 类型，避免包含 winsock2.h 头文件
-typedef unsigned long long SOCKET;
-#endif
-
 #ifdef HAVE_CURL
+#ifdef _WIN32
+// 防止 sys/socket.h 被包含
+#define __sys_socket_h
+#define __SYS_SOCKET_H
+#define __sys_socket_h__
+#define __SYS_SOCKET_H__
+#endif
 #include <curl/curl.h>
 
 // 全局初始化标志

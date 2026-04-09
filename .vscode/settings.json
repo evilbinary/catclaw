@@ -7,6 +7,8 @@
         "utility": "c",
         "cstdio": "c",
         "plugin.h": "c",
-        "windows.h": "c"
+        "windows.h": "c",
+        "config.h": "c",
+        "platform.h": "c"
     }
 }

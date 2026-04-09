@@ -1,21 +1,12 @@
 // Platform-specific includes
-#ifdef _WIN32
-#include <winsock2.h>
-#include <ws2tcpip.h>
-#include <windows.h>
-#pragma comment(lib, "ws2_32.lib")
-#define msleep(ms) Sleep(ms)
-#define SOCKET int
-#define INVALID_SOCKET (-1)
-#define CLOSESOCKET(s) closesocket(s)
-#else
+#include "common/platform.h"
+
+#include <time.h>
+#ifndef _WIN32
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
-#include <unistd.h>
-#include <time.h>
-#define msleep(ms) do { struct timespec ts = {0, (ms)*1000000L}; nanosleep(&ts, NULL); } while(0)
-#define CLOSESOCKET(s) close(s)
+#include <errno.h>
 #endif
 
 #include "http_server.h"

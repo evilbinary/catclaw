@@ -2,17 +2,10 @@
  * Common utility functions implementation
  */
 #include "utils.h"
+#include "platform.h"
 #include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
-
-#ifdef _WIN32
-#include <windows.h>
-#else
-#include <sys/types.h>
-#include <pwd.h>
-#endif
 
 /**
  * Resolve relative path to absolute path
@@ -40,17 +33,7 @@ char* resolve_path(const char* path) {
 
     // Home directory expansion
     if (path[0] == '~') {
-        const char* home = getenv("HOME");
-#ifdef _WIN32
-        if (!home) {
-            home = getenv("USERPROFILE");
-        }
-#else
-        if (!home) {
-            struct passwd* pw = getpwuid(getuid());
-            if (pw) home = pw->pw_dir;
-        }
-#endif
+        const char* home = platform_get_user_profile();
         if (home) {
             size_t home_len = strlen(home);
             size_t path_len = strlen(path);
@@ -64,7 +47,7 @@ char* resolve_path(const char* path) {
 
     // Relative path - resolve against current working directory
     char cwd[1024];
-    if (!getcwd(cwd, sizeof(cwd))) {
+    if (!platform_getcwd(cwd, sizeof(cwd))) {
         return strdup(path);  // Fallback to original path
     }
 

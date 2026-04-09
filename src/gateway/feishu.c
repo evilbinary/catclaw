@@ -1,3 +1,4 @@
+#include "common/platform.h"
 #include "feishu.h"
 #include "common/http_client.h"
 #include "common/cJSON.h"
@@ -1090,14 +1091,7 @@ bool feishu_stream_finish(const char *channel_id, const char *message_id) {
 
 // 流式发送完整消息 (模拟打字机效果)
 
-#ifdef _WIN32
-#include <windows.h>
-#define msleep(ms) Sleep(ms)
-#else
-#include <unistd.h>
-#include <time.h>
-#define msleep(ms) do { struct timespec ts = {0, (ms)*1000000L}; nanosleep(&ts, NULL); } while(0)
-#endif
+#include "common/platform.h"
 
 bool feishu_stream_send(const char *channel_id, const char *message, int speed_chars_per_sec) {
     if (!channel_id || !message) return false;

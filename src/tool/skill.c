@@ -1,3 +1,4 @@
+#include "common/platform.h"
 #include "skill.h"
 #include "common/plugin.h"
 #include "common/log.h"
@@ -12,21 +13,6 @@
 #include <pthread.h>
 #include <errno.h>
 #include <time.h>
-
-// Windows compatibility
-#ifdef _WIN32
-  #include <windows.h>
-  #define sleep(sec) Sleep((sec) * 1000)
-  #define mkdir(path, mode) CreateDirectoryA(path, NULL)
-#elif defined(__APPLE__)
-  #include <sys/event.h>
-  #include <fcntl.h>
-  #include <unistd.h>
-#elif defined(__linux__)
-  #include <sys/inotify.h>
-  #include <unistd.h>
-  #include <poll.h>
-#endif
 
 // Cross-platform strndup (Windows doesn't have it)
 #ifndef HAVE_STRNDUP
@@ -87,7 +73,7 @@ const char *skill_type_name(SkillType type) {
 
 // Get workspace skills directory path
 static char *get_workspace_skills_path(void) {
-    char *home = getenv("HOME");
+    const char *home = platform_get_user_profile();
     if (!home) {
         return NULL;
     }
@@ -103,7 +89,7 @@ static char *get_workspace_skills_path(void) {
 
 // Get hub cache directory path
 static char *get_hub_cache_path(void) {
-    char *home = getenv("HOME");
+    const char *home = platform_get_user_profile();
     if (!home) {
         return NULL;
     }
@@ -1338,11 +1324,7 @@ bool skill_hub_download(const char *skill_id) {
     }
     
     // Create directory if not exists
-#ifdef _WIN32
-    CreateDirectoryA(cache_dir, NULL);
-#else
-    mkdir(cache_dir, 0755);
-#endif
+    platform_mkdir_p(cache_dir);
     
     // Save to file
     char filepath[MAX_PATH_LEN];

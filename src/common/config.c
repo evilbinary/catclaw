@@ -1,18 +1,11 @@
 #include "config.h"
 #include "common/cJSON.h"
 #include "common/utils.h"
+#include "common/platform.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
-
-#ifdef _WIN32
-#include <windows.h>
-#include <shlobj.h>
-#include <objbase.h>
-#else
-#include <unistd.h>
-#endif
 
 // Global config instance
 Config g_config = {
@@ -99,17 +92,6 @@ Config g_config = {
     .debug = true
 };
 
-// Get user profile path using Windows API (compatible method)
-static char* get_user_profile_path(void) {
-#ifdef _WIN32
-    char path[MAX_PATH];
-    if (SUCCEEDED(SHGetFolderPath(NULL, CSIDL_PROFILE, NULL, 0, path))) {
-        return strdup(path);
-    }
-#endif
-    return NULL;
-}
-
 // Global variable to store home directory
 static char *g_home_dir = NULL;
 
@@ -119,8 +101,15 @@ char *get_home_dir(void) {
         return g_home_dir;
     }
     
-    // First try environment variables
-    char *home = getenv("USERPROFILE");
+    // Use platform-specific function to get user profile directory
+    const char* home = platform_get_user_profile();
+    if (home) {
+        g_home_dir = (char*)home;
+        return g_home_dir;
+    }
+    
+    // Fallback to environment variables
+    home = getenv("USERPROFILE");
     if (!home) {
         home = getenv("HOME");
     }
@@ -128,28 +117,7 @@ char *get_home_dir(void) {
         home = getenv("APPDATA");
     }
     
-    // Check if the path exists
-    if (home) {
-        struct stat st;
-        if (stat(home, &st) == 0 && S_ISDIR(st.st_mode)) {
-            g_home_dir = home;
-            return g_home_dir;
-        }
-        // If path doesn't exist, try Windows API
-        fprintf(stderr, "DEBUG: Home directory path does not exist: %s\n", home);
-    }
-    
-    // Try Windows API to get user profile path
-    #ifdef _WIN32
-    char* profile_path = get_user_profile_path();
-    if (profile_path) {
-        fprintf(stderr, "DEBUG: Using user profile path from Windows API: %s\n", profile_path);
-        g_home_dir = profile_path;
-        return g_home_dir;
-    }
-    #endif
-    
-    g_home_dir = home;
+    g_home_dir = (char*)home;
     return g_home_dir;
 }
 
@@ -951,11 +919,7 @@ bool config_load(void) {
     // Set default workspace path if not provided
     if (!g_config.workspace.path && !g_config.workspace_path) {
         char default_workspace[512];
-#ifdef _WIN32
-        snprintf(default_workspace, sizeof(default_workspace), ".\\workspace");
-#else
         snprintf(default_workspace, sizeof(default_workspace), "./workspace");
-#endif
         g_config.workspace.path = strdup(default_workspace);
         g_config.workspace_path = strdup(default_workspace);
         fprintf(stderr, "Using default workspace: %s\n", default_workspace);
