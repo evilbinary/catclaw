@@ -20,16 +20,9 @@ char* resolve_path(const char* path) {
     if (!path) return NULL;
 
     // Absolute path - return copy
-    if (path[0] == '/') {
+    if (platform_is_absolute_path(path)) {
         return strdup(path);
     }
-
-// Windows absolute path (e.g., C:\...)
-#ifdef _WIN32
-    if (path[0] != '\0' && path[1] == ':') {
-        return strdup(path);
-    }
-#endif
 
     // Home directory expansion
     if (path[0] == '~') {
@@ -58,15 +51,11 @@ char* resolve_path(const char* path) {
     if (!resolved) return NULL;
 
     strcpy(resolved, cwd);
-#ifdef _WIN32
+    char sep = platform_path_separator();
     if (cwd_len > 0 && cwd[cwd_len - 1] != '/' && cwd[cwd_len - 1] != '\\') {
-        strcat(resolved, "\\");
+        char sep_str[2] = {sep, '\0'};
+        strcat(resolved, sep_str);
     }
-#else
-    if (cwd_len > 0 && cwd[cwd_len - 1] != '/') {
-        strcat(resolved, "/");
-    }
-#endif
     strcat(resolved, path);
 
     return resolved;

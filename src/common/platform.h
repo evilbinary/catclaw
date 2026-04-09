@@ -139,6 +139,16 @@ bool platform_socket_set_blocking(SOCKET sock);
 bool platform_socket_would_block(void);
 
 /**
+ * Prepare command for execution
+ * On Windows, prepends "chcp 65001 >nul && " to set UTF-8 code page
+ * 
+ * @param cmd Original command
+ * @param buf Buffer to store prepared command
+ * @param buf_size Size of buffer
+ */
+void platform_prepare_command(const char* cmd, char* buf, size_t buf_size);
+
+/**
  * Get current working directory
  * 
  * @param buf Buffer to store current working directory

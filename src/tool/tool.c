@@ -982,15 +982,9 @@ int tool_shell_execute(ToolArgs* args, char** result, int* result_len) {
     
     int offset = snprintf(*result, buf_size, "Command: %s\n\n", cmd);
     
-#ifdef _WIN32
-    // Windows: prepend chcp 65001 to set UTF-8 code page
     char full_cmd[2048];
-    snprintf(full_cmd, sizeof(full_cmd), "chcp 65001 >nul && %s", cmd);
+    platform_prepare_command(cmd, full_cmd, sizeof(full_cmd));
     FILE* fp = popen(full_cmd, "r");
-#else
-    // Unix: use popen with timeout
-    FILE* fp = popen(cmd, "r");
-#endif
     
     if (!fp) {
         free(*result);
@@ -1005,11 +999,7 @@ int tool_shell_execute(ToolArgs* args, char** result, int* result_len) {
         offset += snprintf(*result + offset, buf_size - offset, "%s", line);
     }
     
-#ifdef _WIN32
     int exit_code = pclose(fp);
-#else
-    int exit_code = pclose(fp);
-#endif
     
     if (offset == (int)strlen(cmd) + 11) {
         offset += snprintf(*result + offset, buf_size - offset, "(no output)\n");

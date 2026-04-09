@@ -191,24 +191,12 @@ char* ws_client_parse_url(const char *url, char **host, char **path, int *port, 
 
 // Set socket non-blocking
 static bool set_socket_nonblocking(SOCKET sock) {
-#ifdef _WIN32
-    u_long mode = 1;
-    return ioctlsocket(sock, FIONBIO, &mode) == 0;
-#else
-    int flags = fcntl(sock, F_GETFL, 0);
-    return fcntl(sock, F_SETFL, flags | O_NONBLOCK) != -1;
-#endif
+    return platform_socket_set_nonblocking(sock);
 }
 
 // Set socket blocking
 static bool set_socket_blocking(SOCKET sock) {
-#ifdef _WIN32
-    u_long mode = 0;
-    return ioctlsocket(sock, FIONBIO, &mode) == 0;
-#else
-    int flags = fcntl(sock, F_GETFL, 0);
-    return fcntl(sock, F_SETFL, flags & ~O_NONBLOCK) != -1;
-#endif
+    return platform_socket_set_blocking(sock);
 }
 
 // Create WebSocket client
@@ -676,11 +664,7 @@ static int ws_client_recv_frame(WsClient *client, uint8_t *opcode, char **payloa
         } else if (recv_len == 0) {
             return -1;  // Connection closed
         }
-#ifdef _WIN32
-        else if (WSAGetLastError() != WSAEWOULDBLOCK) {
-#else
-        else if (errno != EWOULDBLOCK && errno != EAGAIN) {
-#endif
+        else if (!platform_socket_would_block()) {
             return -1;  // Error
         }
     }

@@ -96,17 +96,9 @@ static bool create_directory_recursive(const char* path) {
         }
     }
     
-#ifdef _WIN32
-    // Convert slashes to backslashes for Windows
-    char* p = dir;
-    while (*p) {
-        if (*p == '/') {
-            *p = '\\';
-        }
-        p++;
-    }
-    printf("Converted path: %s\n", dir);
-#endif
+    // Normalize path separators for current platform
+    platform_normalize_path(dir);
+    printf("Normalized path: %s\n", dir);
     
     // Create directory recursively using platform-agnostic function
     printf("Creating directory: %s\n", dir);
@@ -162,11 +154,9 @@ bool session_save(Session* session, const char* sessions_dir) {
     
     // Save session history as JSONL
     char history_file[256];
-#ifdef _WIN32
-    snprintf(history_file, sizeof(history_file), "%s\\%s.jsonl", actual_dir, session->session_id);
-#else
-    snprintf(history_file, sizeof(history_file), "%s/%s.jsonl", actual_dir, session->session_id);
-#endif
+    char filename[64];
+    snprintf(filename, sizeof(filename), "%s.jsonl", session->session_id);
+    platform_path_join(history_file, sizeof(history_file), actual_dir, filename, NULL);
     
     log_debug("Saving session history to: %s\n", history_file);
     
@@ -192,11 +182,7 @@ bool session_save(Session* session, const char* sessions_dir) {
     
     // Save session metadata
     char metadata_file[256];
-#ifdef _WIN32
-    snprintf(metadata_file, sizeof(metadata_file), "%s\\sessions.json", actual_dir);
-#else
-    snprintf(metadata_file, sizeof(metadata_file), "%s/sessions.json", actual_dir);
-#endif
+    platform_path_join(metadata_file, sizeof(metadata_file), actual_dir, "sessions.json", NULL);
     
     log_debug("Saving session metadata to: %s", metadata_file);
     
@@ -295,16 +281,8 @@ Session* session_load(const char* session_id, const char* sessions_dir) {
             }
         }
         
-#ifdef _WIN32
-        // Convert slashes to backslashes for Windows
-        char* p = expanded_path;
-        while (*p) {
-            if (*p == '/') {
-                *p = '\\';
-            }
-            p++;
-        }
-#endif
+        // Normalize path separators for current platform
+        platform_normalize_path(expanded_path);
         
         strncpy(history_file, expanded_path, sizeof(history_file) - 1);
         history_file[sizeof(history_file) - 1] = '\0';
@@ -367,16 +345,8 @@ Session* session_load(const char* session_id, const char* sessions_dir) {
             }
         }
         
-#ifdef _WIN32
-        // Convert slashes to backslashes for Windows
-        char* p = expanded_metadata_path;
-        while (*p) {
-            if (*p == '/') {
-                *p = '\\';
-            }
-            p++;
-        }
-#endif
+        // Normalize path separators for current platform
+        platform_normalize_path(expanded_metadata_path);
         
         strncpy(metadata_file, expanded_metadata_path, sizeof(metadata_file) - 1);
         metadata_file[sizeof(metadata_file) - 1] = '\0';

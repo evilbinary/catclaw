@@ -9,6 +9,7 @@
         "plugin.h": "c",
         "windows.h": "c",
         "config.h": "c",
-        "platform.h": "c"
+        "platform.h": "c",
+        "stat.h": "c"
     }
 }

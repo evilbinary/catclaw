@@ -489,11 +489,7 @@ static void* weixin_polling_thread(void *arg) {
                 int waited = 0;
                 
                 while (waited < max_wait && channel->enabled) {
-#ifdef _WIN32
-                    Sleep(1000);
-#else
                     sleep(1);
-#endif
                     waited++;
                     
                     printf(".");
@@ -538,11 +534,7 @@ static void* weixin_polling_thread(void *arg) {
                 free(qrcode_img);
             } else {
                 log_error("[Weixin] Failed to get QR code, retrying in 5 seconds...");
-#ifdef _WIN32
-                Sleep(5000);
-#else
                 sleep(5);
-#endif
                 continue;  // 重新尝试登录
             }
         }
@@ -628,11 +620,7 @@ static void* weixin_polling_thread(void *arg) {
                 }
             }
             
-#ifdef _WIN32
-            Sleep(100);
-#else
-            usleep(200000);
-#endif
+            msleep(200);
         }
         
         // 如果是 session timeout，继续循环重新登录

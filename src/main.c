@@ -23,11 +23,9 @@
 static ThreadPool *g_thread_pool = NULL;
 
 int main(int argc, char *argv[]) {
-#ifdef _WIN32
-    // Set console to UTF-8 mode for proper Chinese character display
-    SetConsoleOutputCP(CP_UTF8);
-    SetConsoleCP(CP_UTF8);
-#endif
+    // Initialize platform-specific console
+    platform_console_init();
+    
     printf("🐦 CatClaw - C version\n");
     printf("Based on OpenClaw functionality\n\n");
 

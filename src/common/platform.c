@@ -257,7 +257,7 @@ void platform_console_init(void) {
 bool platform_socket_set_nonblocking(SOCKET sock) {
 #ifdef _WIN32
     u_long mode = 1;
-    return ioctlsocket(sock, FIONBIO, &mode) == 0;
+    return ioctlsocket(sock, FIONBIO, (u_long*)&mode) == 0;
 #else
     int flags = fcntl(sock, F_GETFL, 0);
     return fcntl(sock, F_SETFL, flags | O_NONBLOCK) != -1;
@@ -273,7 +273,7 @@ bool platform_socket_set_nonblocking(SOCKET sock) {
 bool platform_socket_set_blocking(SOCKET sock) {
 #ifdef _WIN32
     u_long mode = 0;
-    return ioctlsocket(sock, FIONBIO, &mode) == 0;
+    return ioctlsocket(sock, FIONBIO, (u_long*)&mode) == 0;
 #else
     int flags = fcntl(sock, F_GETFL, 0);
     return fcntl(sock, F_SETFL, flags & ~O_NONBLOCK) != -1;
@@ -290,6 +290,27 @@ bool platform_socket_would_block(void) {
     return WSAGetLastError() == WSAEWOULDBLOCK;
 #else
     return errno == EWOULDBLOCK || errno == EAGAIN;
+#endif
+}
+
+/**
+ * Prepare command for execution
+ * On Windows, prepends "chcp 65001 >nul && " to set UTF-8 code page
+ * 
+ * @param cmd Original command
+ * @param buf Buffer to store prepared command
+ * @param buf_size Size of buffer
+ */
+void platform_prepare_command(const char* cmd, char* buf, size_t buf_size) {
+    if (!cmd || !buf || buf_size == 0) return;
+    
+#ifdef _WIN32
+    // Windows: prepend chcp 65001 to set UTF-8 code page
+    snprintf(buf, buf_size, "chcp 65001 >nul && %s", cmd);
+#else
+    // Unix: use command as-is
+    strncpy(buf, cmd, buf_size - 1);
+    buf[buf_size - 1] = '\0';
 #endif
 }
 
