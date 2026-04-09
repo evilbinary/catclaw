@@ -110,7 +110,15 @@ static char* get_user_profile_path(void) {
     return NULL;
 }
 
+// Global variable to store home directory
+static char *g_home_dir = NULL;
+
 char *get_home_dir(void) {
+    // Return cached home directory if already set
+    if (g_home_dir) {
+        return g_home_dir;
+    }
+    
     // First try environment variables
     char *home = getenv("USERPROFILE");
     if (!home) {
@@ -124,7 +132,8 @@ char *get_home_dir(void) {
     if (home) {
         struct stat st;
         if (stat(home, &st) == 0 && S_ISDIR(st.st_mode)) {
-            return home;
+            g_home_dir = home;
+            return g_home_dir;
         }
         // If path doesn't exist, try Windows API
         fprintf(stderr, "DEBUG: Home directory path does not exist: %s\n", home);
@@ -135,11 +144,13 @@ char *get_home_dir(void) {
     char* profile_path = get_user_profile_path();
     if (profile_path) {
         fprintf(stderr, "DEBUG: Using user profile path from Windows API: %s\n", profile_path);
-        return profile_path;
+        g_home_dir = profile_path;
+        return g_home_dir;
     }
     #endif
     
-    return home;
+    g_home_dir = home;
+    return g_home_dir;
 }
 
 static char *read_file(const char *path) {
@@ -930,10 +941,6 @@ bool config_load(void) {
             fprintf(stderr, "Error parsing config.json: %s\n", cJSON_GetErrorPtr());
             fprintf(stderr, "Please fix the JSON syntax in ~/.catclaw/config.json\n");
             free(config_content);
-            // Free home directory if it was allocated by get_user_profile_path
-            if (home && strstr(home, "/") == NULL) {
-                free(home);
-            }
             return false;
         }
         free(config_content);
@@ -1009,11 +1016,6 @@ bool config_load(void) {
     g_config.compaction_threshold = g_config.compaction.threshold;
     g_config.max_context_tokens = g_config.model.max_context_tokens;
     g_config.timeout_seconds = g_config.model.timeout_seconds;
-
-    // Free home directory if it was allocated by get_user_profile_path
-    if (home && strstr(home, "/") == NULL) {
-        free(home);
-    }
 
     return true;
 }
