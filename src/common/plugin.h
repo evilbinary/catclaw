@@ -43,6 +43,7 @@ bool plugin_load(const char *path);
 bool plugin_unload(const char *name);
 Plugin *plugin_find(const char *name);
 void plugin_list(void);
+char* plugin_list_to_string(void);
 PluginRegistry *plugin_get_registry(void);
 
 #endif // PLUGIN_H

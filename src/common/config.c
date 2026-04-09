@@ -1185,6 +1185,81 @@ void config_print(void) {
     }
 }
 
+// Get configuration as string
+char* config_print_to_string(void) {
+    // Calculate approximate size needed
+    size_t size = 2048; // Initial size
+    char* buf = (char*)malloc(size);
+    if (!buf) return NULL;
+    
+    int pos = snprintf(buf, size, "Configuration:\n");
+    
+    // Model section
+    pos += snprintf(buf + pos, size - pos, "  Model:\n");
+    pos += snprintf(buf + pos, size - pos, "    Provider: %s\n", g_config.model.provider ? g_config.model.provider : "(default)");
+    pos += snprintf(buf + pos, size - pos, "    Name: %s\n", g_config.model.name ? g_config.model.name : "(default)");
+    pos += snprintf(buf + pos, size - pos, "    Base URL: %s\n", g_config.model.base_url ? g_config.model.base_url : "(default)");
+    pos += snprintf(buf + pos, size - pos, "    Max Context Tokens: %d\n", g_config.model.max_context_tokens);
+    pos += snprintf(buf + pos, size - pos, "    Timeout: %d seconds\n", g_config.model.timeout_seconds);
+    
+    // Gateway section
+    pos += snprintf(buf + pos, size - pos, "  Gateway:\n");
+    pos += snprintf(buf + pos, size - pos, "    Port: %d\n", g_config.gateway.port);
+    pos += snprintf(buf + pos, size - pos, "    Browser Enabled: %s\n", g_config.gateway.browser_enabled ? "true" : "false");
+    pos += snprintf(buf + pos, size - pos, "    HTTP Server Enabled: %s\n", g_config.gateway.http_server_enabled ? "true" : "false");
+    pos += snprintf(buf + pos, size - pos, "    WebSocket Enabled: %s\n", g_config.gateway.websocket_enabled ? "true" : "false");
+    
+    // Workspace section
+    pos += snprintf(buf + pos, size - pos, "  Workspace:\n");
+    pos += snprintf(buf + pos, size - pos, "    Path: %s\n", g_config.workspace.path ? g_config.workspace.path : "(default)");
+    
+    // Session section
+    pos += snprintf(buf + pos, size - pos, "  Session:\n");
+    pos += snprintf(buf + pos, size - pos, "    Max Sessions: %d\n", g_config.session.max_sessions);
+    pos += snprintf(buf + pos, size - pos, "    Auto Save: %s\n", g_config.session.auto_save ? "true" : "false");
+    pos += snprintf(buf + pos, size - pos, "    Default Session Key: %s\n", g_config.session.default_session_key ? g_config.session.default_session_key : "default");
+    pos += snprintf(buf + pos, size - pos, "    Max History Per Session: %d\n", g_config.session.max_history_per_session);
+    pos += snprintf(buf + pos, size - pos, "    Context History Limit: %d\n", g_config.session.context_history_limit);
+    
+    // Logging section
+    pos += snprintf(buf + pos, size - pos, "  Logging:\n");
+    pos += snprintf(buf + pos, size - pos, "    Level: %s\n", g_config.logging.level ? g_config.logging.level : "(default)");
+    pos += snprintf(buf + pos, size - pos, "    File: %s\n", g_config.logging.file ? g_config.logging.file : "(none)");
+    pos += snprintf(buf + pos, size - pos, "    Console Output: %s\n", g_config.logging.console_output ? "true" : "false");
+    
+    // Compaction section
+    pos += snprintf(buf + pos, size - pos, "  Compaction:\n");
+    pos += snprintf(buf + pos, size - pos, "    Enabled: %s\n", g_config.compaction.enabled ? "true" : "false");
+    pos += snprintf(buf + pos, size - pos, "    Threshold: %d\n", g_config.compaction.threshold);
+    
+    // Agent section
+    pos += snprintf(buf + pos, size - pos, "  Agent:\n");
+    pos += snprintf(buf + pos, size - pos, "    System Prompt: %s\n", g_config.agent.system_prompt ? "(configured)" : "(default)");
+    
+    // Channels section
+    pos += snprintf(buf + pos, size - pos, "  Channels:\n");
+    pos += snprintf(buf + pos, size - pos, "    Count: %d\n", g_config.channels.count);
+    for (int i = 0; i < g_config.channels.count; i++) {
+        ChannelConfigEntry *ch = &g_config.channels.channels[i];
+        // Check if we need more space
+        if (pos + 512 > size) {
+            size *= 2;
+            char* new_buf = (char*)realloc(buf, size);
+            if (!new_buf) {
+                free(buf);
+                return NULL;
+            }
+            buf = new_buf;
+        }
+        pos += snprintf(buf + pos, size - pos, "      [%d] %s (%s) %s\n", i,
+                       ch->name ? ch->name : "(unnamed)",
+                       ch->type ? ch->type : "(unknown)",
+                       ch->enabled ? "enabled" : "disabled");
+    }
+    
+    return buf;
+}
+
 bool config_set(const char *key, const char *value) {
     // TODO: Implement configuration setting
     (void)key;

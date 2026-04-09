@@ -79,6 +79,7 @@ bool skill_unload(const char *name);
 Skill *skill_find(const char *name);
 char *skill_execute_skill(const char *name, const char *params);
 void skill_list(void);
+char* skill_list_to_string(void);
 SkillRegistry *skill_get_registry(void);
 bool skill_enable(const char *name);
 bool skill_disable(const char *name);

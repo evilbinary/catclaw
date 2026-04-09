@@ -451,8 +451,18 @@ static char* cmd_config(const char* args) {
     if (!buf) return NULL;
     
     if (!args || strlen(args) == 0 || strcmp(args, "list") == 0) {
-        config_print();
-        snprintf(buf, size, "配置已打印到控制台");
+        config_print(); // Still print to console for debugging
+        char* config_str = config_print_to_string();
+        if (config_str) {
+            size_t new_size = strlen(config_str) + 1;
+            buf = (char*)realloc(buf, new_size);
+            if (buf) {
+                snprintf(buf, new_size, "%s", config_str);
+            }
+            free(config_str);
+        } else {
+            snprintf(buf, size, "配置已打印到控制台");
+        }
     } else if (strncmp(args, "get ", 4) == 0) {
         const char* key = args + 4;
         const char* value = config_get(key);
@@ -538,8 +548,18 @@ static char* cmd_plugin(const char* args) {
     if (!buf) return NULL;
     
     if (!args || strlen(args) == 0 || strcmp(args, "list") == 0) {
-        plugin_list();
-        snprintf(buf, size, "插件列表已打印到控制台");
+        plugin_list(); // Still print to console for debugging
+        char* plugin_list_str = plugin_list_to_string();
+        if (plugin_list_str) {
+            size_t new_size = strlen(plugin_list_str) + 1;
+            buf = (char*)realloc(buf, new_size);
+            if (buf) {
+                snprintf(buf, new_size, "%s", plugin_list_str);
+            }
+            free(plugin_list_str);
+        } else {
+            snprintf(buf, size, "插件列表已打印到控制台");
+        }
     } else if (strncmp(args, "load ", 5) == 0) {
         const char* path = args + 5;
         if (plugin_load(path)) {
@@ -629,8 +649,18 @@ static char* cmd_skill(const char* args) {
     if (!buf) return NULL;
     
     if (!args || strlen(args) == 0 || strcmp(args, "list") == 0) {
-        skill_list();
-        snprintf(buf, size, "技能列表已打印到控制台");
+        skill_list(); // Still print to console for debugging
+        char* skill_list_str = skill_list_to_string();
+        if (skill_list_str) {
+            size_t new_size = strlen(skill_list_str) + 1;
+            buf = (char*)realloc(buf, new_size);
+            if (buf) {
+                snprintf(buf, new_size, "%s", skill_list_str);
+            }
+            free(skill_list_str);
+        } else {
+            snprintf(buf, size, "技能列表已打印到控制台");
+        }
     } else if (strncmp(args, "load ", 5) == 0) {
         const char* path = args + 5;
         if (skill_load(path)) {

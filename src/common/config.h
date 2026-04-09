@@ -152,6 +152,7 @@ extern Config g_config;
 bool config_load(void);
 void config_cleanup(void);
 void config_print(void);
+char* config_print_to_string(void);
 bool config_set(const char *key, const char *value);
 const char *config_get(const char *key);
 char *get_home_dir(void);

@@ -302,6 +302,50 @@ void plugin_list(void) {
     }
 }
 
+// Get plugin list as string
+char* plugin_list_to_string(void) {
+    if (!registry) {
+        return strdup("Plugin system not initialized");
+    }
+    
+    if (registry->count == 0) {
+        return strdup("No plugins loaded");
+    }
+    
+    // Calculate approximate size needed
+    size_t size = 1024; // Initial size
+    char* buf = (char*)malloc(size);
+    if (!buf) return NULL;
+    
+    int pos = snprintf(buf, size, "Loaded plugins:\n");
+    
+    for (int i = 0; i < registry->count; i++) {
+        Plugin *plugin = registry->plugins[i];
+        if (plugin) {
+            // Check if we need more space
+            if (pos + 512 > size) {
+                size *= 2;
+                char* new_buf = (char*)realloc(buf, size);
+                if (!new_buf) {
+                    free(buf);
+                    return NULL;
+                }
+                buf = new_buf;
+            }
+            
+            pos += snprintf(buf + pos, size - pos, "  %s v%s (%s) - %s\n", 
+                           plugin->name, 
+                           plugin->version, 
+                           plugin->type == PLUGIN_TYPE_CHANNEL ? "Channel" : 
+                           plugin->type == PLUGIN_TYPE_TOOL ? "Tool" : 
+                           plugin->type == PLUGIN_TYPE_SKILL ? "Skill" : "Other",
+                           plugin->description);
+        }
+    }
+    
+    return buf;
+}
+
 // Get plugin registry
 PluginRegistry *plugin_get_registry(void) {
     return registry;

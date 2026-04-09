@@ -15,9 +15,7 @@
 
 // Windows compatibility
 #ifdef _WIN32
-  #include <direct.h>
   #include <windows.h>
-  #define mkdir(path, mode) _mkdir(path)
   #define sleep(sec) Sleep((sec) * 1000)
 #elif defined(__APPLE__)
   #include <sys/event.h>
@@ -578,6 +576,47 @@ void skill_list(void) {
                    skill->enabled ? "✓ Enabled" : "✗ Disabled");
         }
     }
+}
+
+// Get skill list as string
+char* skill_list_to_string(void) {
+    if (g_skill_registry.count == 0) {
+        return strdup("No skills loaded");
+    }
+    
+    // Calculate approximate size needed
+    size_t size = 1024; // Initial size
+    char* buf = (char*)malloc(size);
+    if (!buf) return NULL;
+    
+    int pos = snprintf(buf, size, "Loaded skills:\n");
+    
+    for (int i = 0; i < g_skill_registry.count; i++) {
+        Skill *skill = g_skill_registry.skills[i];
+        if (skill) {
+            // Check if we need more space
+            if (pos + 512 > size) {
+                size *= 2;
+                char* new_buf = (char*)realloc(buf, size);
+                if (!new_buf) {
+                    free(buf);
+                    return NULL;
+                }
+                buf = new_buf;
+            }
+            
+            pos += snprintf(buf + pos, size - pos, "  %s (%s) [%s/%s] - %s\n", 
+                           skill->name, skill->version, 
+                           skill_source_name(skill->source),
+                           skill_type_name(skill->type),
+                           skill->description);
+            pos += snprintf(buf + pos, size - pos, "    Author: %s | Category: %s | %s\n", 
+                           skill->author, skill->category,
+                           skill->enabled ? "✓ Enabled" : "✗ Disabled");
+        }
+    }
+    
+    return buf;
 }
 
 // Get the skill registry
@@ -1298,7 +1337,18 @@ bool skill_hub_download(const char *skill_id) {
     }
     
     // Create directory if not exists
+#ifdef _WIN32
+    // Use Windows API CreateDirectory
+    if (!CreateDirectory(cache_dir, NULL)) {
+        DWORD error = GetLastError();
+        // Ignore error if directory already exists
+        if (error != ERROR_ALREADY_EXISTS) {
+            fprintf(stderr, "Failed to create directory: %s (error: %d)\n", cache_dir, error);
+        }
+    }
+#else
     mkdir(cache_dir, 0755);
+#endif
     
     // Save to file
     char filepath[MAX_PATH_LEN];
