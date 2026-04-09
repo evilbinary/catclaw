@@ -1,19 +1,6 @@
 /**
  * WebSocket Client Implementation
  */
-#include "ws_client.h"
-#include "common/log.h"
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <time.h>
-
-// OpenSSL for SSL/TLS support
-#ifdef HAVE_OPENSSL
-#include <openssl/ssl.h>
-#include <openssl/err.h>
-#endif
-
 // Platform-specific includes
 #ifdef _WIN32
 #include <winsock2.h>
@@ -38,6 +25,20 @@
 #define WSAGetLastError() errno
 #define closesocket close
 #endif
+
+// OpenSSL for SSL/TLS support
+#ifdef HAVE_OPENSSL
+#include <openssl/ssl.h>
+#include <openssl/err.h>
+#endif
+
+// Other includes
+#include "ws_client.h"
+#include "common/log.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
 
 // WebSocket opcodes
 #define WS_OPCODE_CONTINUATION 0x0
@@ -244,6 +245,18 @@ WsClient* ws_client_create(const WsClientConfig *config) {
         free(client);
         return NULL;
     }
+    
+    // Check if WSS is requested but OpenSSL is not available
+    #ifndef HAVE_OPENSSL
+    if (client->use_ssl) {
+        log_error("[WSClient] WSS connections require OpenSSL, but it's not available");
+        free(client->url);
+        free(client->host);
+        free(client->path);
+        free(client);
+        return NULL;
+    }
+    #endif
     
     // Set configuration
     client->ping_interval_sec = config->ping_interval_sec > 0 ? config->ping_interval_sec : 30;

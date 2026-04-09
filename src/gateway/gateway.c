@@ -96,6 +96,7 @@ bool gateway_start(void) {
             } else {
                 for (int i = 0; i < g_config.channels.count; i++) {
                     ChannelConfigEntry *ch = &g_config.channels.channels[i];
+                    #ifdef HAVE_OPENSSL
                     if (ch->type && strcmp(ch->type, "feishu") == 0 &&
                         ch->ws_enabled && ch->app_id && ch->app_secret) {
 
@@ -122,6 +123,11 @@ bool gateway_start(void) {
                             }
                         }
                     }
+                    #else
+                    if (ch->type && strcmp(ch->type, "feishu") == 0) {
+                        log_warn("Feishu WebSocket disabled: OpenSSL not available");
+                    }
+                    #endif
                 }
             }
         }
