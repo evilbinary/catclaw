@@ -78,6 +78,67 @@ bool platform_exists(const char* path);
 bool platform_is_dir(const char* path);
 
 /**
+ * Get path separator character
+ * 
+ * @return Path separator character ('\\' on Windows, '/' on Unix)
+ */
+char platform_path_separator(void);
+
+/**
+ * Check if path is absolute
+ * 
+ * @param path Path to check
+ * @return true if absolute, false otherwise
+ */
+bool platform_is_absolute_path(const char* path);
+
+/**
+ * Normalize path separators for current platform
+ * Converts '/' to '\\' on Windows, and '\\' to '/' on Unix
+ * 
+ * @param path Path to normalize (modified in place)
+ */
+void platform_normalize_path(char* path);
+
+/**
+ * Join path components
+ * 
+ * @param dest Destination buffer
+ * @param dest_size Size of destination buffer
+ * @param ... Path components (NULL-terminated list)
+ */
+void platform_path_join(char* dest, size_t dest_size, ...);
+
+/**
+ * Initialize platform-specific console
+ * Sets UTF-8 mode on Windows, no-op on Unix
+ */
+void platform_console_init(void);
+
+/**
+ * Set socket to non-blocking mode
+ * 
+ * @param sock Socket handle
+ * @return true on success, false on failure
+ */
+bool platform_socket_set_nonblocking(SOCKET sock);
+
+/**
+ * Set socket to blocking mode
+ * 
+ * @param sock Socket handle
+ * @return true on success, false on failure
+ */
+bool platform_socket_set_blocking(SOCKET sock);
+
+/**
+ * Check if last error is "would block"
+ * 
+ * @return true if error is WSAEWOULDBLOCK/EWOULDBLOCK/EAGAIN
+ */
+bool platform_socket_would_block(void);
+
+/**
  * Get current working directory
  * 
  * @param buf Buffer to store current working directory
