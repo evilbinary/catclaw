@@ -846,7 +846,7 @@ bool config_load(void) {
     // Load config from JSON file
     char config_path[256];
     snprintf(config_path, sizeof(config_path), "%s/.catclaw/config.json", home);
-
+    log_info("Loading config from %s", config_path);
     char *config_content = read_file(config_path);
     if (config_content) {
         cJSON *root = cJSON_Parse(config_content);
