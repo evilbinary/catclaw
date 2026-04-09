@@ -5,17 +5,20 @@ CFLAGS = -Wall -Wextra -g -I. -I./src
 UNAME_S := $(shell uname -s)
 OS_NAME := $(shell echo $(UNAME_S) | tr '[A-Z]' '[a-z]')
 
+MINGW_PREFIX := 
+
 # Platform-specific flags
 ifeq ($(findstring mingw32_nt,$(OS_NAME)),mingw32_nt)
     # MinGW32 environment
     LDFLAGS = -lpthread -lws2_32 -lole32 -luserenv
     CFLAGS += -D_WIN32 -DMINGW32
-    
+    MINGW_PREFIX=/mingw32
     # Use MinGW32 paths
     CFLAGS += -I$(MINGW_PREFIX)/include
     LDFLAGS += -L$(MINGW_PREFIX)/lib
 else ifeq ($(findstring mingw64_nt,$(OS_NAME)),mingw64_nt)
     # MinGW64 environment
+    MINGW_PREFIX=/mingw64
     LDFLAGS = -lpthread -lws2_32 -lole32 -luserenv
     CFLAGS += -D_WIN32 -DMINGW64
     
@@ -24,7 +27,12 @@ else ifeq ($(findstring mingw64_nt,$(OS_NAME)),mingw64_nt)
     LDFLAGS += -L/mingw64/lib
 else ifeq ($(findstring msys_nt,$(OS_NAME)),msys_nt)
     # MSYS2 environment
+    MINGW_PREFIX=/mingw64
     LDFLAGS = -lpthread -lws2_32 -lole32 -luserenv
+    CFLAGS += -D_WIN32 -DMSYS
+    
+    # Use MSYS2 paths
+    CFLAGS += -I/msys2_32 -lole32 -luserenv
     CFLAGS += -D_WIN32 -DMSYS
     
     # Use MinGW64 paths
@@ -39,28 +47,25 @@ endif
 # OpenSSL support
 ifeq ($(findstring mingw32_nt,$(OS_NAME)),mingw32_nt)
     # MinGW32 environment
-    MINGW_OPENSSL_DIR := $(MINGW_PREFIX)/ssl
-    ifneq ($(wildcard $(MINGW_OPENSSL_DIR)/lib/libssl.a),)
-        CFLAGS += -I$(MINGW_OPENSSL_DIR)/include -DHAVE_OPENSSL
-        LDFLAGS += -L$(MINGW_OPENSSL_DIR)/lib -lssl -lcrypto
+    ifneq ($(wildcard $(MINGW_PREFIX)/lib/libssl.a),)
+        CFLAGS += -I$(MINGW_PREFIX)/include -DHAVE_OPENSSL
+        LDFLAGS += -lssl -lcrypto
     else
         CFLAGS += -DNO_OPENSSL
     endif
 else ifeq ($(findstring mingw64_nt,$(OS_NAME)),mingw64_nt)
     # MinGW64 environment
-    MINGW_OPENSSL_DIR := /mingw64/ssl
-    ifneq ($(wildcard $(MINGW_OPENSSL_DIR)/lib/libssl.a),)
-        CFLAGS += -I$(MINGW_OPENSSL_DIR)/include -DHAVE_OPENSSL
-        LDFLAGS += -L$(MINGW_OPENSSL_DIR)/lib -lssl -lcrypto
+    ifneq ($(wildcard /mingw64/lib/libssl.a),)
+        CFLAGS += -I/mingw64/include -DHAVE_OPENSSL
+        LDFLAGS += -lssl -lcrypto
     else
         CFLAGS += -DNO_OPENSSL
     endif
 else ifeq ($(findstring msys_nt,$(OS_NAME)),msys_nt)
     # MSYS2 environment
-    MINGW_OPENSSL_DIR := /mingw64/ssl
-    ifneq ($(wildcard $(MINGW_OPENSSL_DIR)/lib/libssl.a),)
-        CFLAGS += -I$(MINGW_OPENSSL_DIR)/include -DHAVE_OPENSSL
-        LDFLAGS += -L$(MINGW_OPENSSL_DIR)/lib -lssl -lcrypto
+    ifneq ($(wildcard /mingw64/lib/libssl.a),)
+        CFLAGS += -I/mingw64/include -DHAVE_OPENSSL
+        LDFLAGS += -lssl -lcrypto
     else
         CFLAGS += -DNO_OPENSSL
     endif
