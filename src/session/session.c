@@ -6,8 +6,8 @@
 #include <errno.h>
 
 #ifdef _WIN32
-#include <direct.h>
-#define MKDIR(path) _mkdir(path)
+#include <windows.h>
+#define MKDIR(path) CreateDirectoryA(path, NULL)
 #else
 #include <sys/types.h>
 #define MKDIR(path) mkdir(path, 0755)

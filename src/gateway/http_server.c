@@ -1,14 +1,3 @@
-#include "http_server.h"
-#include "../common/log.h"
-#include "../common/cJSON.h"
-#include "../common/utils.h"
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <ctype.h>
-#include <pthread.h>
-
-
 // Platform-specific includes
 #ifdef _WIN32
 #include <winsock2.h>
@@ -28,6 +17,16 @@
 #define msleep(ms) do { struct timespec ts = {0, (ms)*1000000L}; nanosleep(&ts, NULL); } while(0)
 #define CLOSESOCKET(s) close(s)
 #endif
+
+#include "http_server.h"
+#include "../common/log.h"
+#include "../common/cJSON.h"
+#include "../common/utils.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <ctype.h>
+#include <pthread.h>
 #include <errno.h>
 
 #define BUFFER_SIZE 8192

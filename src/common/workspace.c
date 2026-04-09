@@ -8,7 +8,7 @@
 #ifdef _WIN32
 #include <windows.h>
 #define MKDIR(path) CreateDirectory(path, NULL)
-#define ACCESS(path, mode) _access(path, mode)
+#define ACCESS(path, mode) access(path, mode)
 #else
 #include <unistd.h>
 #define MKDIR(path) mkdir(path, 0755)

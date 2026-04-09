@@ -1,12 +1,3 @@
-#include "websocket.h"
-#include "channels.h"
-#include "../common/utils.h"
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <ctype.h>
-#include <pthread.h>
-
 // Platform-specific includes
 #ifdef _WIN32
 #include <winsock2.h>
@@ -28,6 +19,14 @@
 #define closesocket close
 #endif
 
+#include "websocket.h"
+#include "channels.h"
+#include "../common/utils.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <ctype.h>
+#include <pthread.h>
 #include <stdint.h>
 
 // ntohll/htonll: use platform macros if available, otherwise provide fallback

@@ -10,6 +10,11 @@
 #include <string.h>
 #include <ctype.h>
 
+#ifdef _WIN32
+// 直接定义 SOCKET 类型，避免包含 winsock2.h 头文件
+typedef unsigned long long SOCKET;
+#endif
+
 #ifdef HAVE_CURL
 #include <curl/curl.h>
 

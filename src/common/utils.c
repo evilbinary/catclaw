@@ -9,7 +9,6 @@
 
 #ifdef _WIN32
 #include <windows.h>
-#include <direct.h>
 #else
 #include <sys/types.h>
 #include <pwd.h>
