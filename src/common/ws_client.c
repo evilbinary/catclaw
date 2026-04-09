@@ -377,21 +377,12 @@ bool ws_client_connect(WsClient *client) {
         return true;
     }
     
-#ifdef _WIN32
-    // Initialize Windows Sockets
-    static bool ws_initialized = false;
-    if (!ws_initialized) {
-        WSADATA wsaData;
-        int result = WSAStartup(MAKEWORD(2, 2), &wsaData);
-        if (result != 0) {
-            log_error("[WSClient] WSAStartup failed: %d", result);
-            client->state = WS_CLIENT_ERROR;
-            return false;
-        }
-        ws_initialized = true;
-        log_debug("[WSClient] Windows Sockets initialized");
+    // Initialize platform-specific network
+    if (!platform_network_init()) {
+        log_error("[WSClient] Failed to initialize network");
+        client->state = WS_CLIENT_ERROR;
+        return false;
     }
-#endif
     
     client->state = WS_CLIENT_CONNECTING;
     if (client->on_state_change) {

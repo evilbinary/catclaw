@@ -315,6 +315,24 @@ void platform_prepare_command(const char* cmd, char* buf, size_t buf_size) {
 }
 
 /**
+ * Set socket option
+ * 
+ * @param sock Socket handle
+ * @param level Protocol level
+ * @param optname Option name
+ * @param optval Option value
+ * @param optlen Option length
+ * @return 0 on success, -1 on failure
+ */
+int platform_setsockopt(SOCKET sock, int level, int optname, const void* optval, socklen_t optlen) {
+#ifdef _WIN32
+    return setsockopt(sock, level, optname, (const char*)optval, optlen);
+#else
+    return setsockopt(sock, level, optname, optval, optlen);
+#endif
+}
+
+/**
  * Get current working directory
  * 
  * @param buf Buffer to store current working directory

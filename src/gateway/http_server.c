@@ -569,11 +569,7 @@ HttpServer* http_server_create(const SrvConfig* config) {
     
     // 设置 socket 选项
     int opt = 1;
-#ifdef _WIN32
-    setsockopt(server->socket, SOL_SOCKET, SO_REUSEADDR, (const char*)&opt, sizeof(opt));
-#else
-    setsockopt(server->socket, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
-#endif
+    platform_setsockopt(server->socket, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
     
     // 绑定端口
     struct sockaddr_in addr;
