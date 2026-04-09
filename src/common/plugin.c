@@ -43,7 +43,7 @@ void plugin_system_cleanup(void) {
                 if (plugin->cleanup) {
                     plugin->cleanup();
                 }
-                dlclose(plugin->handle);
+                platform_unload_library(plugin->handle);
             }
             free(plugin->name);
             free(plugin->version);
@@ -167,7 +167,7 @@ bool plugin_load(const char *path) {
             free(plugin->version);
             free(plugin->description);
             free(plugin);
-            dlclose(handle);
+            platform_unload_library(handle);
             free(path_copy);
             return false;
         }
@@ -185,7 +185,7 @@ bool plugin_load(const char *path) {
             free(plugin->version);
             free(plugin->description);
             free(plugin);
-            dlclose(handle);
+            platform_unload_library(handle);
             free(path_copy);
             return false;
         }
@@ -215,7 +215,7 @@ bool plugin_unload(const char *name) {
             }
             
             // Close plugin handle
-            dlclose(plugin->handle);
+            platform_unload_library(plugin->handle);
             
             // Remove from registry
             free(plugin->name);
