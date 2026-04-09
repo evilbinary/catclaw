@@ -17,6 +17,7 @@
 #ifdef _WIN32
   #include <windows.h>
   #define sleep(sec) Sleep((sec) * 1000)
+  #define mkdir(path, mode) CreateDirectoryA(path, NULL)
 #elif defined(__APPLE__)
   #include <sys/event.h>
   #include <fcntl.h>
@@ -1338,14 +1339,7 @@ bool skill_hub_download(const char *skill_id) {
     
     // Create directory if not exists
 #ifdef _WIN32
-    // Use Windows API CreateDirectory
-    if (!CreateDirectory(cache_dir, NULL)) {
-        DWORD error = GetLastError();
-        // Ignore error if directory already exists
-        if (error != ERROR_ALREADY_EXISTS) {
-            fprintf(stderr, "Failed to create directory: %s (error: %d)\n", cache_dir, error);
-        }
-    }
+    CreateDirectoryA(cache_dir, NULL);
 #else
     mkdir(cache_dir, 0755);
 #endif

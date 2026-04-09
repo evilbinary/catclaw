@@ -27,9 +27,9 @@ else ifeq ($(findstring msys_nt,$(OS_NAME)),msys_nt)
     LDFLAGS = -lpthread -lws2_32 -lole32
     CFLAGS += -D_WIN32 -DMSYS
     
-    # Use MSYS2 paths
-    CFLAGS += -I/usr/include
-    LDFLAGS += -L/usr/lib
+    # Use MinGW64 paths
+    CFLAGS += -I/mingw64/include
+    LDFLAGS += -L/mingw64/lib
 else
     # Linux or other Unix-like systems
     LDFLAGS = -lpthread
@@ -57,10 +57,10 @@ else ifeq ($(findstring mingw64_nt,$(OS_NAME)),mingw64_nt)
     endif
 else ifeq ($(findstring msys_nt,$(OS_NAME)),msys_nt)
     # MSYS2 environment
-    MSYS_OPENSSL_DIR := /usr
-    ifneq ($(wildcard $(MSYS_OPENSSL_DIR)/lib/libssl.a),)
-        CFLAGS += -I$(MSYS_OPENSSL_DIR)/include -DHAVE_OPENSSL
-        LDFLAGS += -L$(MSYS_OPENSSL_DIR)/lib -lssl -lcrypto
+    MINGW_OPENSSL_DIR := /mingw64/ssl
+    ifneq ($(wildcard $(MINGW_OPENSSL_DIR)/lib/libssl.a),)
+        CFLAGS += -I$(MINGW_OPENSSL_DIR)/include -DHAVE_OPENSSL
+        LDFLAGS += -L$(MINGW_OPENSSL_DIR)/lib -lssl -lcrypto
     else
         CFLAGS += -DNO_OPENSSL
     endif
@@ -142,10 +142,10 @@ else ifeq ($(findstring mingw64_nt,$(OS_NAME)),mingw64_nt)
     endif
 else ifeq ($(findstring msys_nt,$(OS_NAME)),msys_nt)
     # MSYS2 environment
-    MSYS_CURL_DIR := /usr
-    ifneq ($(wildcard $(MSYS_CURL_DIR)/lib/libcurl.a),)
-        CFLAGS += -I$(MSYS_CURL_DIR)/include -DHAVE_CURL
-        LDFLAGS += -L$(MSYS_CURL_DIR)/lib -lcurl
+    MINGW_CURL_DIR := /mingw64
+    ifneq ($(wildcard $(MINGW_CURL_DIR)/lib/libcurl.a),)
+        CFLAGS += -I$(MINGW_CURL_DIR)/include -DHAVE_CURL
+        LDFLAGS += -L$(MINGW_CURL_DIR)/lib -lcurl
     else
         CFLAGS += -DNO_CURL
     endif

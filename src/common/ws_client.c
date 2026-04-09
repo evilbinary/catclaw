@@ -806,7 +806,11 @@ static void* ws_client_event_loop(void *arg) {
             timeout.tv_sec = 1;
             timeout.tv_usec = 0;
             
+#ifdef _WIN32
+            int result = select(client->socket + 1, &read_fds, NULL, NULL, (PTIMEVAL)&timeout);
+#else
             int result = select(client->socket + 1, &read_fds, NULL, NULL, &timeout);
+#endif
             
             if (!client->running) break;
             

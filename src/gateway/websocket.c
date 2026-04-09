@@ -181,7 +181,11 @@ static void* websocket_server_thread(void *arg) {
         struct timeval timeout;
         timeout.tv_sec = 1;
         timeout.tv_usec = 0;
+#ifdef _WIN32
+        int activity = select(max_fd + 1, &read_fds, NULL, NULL, (PTIMEVAL)&timeout);
+#else
         int activity = select(max_fd + 1, &read_fds, NULL, NULL, &timeout);
+#endif
         if (activity == SOCKET_ERROR) {
             fprintf(stderr, "select failed: %d\n", WSAGetLastError());
             break;
