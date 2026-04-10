@@ -38,6 +38,8 @@
 #define WSADATA int
 #define WSAStartup(a, b) (0)
 #define WSACleanup() (0)
+#include <dlfcn.h>
+
 #endif
 
 #include <stdbool.h>
