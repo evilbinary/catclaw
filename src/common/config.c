@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <log.h>
 
 // Global config instance
 Config g_config = {
