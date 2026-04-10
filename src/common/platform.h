@@ -18,6 +18,9 @@
 #define msleep(ms) Sleep(ms)
 #define CLOSESOCKET(s) closesocket(s)
 #define WSAGetLastError() GetLastError()
+// Windows uses WSAEWOULDBLOCK, Unix uses EINPROGRESS
+#define WSAEWOULDBLOCK WSAEWOULDBLOCK
+#define SOCKET_WOULD_BLOCK(e) ((e) == WSAEWOULDBLOCK)
 #else
 #include <unistd.h>
 #include <sys/stat.h>
@@ -38,6 +41,8 @@
 #define WSADATA int
 #define WSAStartup(a, b) (0)
 #define WSACleanup() (0)
+#define WSAEWOULDBLOCK EINPROGRESS
+#define SOCKET_WOULD_BLOCK(e) ((e) == EINPROGRESS)
 #include <dlfcn.h>
 
 #endif

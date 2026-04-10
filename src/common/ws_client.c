@@ -420,7 +420,7 @@ bool ws_client_connect(WsClient *client) {
     int result = connect(client->socket, (struct sockaddr *)&addr, sizeof(addr));
     
     int error = platform_get_last_error();
-    if (result == SOCKET_ERROR && error != WSAEWOULDBLOCK && error != EINPROGRESS) {
+    if (result == SOCKET_ERROR && !SOCKET_WOULD_BLOCK(error)) {
         log_error("[WSClient] Connect failed: %d", error);
         CLOSESOCKET(client->socket);
         client->socket = INVALID_SOCKET;
