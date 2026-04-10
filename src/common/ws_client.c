@@ -38,6 +38,13 @@ static bool ws_client_send_frame(WsClient *client, uint8_t opcode, const void *d
 static int ws_client_recv_frame(WsClient *client, uint8_t *opcode, char **payload, size_t *payload_len);
 static void* ws_client_event_loop(void *arg);
 
+#ifdef _WIN32
+static DWORD WINAPI ws_client_event_loop_win(LPVOID arg) {
+    ws_client_event_loop(arg);
+    return 0;
+}
+#endif
+
 // Base64 encoding
 static const char base64_chars[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
@@ -851,8 +858,7 @@ bool ws_client_start(WsClient *client) {
     }
     client->thread = (void *)(uintptr_t)thread;
 #else
-    // Windows: Create a thread for the event loop
-    HANDLE thread = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)ws_client_event_loop, client, 0, NULL);
+    HANDLE thread = CreateThread(NULL, 0, ws_client_event_loop_win, client, 0, NULL);
     if (thread == NULL) {
         log_error("[WSClient] Failed to create event loop thread");
         client->running = false;

@@ -18,8 +18,6 @@
 #define msleep(ms) Sleep(ms)
 #define CLOSESOCKET(s) closesocket(s)
 #define WSAGetLastError() GetLastError()
-// Windows uses WSAEWOULDBLOCK, Unix uses EINPROGRESS
-#define WSAEWOULDBLOCK WSAEWOULDBLOCK
 #define SOCKET_WOULD_BLOCK(e) ((e) == WSAEWOULDBLOCK)
 #else
 #include <unistd.h>
