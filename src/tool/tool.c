@@ -1011,6 +1011,143 @@ int tool_shell_execute(ToolArgs* args, char** result, int* result_len) {
     return 0;
 }
 
+int tool_grep_execute(ToolArgs* args, char** result, int* result_len) {
+    const char* pattern = tool_args_get(args, "pattern");
+    if (!pattern) pattern = tool_args_get(args, "arg");
+    
+    const char* path = tool_args_get(args, "path");
+    if (!path) path = tool_args_get(args, "file");
+    
+    const char* options = tool_args_get(args, "options");
+    
+    if (!pattern || strlen(pattern) == 0) {
+        *result = strdup("Error: No pattern provided");
+        *result_len = strlen(*result);
+        return -1;
+    }
+    
+    size_t buf_size = 32768;
+    *result = (char*)malloc(buf_size);
+    if (!*result) {
+        *result = strdup("Error: Memory allocation failed");
+        *result_len = strlen(*result);
+        return -1;
+    }
+    
+    int offset = 0;
+    
+    char full_cmd[2048];
+    if (path && strlen(path) > 0) {
+        if (options && strlen(options) > 0) {
+            snprintf(full_cmd, sizeof(full_cmd), "grep %s \"%s\" \"%s\"", options, pattern, path);
+        } else {
+            snprintf(full_cmd, sizeof(full_cmd), "grep \"%s\" \"%s\"", pattern, path);
+        }
+    } else {
+        *result = strdup("Error: No file/path provided for grep");
+        *result_len = strlen(*result);
+        return -1;
+    }
+    
+    offset = snprintf(*result, buf_size, "Command: %s\n\n", full_cmd);
+    
+    char platform_cmd[2048];
+    platform_prepare_command(full_cmd, platform_cmd, sizeof(platform_cmd));
+    FILE* fp = popen(platform_cmd, "r");
+    
+    if (!fp) {
+        free(*result);
+        *result = strdup("Error: Failed to execute grep command");
+        *result_len = strlen(*result);
+        return -1;
+    }
+    
+    char line[2048];
+    while (fgets(line, sizeof(line), fp) && offset < (int)(buf_size - 2048)) {
+        offset += snprintf(*result + offset, buf_size - offset, "%s", line);
+    }
+    
+    int exit_code = pclose(fp);
+    
+    if (offset == (int)strlen(full_cmd) + 11) {
+        offset += snprintf(*result + offset, buf_size - offset, "(no matches)\n");
+    }
+    
+    offset += snprintf(*result + offset, buf_size - offset, "\nExit code: %d", exit_code);
+    
+    *result_len = offset;
+    return 0;
+}
+
+int tool_sed_execute(ToolArgs* args, char** result, int* result_len) {
+    const char* expression = tool_args_get(args, "expression");
+    if (!expression) expression = tool_args_get(args, "expr");
+    if (!expression) expression = tool_args_get(args, "arg");
+    
+    const char* path = tool_args_get(args, "path");
+    if (!path) path = tool_args_get(args, "file");
+    
+    const char* options = tool_args_get(args, "options");
+    
+    if (!expression || strlen(expression) == 0) {
+        *result = strdup("Error: No sed expression provided");
+        *result_len = strlen(*result);
+        return -1;
+    }
+    
+    if (!path || strlen(path) == 0) {
+        *result = strdup("Error: No file/path provided for sed");
+        *result_len = strlen(*result);
+        return -1;
+    }
+    
+    size_t buf_size = 32768;
+    *result = (char*)malloc(buf_size);
+    if (!*result) {
+        *result = strdup("Error: Memory allocation failed");
+        *result_len = strlen(*result);
+        return -1;
+    }
+    
+    int offset = 0;
+    
+    char full_cmd[2048];
+    if (options && strlen(options) > 0) {
+        snprintf(full_cmd, sizeof(full_cmd), "sed %s \"%s\" \"%s\"", options, expression, path);
+    } else {
+        snprintf(full_cmd, sizeof(full_cmd), "sed \"%s\" \"%s\"", expression, path);
+    }
+    
+    offset = snprintf(*result, buf_size, "Command: %s\n\n", full_cmd);
+    
+    char platform_cmd[2048];
+    platform_prepare_command(full_cmd, platform_cmd, sizeof(platform_cmd));
+    FILE* fp = popen(platform_cmd, "r");
+    
+    if (!fp) {
+        free(*result);
+        *result = strdup("Error: Failed to execute sed command");
+        *result_len = strlen(*result);
+        return -1;
+    }
+    
+    char line[2048];
+    while (fgets(line, sizeof(line), fp) && offset < (int)(buf_size - 2048)) {
+        offset += snprintf(*result + offset, buf_size - offset, "%s", line);
+    }
+    
+    int exit_code = pclose(fp);
+    
+    if (offset == (int)strlen(full_cmd) + 11) {
+        offset += snprintf(*result + offset, buf_size - offset, "(no output)\n");
+    }
+    
+    offset += snprintf(*result + offset, buf_size - offset, "\nExit code: %d", exit_code);
+    
+    *result_len = offset;
+    return 0;
+}
+
 // Skill search tool - search local skills by query (empty query = list all)
 int tool_skill_search(ToolArgs* args, char** result, int* result_len) {
     const char* query = tool_args_get(args, "query");

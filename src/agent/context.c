@@ -33,11 +33,13 @@ static const char* DEFAULT_SYSTEM_PROMPT =
 "10. (list-directory path \"目录路径\") - 列出目录内容，支持 ~ 展开\n"
 "11. (web-fetch url \"URL地址\") - 获取网页内容\n"
 "12. (shell command \"命令\") - 执行系统命令\n"
+"13. (grep pattern \"搜索模式\" path \"文件路径\" options \"选项\") - 在文件中搜索模式\n"
+"14. (sed expression \"sed表达式\" path \"文件路径\" options \"选项\") - 流编辑器，用于文本过滤和转换\n"
 "\n"
 "技能发现工具（用于查找和使用技能）：\n"
-"13. (skill-search query \"关键词\" limit 5) - 搜索本地技能库\n"
-"14. (skill-match query \"关键词\") - 发现相关技能（返回JSON格式匹配结果）\n"
-"15. (skill-preview name \"技能名\" lines 5) - 预览技能内容\n"
+"15. (skill-search query \"关键词\" limit 5) - 搜索本地技能库\n"
+"16. (skill-match query \"关键词\") - 发现相关技能（返回JSON格式匹配结果）\n"
+"17. (skill-preview name \"技能名\" lines 5) - 预览技能内容\n"
 "\n"
 "技能发现工具说明：\n"
 "- skill-search: 搜索已加载的技能，返回匹配度排序的列表\n"
@@ -88,7 +90,7 @@ typedef struct {
 // ==================== 流式消息系统 ====================
 
 // 流式状态结构体（支持多 context/agent）
-typedef struct {
+typedef struct { 
     bool active;
     char* accumulated_content;  // 保存累积内容
     int last_sent_len;          // 上次发送的长度
