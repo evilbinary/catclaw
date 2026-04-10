@@ -14,6 +14,17 @@
 #include <errno.h>
 #include <time.h>
 
+// Platform-specific includes for file watcher
+#ifdef __APPLE__
+#include <sys/event.h>
+#include <fcntl.h>
+#include <unistd.h>
+#elif defined(__linux__)
+#include <sys/inotify.h>
+#include <unistd.h>
+#include <poll.h>
+#endif
+
 // Cross-platform strndup (Windows doesn't have it)
 #ifndef HAVE_STRNDUP
 static char* strndup_impl(const char* s, size_t n) {
@@ -582,7 +593,7 @@ char* skill_list_to_string(void) {
         Skill *skill = g_skill_registry.skills[i];
         if (skill) {
             // Check if we need more space
-            if (pos + 512 > size) {
+            if ((size_t)pos + 512 > size) {
                 size *= 2;
                 char* new_buf = (char*)realloc(buf, size);
                 if (!new_buf) {
