@@ -391,7 +391,7 @@ static bool feishu_stream_send_callback(ChannelInstance *channel, const char *me
         return false;
     }
     
-    int speed = config->stream_speed > 0 ? config->stream_speed : 20;
+    int speed = config->stream_speed > 0 ? config->stream_speed : 100;
     return feishu_stream_send(channel->id, message, speed);
 }
 
@@ -1123,8 +1123,8 @@ bool feishu_stream_send(const char *channel_id, const char *message, int speed_c
         return false;
     }
     
-    // 分批更新，每20个字符更新一次
-    int batch_size = 20;
+    // 分批更新，每200个字符更新一次
+    int batch_size = 200;
 
     // 创建流式上下文，使 feishu_stream_update 能保存 current_content
     FeishuStreamContext stream_ctx = {0};
