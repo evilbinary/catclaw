@@ -123,7 +123,7 @@ char *get_home_dir(void) {
 }
 
 static char *read_file(const char *path) {
-    FILE *file = fopen(path, "r");
+    FILE *file = fopen(path, "rb");
     if (!file) {
         return NULL;
     }
@@ -141,6 +141,31 @@ static char *read_file(const char *path) {
     fread(buffer, 1, size, file);
     buffer[size] = '\0';
     fclose(file);
+
+    unsigned char *ubuf = (unsigned char *)buffer;
+    
+    // Skip UTF-8 BOM if present (EF BB BF)
+    if (size >= 3 && ubuf[0] == 0xEF && ubuf[1] == 0xBB && ubuf[2] == 0xBF) {
+        memmove(buffer, buffer + 3, size - 3 + 1);
+    }
+#ifdef _WIN32
+    // Handle UTF-16 LE BOM (FF FE) - Windows Notepad default
+    else if (size >= 2 && ubuf[0] == 0xFF && ubuf[1] == 0xFE) {
+        wchar_t *utf16_buf = (wchar_t *)(buffer + 2);
+        int utf16_len = (size - 2) / 2;
+        
+        int utf8_len = WideCharToMultiByte(CP_UTF8, 0, utf16_buf, utf16_len, NULL, 0, NULL, NULL);
+        if (utf8_len > 0) {
+            char *utf8_buf = (char *)malloc(utf8_len + 1);
+            if (utf8_buf) {
+                WideCharToMultiByte(CP_UTF8, 0, utf16_buf, utf16_len, utf8_buf, utf8_len, NULL, NULL);
+                utf8_buf[utf8_len] = '\0';
+                free(buffer);
+                return utf8_buf;
+            }
+        }
+    }
+#endif
 
     return buffer;
 }
