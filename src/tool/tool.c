@@ -34,7 +34,7 @@ extern bool agent_memory_set(const char *key, const char *value);
 extern char *agent_memory_get(const char *key);
 extern bool agent_memory_clear(void);
 extern bool agent_memory_delete(const char *key);
-extern char *agent_get_history(int limit, const char *query);
+extern char *agent_get_history(int limit, int page, const char *query);
 
 // Helper to get argument value by key
 const char* tool_args_get(ToolArgs* args, const char* key) {
@@ -1379,6 +1379,7 @@ int tool_skill_preview(ToolArgs* args, char** result, int* result_len) {
 // Recall history tool - search and recall conversation history
 int tool_recall_history(ToolArgs* args, char** result, int* result_len) {
     const char* limit_str = tool_args_get(args, "limit");
+    const char* page_str = tool_args_get(args, "page");
     const char* query = tool_args_get(args, "query");
     if (!query) query = tool_args_get(args, "keyword");
     if (!query) query = tool_args_get(args, "arg");
@@ -1387,10 +1388,16 @@ int tool_recall_history(ToolArgs* args, char** result, int* result_len) {
     if (limit_str) {
         limit = atoi(limit_str);
         if (limit <= 0) limit = 10;
-        if (limit > 100) limit = 100;
+        if (limit > 50) limit = 50;
     }
     
-    char* history = agent_get_history(limit, query);
+    int page = 1;
+    if (page_str) {
+        page = atoi(page_str);
+        if (page <= 0) page = 1;
+    }
+    
+    char* history = agent_get_history(limit, page, query);
     if (!history) {
         *result = strdup("Error: Failed to get history");
         *result_len = strlen(*result);

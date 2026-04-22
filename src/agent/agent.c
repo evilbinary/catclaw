@@ -68,7 +68,7 @@ bool agent_memory_delete(const char *key) {
     return memory_delete(g_agent.memory_manager, key);
 }
 
-char *agent_get_history(int limit, const char *query) {
+char *agent_get_history(int limit, int page, const char *query) {
     if (!g_agent.session_manager) {
         return strdup("Error: Session manager not initialized");
     }
@@ -80,7 +80,24 @@ char *agent_get_history(int limit, const char *query) {
     
     MessageList *history = session->history;
     int total = history->count;
-    int start = (limit > 0 && limit < total) ? total - limit : 0;
+    
+    if (limit <= 0) limit = 10;
+    if (limit > 50) limit = 50;
+    if (page <= 0) page = 1;
+    
+    int total_pages = (total + limit - 1) / limit;
+    
+    int start, end;
+    if (query && strlen(query) > 0) {
+        start = (page - 1) * limit;
+        end = start + limit;
+        if (end > total) end = total;
+    } else {
+        end = total - (page - 1) * limit;
+        start = end - limit;
+        if (start < 0) start = 0;
+        if (end > total) end = total;
+    }
     
     size_t buf_size = 16384;
     char *result = (char *)malloc(buf_size);
@@ -89,37 +106,70 @@ char *agent_get_history(int limit, const char *query) {
     }
     
     int offset = snprintf(result, buf_size,
-        "📜 Conversation History (%d messages, showing %d-%d):\n"
+        "📜 Conversation History (共%d条, 第%d/%d页, 显示%d-%d):\n"
         "═══════════════════════════════════════════════════════════\n\n",
-        total, start + 1, total);
+        total, page, total_pages, start + 1, end > start ? end : start + 1);
     
-    for (int i = start; i < total && offset < (int)(buf_size - 512); i++) {
-        Message *msg = history->messages[i];
-        if (!msg || !msg->content) continue;
-        
-        const char *role_name;
-        switch (msg->role) {
-            case ROLE_USER: role_name = "👤 User"; break;
-            case ROLE_ASSISTANT: role_name = "🤖 Assistant"; break;
-            case ROLE_SYSTEM: role_name = "⚙️ System"; break;
-            case ROLE_TOOL: role_name = "🔧 Tool"; break;
-            default: role_name = "❓ Unknown"; break;
-        }
-        
-        if (query && strlen(query) > 0) {
+    if (query && strlen(query) > 0) {
+        int count = 0;
+        for (int i = 0; i < total && count < end && offset < (int)(buf_size - 512); i++) {
+            Message *msg = history->messages[i];
+            if (!msg || !msg->content) continue;
             if (!strstr(msg->content, query)) continue;
+            
+            count++;
+            if (count <= start) continue;
+            
+            const char *role_name;
+            switch (msg->role) {
+                case ROLE_USER: role_name = "👤 User"; break;
+                case ROLE_ASSISTANT: role_name = "🤖 Assistant"; break;
+                case ROLE_SYSTEM: role_name = "⚙️ System"; break;
+                case ROLE_TOOL: role_name = "🔧 Tool"; break;
+                default: role_name = "❓ Unknown"; break;
+            }
+            
+            char time_str[32] = "";
+            if (msg->timestamp > 0) {
+                time_t t = (time_t)msg->timestamp;
+                struct tm *tm_info = localtime(&t);
+                strftime(time_str, sizeof(time_str), "[%H:%M:%S] ", tm_info);
+            }
+            
+            offset += snprintf(result + offset, buf_size - offset,
+                "%s%s:\n%s\n\n",
+                time_str, role_name, msg->content);
         }
-        
-        char time_str[32] = "";
-        if (msg->timestamp > 0) {
-            time_t t = (time_t)msg->timestamp;
-            struct tm *tm_info = localtime(&t);
-            strftime(time_str, sizeof(time_str), "[%H:%M:%S] ", tm_info);
+    } else {
+        for (int i = start; i < end && offset < (int)(buf_size - 512); i++) {
+            Message *msg = history->messages[i];
+            if (!msg || !msg->content) continue;
+            
+            const char *role_name;
+            switch (msg->role) {
+                case ROLE_USER: role_name = "👤 User"; break;
+                case ROLE_ASSISTANT: role_name = "🤖 Assistant"; break;
+                case ROLE_SYSTEM: role_name = "⚙️ System"; break;
+                case ROLE_TOOL: role_name = "🔧 Tool"; break;
+                default: role_name = "❓ Unknown"; break;
+            }
+            
+            char time_str[32] = "";
+            if (msg->timestamp > 0) {
+                time_t t = (time_t)msg->timestamp;
+                struct tm *tm_info = localtime(&t);
+                strftime(time_str, sizeof(time_str), "[%H:%M:%S] ", tm_info);
+            }
+            
+            offset += snprintf(result + offset, buf_size - offset,
+                "%s%s:\n%s\n\n",
+                time_str, role_name, msg->content);
         }
-        
+    }
+    
+    if (page < total_pages) {
         offset += snprintf(result + offset, buf_size - offset,
-            "%s%s:\n%s\n\n",
-            time_str, role_name, msg->content);
+            "\n📄 使用 page %d 查看下一页\n", page + 1);
     }
     
     return result;

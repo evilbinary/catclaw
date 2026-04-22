@@ -35,7 +35,7 @@ static const char* DEFAULT_SYSTEM_PROMPT =
 "12. (shell command \"命令\") - 执行系统命令\n"
 "13. (grep pattern \"搜索模式\" path \"文件路径\" options \"选项\") - 在文件中搜索模式\n"
 "14. (sed expression \"sed表达式\" path \"文件路径\" options \"选项\") - 流编辑器，用于文本过滤和转换\n"
-"15. (recall-history query \"关键词\" limit 10) - 搜索和回忆对话历史记录\n"
+"15. (recall-history query \"关键词\" limit 10 page 1) - 搜索和回忆对话历史记录，支持翻页查看所有历史\n"
 "\n"
 "技能发现工具（用于查找和使用技能）：\n"
 "16. (skill-search query \"关键词\" limit 5) - 搜索本地技能库\n"
