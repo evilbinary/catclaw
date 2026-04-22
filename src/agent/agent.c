@@ -68,6 +68,63 @@ bool agent_memory_delete(const char *key) {
     return memory_delete(g_agent.memory_manager, key);
 }
 
+char *agent_get_history(int limit, const char *query) {
+    if (!g_agent.session_manager) {
+        return strdup("Error: Session manager not initialized");
+    }
+    
+    Session *session = session_manager_get(g_agent.session_manager, "default");
+    if (!session || !session->history || session->history->count == 0) {
+        return strdup("No conversation history available");
+    }
+    
+    MessageList *history = session->history;
+    int total = history->count;
+    int start = (limit > 0 && limit < total) ? total - limit : 0;
+    
+    size_t buf_size = 16384;
+    char *result = (char *)malloc(buf_size);
+    if (!result) {
+        return strdup("Error: Memory allocation failed");
+    }
+    
+    int offset = snprintf(result, buf_size,
+        "📜 Conversation History (%d messages, showing %d-%d):\n"
+        "═══════════════════════════════════════════════════════════\n\n",
+        total, start + 1, total);
+    
+    for (int i = start; i < total && offset < (int)(buf_size - 512); i++) {
+        Message *msg = history->messages[i];
+        if (!msg || !msg->content) continue;
+        
+        const char *role_name;
+        switch (msg->role) {
+            case ROLE_USER: role_name = "👤 User"; break;
+            case ROLE_ASSISTANT: role_name = "🤖 Assistant"; break;
+            case ROLE_SYSTEM: role_name = "⚙️ System"; break;
+            case ROLE_TOOL: role_name = "🔧 Tool"; break;
+            default: role_name = "❓ Unknown"; break;
+        }
+        
+        if (query && strlen(query) > 0) {
+            if (!strstr(msg->content, query)) continue;
+        }
+        
+        char time_str[32] = "";
+        if (msg->timestamp > 0) {
+            time_t t = (time_t)msg->timestamp;
+            struct tm *tm_info = localtime(&t);
+            strftime(time_str, sizeof(time_str), "[%H:%M:%S] ", tm_info);
+        }
+        
+        offset += snprintf(result + offset, buf_size - offset,
+            "%s%s:\n%s\n\n",
+            time_str, role_name, msg->content);
+    }
+    
+    return result;
+}
+
 void agent_set_debug_mode(bool enabled) {
     g_agent.debug_mode = enabled;
     printf("Debug mode %s\n", enabled ? "enabled" : "disabled");
@@ -285,6 +342,7 @@ bool agent_init(void) {
     agent_register_tool("skill-search", "Search local skills by query keyword", NULL, tool_skill_search);
     agent_register_tool("skill-match", "Discover and match relevant skills by keyword (for agent auto-discovery)", NULL, tool_skill_match);
     agent_register_tool("skill-preview", "Preview skill content without full loading", NULL, tool_skill_preview);
+    agent_register_tool("recall-history", "Search and recall conversation history", NULL, tool_recall_history);
 
     g_agent.running = true;
     

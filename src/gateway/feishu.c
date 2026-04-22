@@ -858,7 +858,7 @@ char* feishu_stream_create(const char *channel_id, const char *receive_id, const
     char *body_str = cJSON_PrintUnformatted(body);
     cJSON_Delete(body);
     
-    log_info("[Feishu] Creating stream message with body: %s", body_str);
+    log_debug("[Feishu] Creating stream message with body: %s", body_str);
     
     // 构建请求头
     char auth_header[512];

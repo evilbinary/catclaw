@@ -71,4 +71,7 @@ int tool_skill_search(ToolArgs* args, char** result, int* result_len);
 int tool_skill_match(ToolArgs* args, char** result, int* result_len);
 int tool_skill_preview(ToolArgs* args, char** result, int* result_len);
 
+// History recall tool
+int tool_recall_history(ToolArgs* args, char** result, int* result_len);
+
 #endif // TOOL_H
