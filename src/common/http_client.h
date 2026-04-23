@@ -28,6 +28,7 @@ typedef struct {
     const char* url;           // 请求 URL
     const char* method;        // 请求方法 (GET/POST/PUT/DELETE)
     const char* body;          // 请求体 (POST/PUT)
+    size_t body_len;           // 请求体长度 (0 表示使用 strlen)
     const char* content_type;  // Content-Type
     const char** headers;      // 自定义请求头数组 {"Header: Value", NULL}
     int timeout_sec;           // 超时时间(秒), 0 表示默认

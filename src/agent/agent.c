@@ -468,6 +468,10 @@ void agent_cleanup(void) {
 }
 
 bool agent_send_message(const char *message) {
+    return agent_send_message_with_attachments(message, NULL, 0);
+}
+
+bool agent_send_message_with_attachments(const char *message, Attachment** attachments, int attachment_count) {
     if (!g_agent.running) {
         log_error("Agent is not running\n");
         return false;
@@ -480,6 +484,11 @@ bool agent_send_message(const char *message) {
     if (!msg) {
         log_error("Failed to create message\n");
         return false;
+    }
+
+    // Add attachments if any
+    for (int i = 0; i < attachment_count && attachments; i++) {
+        message_add_attachment(msg, attachments[i]);
     }
 
     // Create a queue item

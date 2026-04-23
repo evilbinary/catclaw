@@ -51,6 +51,7 @@ bool agent_init(void);
 void agent_cleanup(void);
 void agent_status(void);
 bool agent_send_message(const char *message);
+bool agent_send_message_with_attachments(const char *message, Attachment** attachments, int attachment_count);
 bool agent_register_tool(const char *name, const char *description, const char *parameters_schema, int (*execute)(ToolArgs* args, char** result, int* result_len));
 int agent_execute_tool(const char *name, ToolArgs* args, char** result, int* result_len);
 void agent_list_tools(void);

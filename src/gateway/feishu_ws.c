@@ -380,12 +380,13 @@ char* feishu_ws_get_endpoint(const char *app_id, const char *app_secret, const c
     cJSON_Delete(body);
     
     // 发送请求
+    const char *headers[] = {"locale: zh", NULL};
     HttpRequest req = {
         .url = url,
         .method = "POST",
         .body = body_str,
         .content_type = "application/json",
-        .headers = (const char *[]){"locale: zh", NULL},
+        .headers = headers,
         .timeout_sec = 10
     };
     
@@ -533,11 +534,11 @@ static bool feishu_ws_on_message(WsClient *ws, const char *data, size_t len, voi
                 feishu_set_receive_id(feishu_channel, reply_target, "chat_id");
             }
 
-            // 构建统一消息结构
+            // 构建统一消息结构（私聊时 chat_id 为空，fallback 到 sender_id）
             ChannelIncomingMessage incoming_msg = {
                 .content = msg->content,
                 .sender_id = msg->sender_id,
-                .chat_id = msg->chat_id,
+                .chat_id = msg->chat_id ? msg->chat_id : msg->sender_id,
                 .message_id = msg->message_id,
                 .extra = NULL
             };

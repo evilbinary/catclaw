@@ -254,7 +254,8 @@ static HttpResponse* do_request(const HttpRequest* req, bool stream,
     // 设置请求体
     if (req->body) {
         curl_easy_setopt(curl, CURLOPT_POSTFIELDS, req->body);
-        curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, strlen(req->body));
+        size_t body_size = req->body_len > 0 ? req->body_len : strlen(req->body);
+        curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, body_size);
         // log_debug("[HTTP] Request body: %s", req->body);
     }
     

@@ -320,7 +320,38 @@ static char* openai_build_request_body(AIProvider* self, MessageList* messages,
                 case ROLE_TOOL: role = "tool"; break;
             }
             cJSON_AddStringToObject(msg_obj, "role", role);
-            if (msg->content) {
+            // 如果有附件，使用 content 数组格式（OpenAI Vision API）
+            if (msg->attachment_count > 0 && msg->role == ROLE_USER) {
+                cJSON* content_arr = cJSON_CreateArray();
+                // 先添加文本
+                if (msg->content) {
+                    cJSON* text_part = cJSON_CreateObject();
+                    cJSON_AddStringToObject(text_part, "type", "text");
+                    cJSON_AddStringToObject(text_part, "text", msg->content);
+                    cJSON_AddItemToArray(content_arr, text_part);
+                }
+                // 添加图片附件
+                for (int j = 0; j < msg->attachment_count; j++) {
+                    Attachment* att = msg->attachments[j];
+                    if (att && att->type == ATTACHMENT_IMAGE && att->data) {
+                        cJSON* img_part = cJSON_CreateObject();
+                        cJSON_AddStringToObject(img_part, "type", "image_url");
+                        cJSON* img_url = cJSON_CreateObject();
+                        // 构建 data URI: data:image/png;base64,xxxxx
+                        const char* mime = att->mime_type ? att->mime_type : "image/jpeg";
+                        size_t url_len = strlen("data:") + strlen(mime) + strlen(";base64,") + strlen(att->data) + 1;
+                        char* url_buf = (char*)malloc(url_len);
+                        if (url_buf) {
+                            snprintf(url_buf, url_len, "data:%s;base64,%s", mime, att->data);
+                            cJSON_AddStringToObject(img_url, "url", url_buf);
+                            free(url_buf);
+                        }
+                        cJSON_AddItemToObject(img_part, "image_url", img_url);
+                        cJSON_AddItemToArray(content_arr, img_part);
+                    }
+                }
+                cJSON_AddItemToObject(msg_obj, "content", content_arr);
+            } else if (msg->content) {
                 cJSON_AddStringToObject(msg_obj, "content", msg->content);
             }
             if (msg->tool_call_id) {

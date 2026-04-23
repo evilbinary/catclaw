@@ -311,10 +311,10 @@ bool websocket_send(WebSocketConnection *conn, const char *message) {
     return websocket_send_frame(conn, message, strlen(message));
 }
 
-// Base64 encoding function
-static void base64_encode(const unsigned char *input, int length, char *output) {
+// Local base64 encoding for WebSocket handshake (utils.h has a different signature)
+static void ws_base64_encode(const unsigned char *input, int length, char *output) {
     const char base64_chars[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    int i, j;
+    int i;
     unsigned char three_bytes[3];
     int output_index = 0;
 
@@ -543,7 +543,7 @@ static bool websocket_handshake(WebSocketConnection *conn, WebSocketServer *serv
     sha1((unsigned char *)combined, strlen(combined), hash);
     
     char base64_hash[30];
-    base64_encode(hash, 20, base64_hash);
+    ws_base64_encode(hash, 20, base64_hash);
 
     // Generate response
     char response[512];

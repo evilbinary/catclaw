@@ -362,6 +362,15 @@ bool channel_send_message_to_type(ChannelType type, const char *message) {
     return success;
 }
 
+bool channel_send_file(ChannelInstance *channel, const char *file_path, const char *chat_id) {
+    if (!channel || !file_path) return false;
+    if (channel->send_file) {
+        return channel->send_file(channel, file_path, chat_id);
+    }
+    log_error("[Channel] '%s' does not support send_file", channel->name);
+    return false;
+}
+
 // 流式发送消息 (打字机效果)
 bool channel_stream_send(ChannelInstance *channel, const char *message) {
     if (!channel) {
@@ -534,12 +543,21 @@ bool channel_handle_incoming_message(ChannelInstance *channel, ChannelIncomingMe
 
     // 1. 首先检查是否是命令
     if (msg->content[0] == '/') {
-        char* cmd_response = command_handle(msg->content);
-        if (cmd_response) {
+        // 构建命令上下文
+        CommandContext ctx = {
+            .chat_id = msg->chat_id,
+            .sender_id = msg->sender_id,
+            .channel_type = channel->type
+        };
+        CommandResult* result = command_process_with_context(msg->content, &ctx);
+        if (result && result->is_command) {
             log_info("[Channel] Command received on %s: %s", channel->name, msg->content);
-            *out_response = cmd_response;
-            return true;  // 命令已处理
+            *out_response = result->response ? strdup(result->response) : strdup("");
+            result->response = NULL;
+            command_result_free(result);
+            return true;
         }
+        if (result) command_result_free(result);
     }
 
     // 2. 调用渠道特定的消息接收回调

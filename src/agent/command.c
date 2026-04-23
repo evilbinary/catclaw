@@ -11,6 +11,7 @@
 #include "common/log.h"
 #include "common/config.h"
 #include "common/plugin.h"
+#include "common/utils.h"
 #include "agent/agent.h"
 #include "gateway/gateway.h"
 #include "gateway/channels.h"
@@ -84,6 +85,7 @@ static char* cmd_help(void) {
         "  /search <query>    - 搜索网络\n"
         "  /weather <city>    - 获取天气\n"
         "  /shell <command>   - 执行Shell命令\n"
+        "  /file <path>        - 发送文件/图片给模型\n"
         "\n"
         "系统控制:\n"
         "  /system restart    - 重启系统\n"
@@ -718,6 +720,89 @@ static char* cmd_skill(const char* args) {
     return buf;
 }
 
+// 当前命令上下文（用于命令处理）
+static const CommandContext* g_cmd_context = NULL;
+
+// 处理 file 命令 - 发送文件/图片给模型
+static char* cmd_file(const char* args) {
+    if (!args || strlen(args) == 0) {
+        return strdup("用法: /file <文件路径>");
+    }
+    
+    // 解析参数（取第一个参数作为文件路径）
+    char* args_copy = strdup(args);
+    char* path = args_copy;
+    
+    // 截断后续参数
+    char* space = strchr(args_copy, ' ');
+    if (space) {
+        *space = '\0';
+    }
+    
+    // 解析路径
+    char* resolved_path = resolve_path(path);
+    free(args_copy);
+    if (!resolved_path) {
+        return strdup("✗ 无法解析文件路径");
+    }
+    
+    // 检查文件是否存在
+    FILE* fp = fopen(resolved_path, "rb");
+    if (!fp) {
+        char* buf = (char*)malloc(256);
+        snprintf(buf, 256, "✗ 文件不存在: %s", resolved_path);
+        free(resolved_path);
+        return buf;
+    }
+    fclose(fp);
+    
+    // 提取文件名
+    const char* filename = strrchr(resolved_path, '/');
+    if (!filename) filename = strrchr(resolved_path, '\\');
+    filename = filename ? filename + 1 : resolved_path;
+    
+    // 读取文件为 base64
+    char* base64_data = message_file_to_base64(resolved_path);
+    if (!base64_data) {
+        free(resolved_path);
+        return strdup("✗ 读取文件失败");
+    }
+    
+    // 判断附件类型和 MIME
+    AttachmentType att_type = ATTACHMENT_FILE;
+    const char* mime = "application/octet-stream";
+    const char* ext = strrchr(resolved_path, '.');
+    if (ext) {
+        if (strcasecmp(ext, ".png") == 0) { att_type = ATTACHMENT_IMAGE; mime = "image/png"; }
+        else if (strcasecmp(ext, ".jpg") == 0 || strcasecmp(ext, ".jpeg") == 0) { att_type = ATTACHMENT_IMAGE; mime = "image/jpeg"; }
+        else if (strcasecmp(ext, ".gif") == 0) { att_type = ATTACHMENT_IMAGE; mime = "image/gif"; }
+        else if (strcasecmp(ext, ".webp") == 0) { att_type = ATTACHMENT_IMAGE; mime = "image/webp"; }
+        else if (strcasecmp(ext, ".pdf") == 0) { att_type = ATTACHMENT_PDF; mime = "application/pdf"; }
+    }
+    
+    // 创建附件
+    Attachment* att = attachment_create(att_type, base64_data, mime, filename);
+    free(base64_data);
+    free(resolved_path);
+    
+    if (!att) {
+        return strdup("✗ 创建附件失败");
+    }
+    
+    // 构建消息文本并发送给模型
+    char msg_text[512];
+    snprintf(msg_text, sizeof(msg_text), "[用户发送了文件: %s，请分析此文件内容]", filename);
+    
+    bool success = agent_send_message_with_attachments(msg_text, &att, 1);
+    if (!success) {
+        // 失败时需要手动释放（成功时所有权已转移给 Message）
+        attachment_destroy(att);
+        return strdup("✗ 文件发送失败");
+    }
+    
+    return strdup("✓ 文件已发送给模型");
+}
+
 // 处理 system 命令
 static char* cmd_system(const char* args, CommandAction* action) {
     size_t size = 256;
@@ -739,12 +824,22 @@ static char* cmd_system(const char* args, CommandAction* action) {
 
 // 主处理函数
 CommandResult* command_process(const char* input) {
+    return command_process_with_context(input, NULL);
+}
+
+// 带上下文的命令处理
+CommandResult* command_process_with_context(const char* input, const CommandContext* ctx) {
+    // 设置全局上下文
+    g_cmd_context = ctx;
+    
     if (!input || strlen(input) == 0) {
+        g_cmd_context = NULL;
         return result_create(false, false, COMMAND_ACTION_NONE, NULL);
     }
     
     // 检查是否是命令
     if (input[0] != '/') {
+        g_cmd_context = NULL;
         return result_create(false, false, COMMAND_ACTION_NONE, NULL);
     }
     
@@ -752,6 +847,7 @@ CommandResult* command_process(const char* input) {
     const char* cmd = input + 1;  // 跳过 /
     char* cmd_copy = strdup(cmd);
     if (!cmd_copy) {
+        g_cmd_context = NULL;
         return result_create(true, false, COMMAND_ACTION_NONE, "内存分配失败");
     }
     
@@ -810,6 +906,8 @@ CommandResult* command_process(const char* input) {
         response = cmd_weather(args);
     } else if (strcmp(cmd_copy, "shell") == 0) {
         response = cmd_shell(args);
+    } else if (strcmp(cmd_copy, "file") == 0) {
+        response = cmd_file(args);
     } else {
         handled = false;
         response = strdup("❌ 未知命令，输入 /help 查看帮助");
@@ -820,6 +918,7 @@ CommandResult* command_process(const char* input) {
     CommandResult* result = result_create(true, handled, action, response);
     free(response);  // result_create 会复制
     
+    g_cmd_context = NULL;
     return result;
 }
 

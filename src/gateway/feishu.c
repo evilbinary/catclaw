@@ -377,6 +377,22 @@ static bool feishu_send_message(ChannelInstance *channel, const char *message) {
     return feishu_send_via_api(config, message);
 }
 
+static bool feishu_channel_send_file(ChannelInstance *channel, const char *file_path, const char *chat_id) {
+    FeishuConfig *config = (FeishuConfig *)channel->config;
+    if (!config) return false;
+    
+    const char *target = chat_id;
+    if (!target || strlen(target) == 0) {
+        target = config->receive_id;
+    }
+    if (!target) {
+        log_error("[Feishu] No chat_id for send_file");
+        return false;
+    }
+    
+    return feishu_send_image(target, file_path);
+}
+
 // 流式发送消息 (打字机效果) - 完整消息一次性发送
 static bool feishu_stream_send_callback(ChannelInstance *channel, const char *message) {
     FeishuConfig *config = (FeishuConfig *)channel->config;
@@ -516,6 +532,7 @@ void feishu_channel_init(ChannelInstance *channel, ChannelConfig *base_config) {
     channel->connect = feishu_connect;
     channel->disconnect = feishu_disconnect;
     channel->send_message = feishu_send_message;
+    channel->send_file = feishu_channel_send_file;
     channel->receive_message = NULL;  // 使用默认消息处理流程
     channel->cleanup = feishu_cleanup;
     channel->stream_ctx = NULL;
@@ -710,6 +727,284 @@ bool feishu_reply_message(const char *channel_id, const char *message_id, const 
     
     // 不是内部 channel，可能是 Feishu chat_id，使用 reply_to_chat
     return feishu_reply_to_chat(channel_id, content);
+}
+
+// 上传图片到飞书 (返回 image_key，需调用者释放)
+char* feishu_upload_image(const char *file_path) {
+    if (!file_path) return NULL;
+    
+    ChannelInstance *channel = channel_first_of_type(CHANNEL_FEISHU);
+    if (!channel) {
+        log_error("[Feishu] No Feishu channel available");
+        return NULL;
+    }
+    
+    FeishuConfig *config = (FeishuConfig *)channel->config;
+    if (!config) return NULL;
+    
+    char *token = feishu_get_valid_token(config);
+    if (!token) return NULL;
+    
+    // 读取文件
+    FILE *fp = fopen(file_path, "rb");
+    if (!fp) {
+        log_error("[Feishu] Failed to open image file: %s", file_path);
+        return NULL;
+    }
+    
+    fseek(fp, 0, SEEK_END);
+    long file_size = ftell(fp);
+    fseek(fp, 0, SEEK_SET);
+    
+    if (file_size <= 0 || file_size > 20 * 1024 * 1024) {
+        fclose(fp);
+        log_error("[Feishu] Invalid image file size: %ld", file_size);
+        return NULL;
+    }
+    
+    char *file_data = (char *)malloc(file_size);
+    if (!file_data) {
+        fclose(fp);
+        return NULL;
+    }
+    
+    fread(file_data, 1, file_size, fp);
+    fclose(fp);
+    
+    // 构建 multipart/form-data 请求
+    char url[256];
+    snprintf(url, sizeof(url), "%s/im/v1/images", FEISHU_API_BASE);
+    
+    char *boundary = "----WebKitFormBoundary7MA4YWxkTrZu0gW";
+    size_t body_size = file_size + 1024;
+    char *body = (char *)malloc(body_size);
+    if (!body) {
+        free(file_data);
+        return NULL;
+    }
+    
+    const char *filename = strrchr(file_path, '/');
+    if (!filename) filename = strrchr(file_path, '\\');
+    filename = filename ? filename + 1 : file_path;
+    
+    // 根据文件扩展名确定 Content-Type
+    const char *mime_type = "image/jpeg";  // 默认
+    const char *ext = strrchr(file_path, '.');
+    if (ext) {
+        if (strcasecmp(ext, ".png") == 0) mime_type = "image/png";
+        else if (strcasecmp(ext, ".gif") == 0) mime_type = "image/gif";
+        else if (strcasecmp(ext, ".webp") == 0) mime_type = "image/webp";
+        else if (strcasecmp(ext, ".bmp") == 0) mime_type = "image/bmp";
+    }
+
+    int body_len = snprintf(body, body_size,
+        "--%s\r\n"
+        "Content-Disposition: form-data; name=\"image_type\"\r\n\r\n"
+        "message\r\n"
+        "--%s\r\n"
+        "Content-Disposition: form-data; name=\"image\"; filename=\"%s\"\r\n"
+        "Content-Type: %s\r\n\r\n",
+        boundary, boundary, filename, mime_type);
+    
+    memcpy(body + body_len, file_data, file_size);
+    body_len += file_size;
+    body_len += snprintf(body + body_len, body_size - body_len,
+        "\r\n--%s--\r\n", boundary);
+    
+    free(file_data);
+    
+    // 构建请求头
+    char auth_header[512];
+    snprintf(auth_header, sizeof(auth_header), "Authorization: Bearer %s", token);
+    char content_type[128];
+    snprintf(content_type, sizeof(content_type), "multipart/form-data; boundary=%s", boundary);
+    const char *headers[] = {auth_header, NULL};
+    
+    // 发送请求
+    HttpRequest req = {
+        .url = url,
+        .method = "POST",
+        .body = body,
+        .body_len = body_len,
+        .content_type = content_type,
+        .headers = headers,
+        .timeout_sec = 60
+    };
+    
+    HttpResponse *resp = http_request(&req);
+    free(body);
+    
+    if (!resp || !resp->success) {
+        if (resp) {
+            log_error("[Feishu] Upload image failed, status=%d, body=%s", resp->status_code, resp->body ? resp->body : "(null)");
+            http_response_free(resp);
+        } else {
+            log_error("[Feishu] Upload image failed, no response");
+        }
+        return NULL;
+    }
+    
+    // 解析响应获取 image_key
+    cJSON *root = cJSON_Parse(resp->body);
+    http_response_free(resp);
+    
+    if (!root) {
+        log_error("[Feishu] Failed to parse upload response");
+        return NULL;
+    }
+    
+    cJSON *data = cJSON_GetObjectItem(root, "data");
+    char *image_key = NULL;
+    if (data) {
+        cJSON *key = cJSON_GetObjectItem(data, "image_key");
+        if (key && cJSON_IsString(key)) {
+            image_key = strdup(key->valuestring);
+            log_info("[Feishu] Image uploaded, key: %s", image_key);
+        }
+    }
+    
+    cJSON_Delete(root);
+    return image_key;
+}
+
+// 发送图片消息
+bool feishu_send_image(const char *chat_id, const char *image_path) {
+    if (!chat_id || !image_path) return false;
+    
+    char *image_key = feishu_upload_image(image_path);
+    if (!image_key) {
+        log_error("[Feishu] Failed to upload image");
+        return false;
+    }
+    
+    ChannelInstance *channel = channel_first_of_type(CHANNEL_FEISHU);
+    if (!channel) {
+        free(image_key);
+        return false;
+    }
+    
+    FeishuConfig *config = (FeishuConfig *)channel->config;
+    if (!config) {
+        free(image_key);
+        return false;
+    }
+    
+    char *token = feishu_get_valid_token(config);
+    if (!token) {
+        free(image_key);
+        return false;
+    }
+    
+    // 构建请求 - 根据 receive_id 前缀判断类型
+    const char *receive_id_type = "chat_id";
+    if (strncmp(chat_id, "ou_", 3) == 0) {
+        receive_id_type = "open_id";
+    } else if (strncmp(chat_id, "on_", 3) == 0) {
+        receive_id_type = "union_id";
+    } else if (strncmp(chat_id, "oc_", 3) == 0) {
+        receive_id_type = "chat_id";
+    }
+
+    char url[256];
+    snprintf(url, sizeof(url), "%s/im/v1/messages?receive_id_type=%s", FEISHU_API_BASE, receive_id_type);
+    
+    cJSON *content = cJSON_CreateObject();
+    cJSON_AddStringToObject(content, "image_key", image_key);
+    char *content_str = cJSON_PrintUnformatted(content);
+    cJSON_Delete(content);
+    free(image_key);
+    
+    cJSON *body = cJSON_CreateObject();
+    cJSON_AddStringToObject(body, "receive_id", chat_id);
+    cJSON_AddStringToObject(body, "msg_type", "image");
+    cJSON_AddStringToObject(body, "content", content_str);
+    free(content_str);
+    
+    char *body_str = cJSON_PrintUnformatted(body);
+    cJSON_Delete(body);
+    
+    char auth_header[512];
+    snprintf(auth_header, sizeof(auth_header), "Authorization: Bearer %s", token);
+    const char *headers[] = {auth_header, "Content-Type: application/json", NULL};
+    
+    HttpRequest req = {
+        .url = url,
+        .method = "POST",
+        .body = body_str,
+        .content_type = "application/json",
+        .headers = headers,
+        .timeout_sec = 30
+    };
+    
+    HttpResponse *resp = http_request(&req);
+    free(body_str);
+    
+    bool success = resp && resp->success && resp->status_code == 200;
+    if (resp) http_response_free(resp);
+    
+    return success;
+}
+
+// 发送图片URL消息
+bool feishu_send_image_url(const char *chat_id, const char *image_url) {
+    if (!chat_id || !image_url) return false;
+    
+    ChannelInstance *channel = channel_first_of_type(CHANNEL_FEISHU);
+    if (!channel) return false;
+    
+    FeishuConfig *config = (FeishuConfig *)channel->config;
+    if (!config) return false;
+    
+    char *token = feishu_get_valid_token(config);
+    if (!token) return false;
+    
+    // 根据 receive_id 前缀判断类型
+    const char *receive_id_type = "chat_id";
+    if (strncmp(chat_id, "ou_", 3) == 0) {
+        receive_id_type = "open_id";
+    } else if (strncmp(chat_id, "on_", 3) == 0) {
+        receive_id_type = "union_id";
+    } else if (strncmp(chat_id, "oc_", 3) == 0) {
+        receive_id_type = "chat_id";
+    }
+
+    char url[256];
+    snprintf(url, sizeof(url), "%s/im/v1/messages?receive_id_type=%s", FEISHU_API_BASE, receive_id_type);
+    
+    cJSON *content = cJSON_CreateObject();
+    cJSON_AddStringToObject(content, "image_key", image_url);
+    char *content_str = cJSON_PrintUnformatted(content);
+    cJSON_Delete(content);
+    
+    cJSON *body = cJSON_CreateObject();
+    cJSON_AddStringToObject(body, "receive_id", chat_id);
+    cJSON_AddStringToObject(body, "msg_type", "image");
+    cJSON_AddStringToObject(body, "content", content_str);
+    free(content_str);
+    
+    char *body_str = cJSON_PrintUnformatted(body);
+    cJSON_Delete(body);
+    
+    char auth_header[512];
+    snprintf(auth_header, sizeof(auth_header), "Authorization: Bearer %s", token);
+    const char *headers[] = {auth_header, "Content-Type: application/json", NULL};
+    
+    HttpRequest req = {
+        .url = url,
+        .method = "POST",
+        .body = body_str,
+        .content_type = "application/json",
+        .headers = headers,
+        .timeout_sec = 30
+    };
+    
+    HttpResponse *resp = http_request(&req);
+    free(body_str);
+    
+    bool success = resp && resp->success && resp->status_code == 200;
+    if (resp) http_response_free(resp);
+    
+    return success;
 }
 
 // 处理飞书事件回调

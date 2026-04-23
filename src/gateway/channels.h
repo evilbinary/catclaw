@@ -42,12 +42,24 @@ typedef struct StreamTaskNode {
 
 // ==================== 消息结构 ====================
 
+// Incoming message attachment
+typedef struct {
+    char* type;          // "image", "audio", "video", "file"
+    char* url;           // 文件URL
+    char* file_key;      // 文件key（飞书等平台）
+    char* filename;      // 文件名
+    char* mime_type;     // MIME类型
+    size_t size;         // 文件大小
+} ChannelAttachment;
+
 // Incoming message structure (for unified handling)
 typedef struct {
     const char* content;         // 消息内容
     const char* sender_id;       // 发送者ID
     const char* chat_id;         // 会话/聊天ID
     const char* message_id;      // 消息ID
+    ChannelAttachment* attachments;  // 附件数组
+    int attachment_count;        // 附件数量
     void* extra;                 // 渠道特定额外数据
 } ChannelIncomingMessage;
 
@@ -74,6 +86,7 @@ struct ChannelInstance {
     void (*connect)(ChannelInstance *channel);
     void (*disconnect)(ChannelInstance *channel);
     bool (*send_message)(ChannelInstance *channel, const char *message);
+    bool (*send_file)(ChannelInstance *channel, const char *file_path, const char *chat_id);
     void (*cleanup)(ChannelInstance *channel);
 
     // 流式发送回调 (可选，用于打字机效果)
@@ -154,6 +167,7 @@ bool channel_send_message(ChannelInstance *channel, const char *message);
 bool channel_send_message_by_id(const char *id, const char *message);
 bool channel_send_message_to_all(const char *message);
 bool channel_send_message_to_type(ChannelType type, const char *message);
+bool channel_send_file(ChannelInstance *channel, const char *file_path, const char *chat_id);
 bool channel_stream_send(ChannelInstance *channel, const char *message);
 bool channel_stream_send_by_id(const char *id, const char *message);
 

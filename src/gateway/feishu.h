@@ -36,6 +36,13 @@ bool feishu_reply_message(const char *channel_id, const char *message_id, const 
 // 回复飞书消息（通过 chat_id/open_id）
 bool feishu_reply_to_chat(const char *chat_id, const char *content);
 
+// 发送图片消息
+bool feishu_send_image(const char *chat_id, const char *image_path);
+bool feishu_send_image_url(const char *chat_id, const char *image_url);
+
+// 上传图片到飞书 (返回 image_key，需调用者释放)
+char* feishu_upload_image(const char *file_path);
+
 // ==================== 流式消息 API (打字机效果) ====================
 
 // 流式消息上下文
