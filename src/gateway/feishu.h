@@ -44,7 +44,8 @@ bool feishu_send_image_url(const char *chat_id, const char *image_url);
 char* feishu_upload_image(const char *file_path);
 
 // 下载飞书图片 (返回 base64 编码数据，需调用者释放)
-char* feishu_download_image(const char *image_key);
+// 用户发送的图片需通过消息资源接口下载: /im/v1/messages/{message_id}/resources/{image_key}?type=image
+char* feishu_download_image(const char *message_id, const char *image_key);
 
 // ==================== 流式消息 API (打字机效果) ====================
 

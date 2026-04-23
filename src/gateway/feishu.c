@@ -869,7 +869,8 @@ char* feishu_upload_image(const char *file_path) {
 }
 
 // 下载飞书图片 (返回 base64 编码数据，需调用者释放)
-char* feishu_download_image(const char *image_key) {
+// 用户发送的图片需通过消息资源接口下载: /im/v1/messages/{message_id}/resources/{image_key}?type=image
+char* feishu_download_image(const char *message_id, const char *image_key) {
     if (!image_key) return NULL;
     
     ChannelInstance *channel = channel_first_of_type(CHANNEL_FEISHU);
@@ -885,8 +886,18 @@ char* feishu_download_image(const char *image_key) {
     if (!token) return NULL;
     
     // 构建下载 URL
-    char url[512];
-    snprintf(url, sizeof(url), "%s/im/v1/images/%s", FEISHU_API_BASE, image_key);
+    // 用户发送的图片使用消息资源接口: /im/v1/messages/{message_id}/resources/{file_key}?type=image
+    // 机器人上传的图片使用图片接口: /im/v1/images/{image_key}
+    char url[1024];
+    if (message_id) {
+        snprintf(url, sizeof(url), "%s/im/v1/messages/%s/resources/%s?type=image", 
+                 FEISHU_API_BASE, message_id, image_key);
+    } else {
+        // 回退到图片接口（仅适用于机器人上传的图片）
+        snprintf(url, sizeof(url), "%s/im/v1/images/%s", FEISHU_API_BASE, image_key);
+    }
+    
+    log_debug("[Feishu] Download image URL: %s", url);
     
     char auth_header[512];
     snprintf(auth_header, sizeof(auth_header), "Authorization: Bearer %s", token);
@@ -906,17 +917,33 @@ char* feishu_download_image(const char *image_key) {
     }
     
     if (!resp->success || !resp->body || resp->body_len == 0) {
-        log_error("[Feishu] Download image failed, status=%d", resp->status_code);
+        log_error("[Feishu] Download image failed, status=%d, body_len=%zu", 
+                  resp->status_code, resp->body_len);
+        // 打印部分响应体用于调试
+        if (resp->body && resp->body_len > 0) {
+            size_t print_len = resp->body_len > 500 ? 500 : resp->body_len;
+            log_debug("[Feishu] Response body: %.*s", (int)print_len, resp->body);
+        }
+        http_response_free(resp);
+        return NULL;
+    }
+    
+    // 检查返回的是否是 JSON 错误响应而非二进制图片
+    if (resp->body_len > 0 && resp->body[0] == '{') {
+        // 可能返回了 JSON 错误信息
+        log_error("[Feishu] Download image got JSON response instead of binary, body: %.*s", 
+                  (int)(resp->body_len > 500 ? 500 : resp->body_len), resp->body);
         http_response_free(resp);
         return NULL;
     }
     
     // 将二进制图片数据转 base64
+    size_t img_size = resp->body_len;
     char *base64 = base64_encode((const unsigned char*)resp->body, resp->body_len);
     http_response_free(resp);
     
     if (base64) {
-        log_info("[Feishu] Image downloaded and encoded, key=%s", image_key);
+        log_info("[Feishu] Image downloaded and encoded, key=%s, size=%zu", image_key, img_size);
     }
     
     return base64;
@@ -1137,7 +1164,7 @@ char* feishu_handle_event(const char *body) {
                             if (content_json) {
                                 cJSON *image_key = cJSON_GetObjectItem(content_json, "image_key");
                                 if (image_key && cJSON_IsString(image_key)) {
-                                    char *base64 = feishu_download_image(image_key->valuestring);
+                                    char *base64 = feishu_download_image(msg->message_id, image_key->valuestring);
                                     if (base64) {
                                         ChannelAttachment *att = (ChannelAttachment*)calloc(1, sizeof(ChannelAttachment));
                                         if (att) {

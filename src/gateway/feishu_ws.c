@@ -555,7 +555,7 @@ static bool feishu_ws_on_message(WsClient *ws, const char *data, size_t len, voi
                 if (content_json) {
                     cJSON *image_key = cJSON_GetObjectItem(content_json, "image_key");
                     if (image_key && cJSON_IsString(image_key)) {
-                        char *base64 = feishu_download_image(image_key->valuestring);
+                        char *base64 = feishu_download_image(msg->message_id, image_key->valuestring);
                         if (base64) {
                             // 构建 ChannelAttachment
                             ChannelAttachment *att = (ChannelAttachment*)calloc(1, sizeof(ChannelAttachment));
