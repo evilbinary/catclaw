@@ -141,6 +141,23 @@ static AIProviderResponse* ollama_send_messages(AIProvider* self,
                 case ROLE_TOOL: cJSON_AddStringToObject(m, "role", "tool"); break;
             }
             cJSON_AddStringToObject(m, "content", msg->content);
+            
+            // Add images if present (Ollama vision models)
+            if (msg->attachments && msg->attachment_count > 0) {
+                cJSON* images_array = cJSON_CreateArray();
+                for (int j = 0; j < msg->attachment_count; j++) {
+                    Attachment* att = msg->attachments[j];
+                    if (att->type == ATTACHMENT_IMAGE && att->data) {
+                        cJSON_AddItemToArray(images_array, cJSON_CreateString(att->data));
+                    }
+                }
+                if (cJSON_GetArraySize(images_array) > 0) {
+                    cJSON_AddItemToObject(m, "images", images_array);
+                } else {
+                    cJSON_Delete(images_array);
+                }
+            }
+            
             cJSON_AddItemToArray(msg_array, m);
         }
         

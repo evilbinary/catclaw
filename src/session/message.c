@@ -4,8 +4,119 @@
 #include <time.h>
 
 #include "common/log.h"
+#include "common/utils.h"
 #include "message.h"
 #include "common/cJSON.h"
+
+const char* attachment_type_to_mime(const char* filename) {
+    if (!filename) return "application/octet-stream";
+    
+    const char* ext = strrchr(filename, '.');
+    if (!ext) return "application/octet-stream";
+    
+    if (strcasecmp(ext, ".jpg") == 0 || strcasecmp(ext, ".jpeg") == 0) return "image/jpeg";
+    if (strcasecmp(ext, ".png") == 0) return "image/png";
+    if (strcasecmp(ext, ".gif") == 0) return "image/gif";
+    if (strcasecmp(ext, ".webp") == 0) return "image/webp";
+    if (strcasecmp(ext, ".bmp") == 0) return "image/bmp";
+    if (strcasecmp(ext, ".mp3") == 0) return "audio/mpeg";
+    if (strcasecmp(ext, ".wav") == 0) return "audio/wav";
+    if (strcasecmp(ext, ".ogg") == 0) return "audio/ogg";
+    if (strcasecmp(ext, ".mp4") == 0) return "video/mp4";
+    if (strcasecmp(ext, ".webm") == 0) return "video/webm";
+    if (strcasecmp(ext, ".pdf") == 0) return "application/pdf";
+    
+    return "application/octet-stream";
+}
+
+char* message_file_to_base64(const char* file_path) {
+    if (!file_path) return NULL;
+    
+    FILE* fp = fopen(file_path, "rb");
+    if (!fp) {
+        log_error("Failed to open file: %s", file_path);
+        return NULL;
+    }
+    
+    fseek(fp, 0, SEEK_END);
+    long file_size = ftell(fp);
+    fseek(fp, 0, SEEK_SET);
+    
+    if (file_size <= 0 || file_size > 20 * 1024 * 1024) {
+        fclose(fp);
+        log_error("Invalid file size: %ld", file_size);
+        return NULL;
+    }
+    
+    unsigned char* buffer = (unsigned char*)malloc(file_size);
+    if (!buffer) {
+        fclose(fp);
+        return NULL;
+    }
+    
+    size_t read_size = fread(buffer, 1, file_size, fp);
+    fclose(fp);
+    
+    char* base64 = base64_encode(buffer, read_size);
+    free(buffer);
+    
+    return base64;
+}
+
+Attachment* attachment_create(AttachmentType type, const char* data, const char* mime_type, const char* filename) {
+    Attachment* att = (Attachment*)malloc(sizeof(Attachment));
+    if (!att) return NULL;
+    
+    att->type = type;
+    att->data = data ? strdup(data) : NULL;
+    att->mime_type = mime_type ? strdup(mime_type) : NULL;
+    att->filename = filename ? strdup(filename) : NULL;
+    
+    return att;
+}
+
+void attachment_destroy(Attachment* attachment) {
+    if (attachment) {
+        if (attachment->data) free(attachment->data);
+        if (attachment->mime_type) free(attachment->mime_type);
+        if (attachment->filename) free(attachment->filename);
+        free(attachment);
+    }
+}
+
+bool message_add_attachment(Message* message, Attachment* attachment) {
+    if (!message || !attachment) return false;
+    
+    Attachment** new_attachments = (Attachment**)realloc(message->attachments, 
+        sizeof(Attachment*) * (message->attachment_count + 1));
+    if (!new_attachments) return false;
+    
+    message->attachments = new_attachments;
+    message->attachments[message->attachment_count] = attachment;
+    message->attachment_count++;
+    
+    return true;
+}
+
+bool message_add_attachment_file(Message* message, const char* file_path, AttachmentType type) {
+    if (!message || !file_path) return false;
+    
+    char* base64 = message_file_to_base64(file_path);
+    if (!base64) return false;
+    
+    const char* filename = strrchr(file_path, '/');
+    if (!filename) filename = strrchr(file_path, '\\');
+    filename = filename ? filename + 1 : file_path;
+    
+    const char* mime = attachment_type_to_mime(filename);
+    
+    Attachment* att = attachment_create(type, base64, mime, filename);
+    free(base64);
+    
+    if (!att) return false;
+    
+    return message_add_attachment(message, att);
+}
 
 // Create a new message
 Message* message_create(MessageRole role, const char* content) {
@@ -18,7 +129,9 @@ Message* message_create(MessageRole role, const char* content) {
     message->content = content ? strdup(content) : NULL;
     message->tool_name = NULL;
     message->tool_call_id = NULL;
-    message->timestamp = time(NULL) * 1000; // Milliseconds
+    message->attachments = NULL;
+    message->attachment_count = 0;
+    message->timestamp = time(NULL) * 1000;
     
     return message;
 }
@@ -34,7 +147,9 @@ Message* message_create_tool(const char* tool_call_id, const char* tool_name, co
     message->content = content ? strdup(content) : NULL;
     message->tool_name = tool_name ? strdup(tool_name) : NULL;
     message->tool_call_id = tool_call_id ? strdup(tool_call_id) : NULL;
-    message->timestamp = time(NULL) * 1000; // Milliseconds
+    message->attachments = NULL;
+    message->attachment_count = 0;
+    message->timestamp = time(NULL) * 1000;
     
     return message;
 }
@@ -50,6 +165,12 @@ void message_destroy(Message* message) {
         }
         if (message->tool_call_id) {
             free(message->tool_call_id);
+        }
+        if (message->attachments) {
+            for (int i = 0; i < message->attachment_count; i++) {
+                attachment_destroy(message->attachments[i]);
+            }
+            free(message->attachments);
         }
         free(message);
     }
@@ -204,6 +325,21 @@ char* message_to_json(const Message* message) {
     // log_debug("message_to_json: adding timestamp: %lld", message->timestamp);
     cJSON_AddNumberToObject(root, "timestamp", message->timestamp);
     
+    // Attachments
+    if (message->attachments && message->attachment_count > 0) {
+        cJSON* attachments_array = cJSON_CreateArray();
+        for (int i = 0; i < message->attachment_count; i++) {
+            Attachment* att = message->attachments[i];
+            cJSON* att_obj = cJSON_CreateObject();
+            cJSON_AddNumberToObject(att_obj, "type", att->type);
+            if (att->data) cJSON_AddStringToObject(att_obj, "data", att->data);
+            if (att->mime_type) cJSON_AddStringToObject(att_obj, "mime_type", att->mime_type);
+            if (att->filename) cJSON_AddStringToObject(att_obj, "filename", att->filename);
+            cJSON_AddItemToArray(attachments_array, att_obj);
+        }
+        cJSON_AddItemToObject(root, "attachments", attachments_array);
+    }
+    
     // log_debug("message_to_json: calling cJSON_PrintUnformatted");
     char* json = cJSON_PrintUnformatted(root);
     // log_debug("message_to_json: cJSON_PrintUnformatted returned");
@@ -268,6 +404,31 @@ Message* message_from_json(const char* json) {
     cJSON* timestamp_obj = cJSON_GetObjectItem(root, "timestamp");
     if (timestamp_obj && cJSON_IsNumber(timestamp_obj)) {
         message->timestamp = (long long)timestamp_obj->valuedouble;
+    }
+    
+    // Attachments
+    cJSON* attachments_obj = cJSON_GetObjectItem(root, "attachments");
+    if (attachments_obj && cJSON_IsArray(attachments_obj)) {
+        int att_count = cJSON_GetArraySize(attachments_obj);
+        for (int i = 0; i < att_count; i++) {
+            cJSON* att_json = cJSON_GetArrayItem(attachments_obj, i);
+            if (!att_json || !cJSON_IsObject(att_json)) continue;
+            
+            cJSON* type_obj = cJSON_GetObjectItem(att_json, "type");
+            cJSON* data_obj = cJSON_GetObjectItem(att_json, "data");
+            cJSON* mime_obj = cJSON_GetObjectItem(att_json, "mime_type");
+            cJSON* filename_obj = cJSON_GetObjectItem(att_json, "filename");
+            
+            AttachmentType type = type_obj && cJSON_IsNumber(type_obj) ? (AttachmentType)type_obj->valueint : ATTACHMENT_FILE;
+            const char* data = data_obj && cJSON_IsString(data_obj) ? data_obj->valuestring : NULL;
+            const char* mime = mime_obj && cJSON_IsString(mime_obj) ? mime_obj->valuestring : NULL;
+            const char* filename = filename_obj && cJSON_IsString(filename_obj) ? filename_obj->valuestring : NULL;
+            
+            Attachment* att = attachment_create(type, data, mime, filename);
+            if (att) {
+                message_add_attachment(message, att);
+            }
+        }
     }
     
     cJSON_Delete(root);
