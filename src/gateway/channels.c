@@ -575,11 +575,40 @@ bool channel_handle_incoming_message(ChannelInstance *channel, ChannelIncomingMe
         }
     }
 
-    // 3. 发送到 agent 处理
-    if (agent_send_message(msg->content)) {
-        log_info("[Channel] Message sent to agent from %s", channel->name);
+    // 3. 发送到 agent 处理（带附件支持）
+    if (msg->attachment_count > 0 && msg->attachments) {
+        // 将 ChannelAttachment 转换为 Attachment
+        Attachment **atts = (Attachment**)calloc(msg->attachment_count, sizeof(Attachment*));
+        if (atts) {
+            for (int i = 0; i < msg->attachment_count; i++) {
+                ChannelAttachment *ca = &msg->attachments[i];
+                AttachmentType att_type = ATTACHMENT_FILE;
+                if (ca->type && strcmp(ca->type, "image") == 0) att_type = ATTACHMENT_IMAGE;
+                else if (ca->type && strcmp(ca->type, "audio") == 0) att_type = ATTACHMENT_AUDIO;
+                else if (ca->type && strcmp(ca->type, "video") == 0) att_type = ATTACHMENT_VIDEO;
+                else if (ca->type && strcmp(ca->type, "pdf") == 0) att_type = ATTACHMENT_PDF;
+                atts[i] = attachment_create(att_type,
+                    ca->url,          // base64 数据存在 url 字段
+                    ca->mime_type,
+                    ca->filename);
+            }
+            if (agent_send_message_with_attachments(msg->content, atts, msg->attachment_count)) {
+                log_info("[Channel] Message with %d attachment(s) sent to agent from %s",
+                         msg->attachment_count, channel->name);
+            } else {
+                log_error("[Channel] Failed to send message to agent from %s", channel->name);
+            }
+            // 注意：attachment 所有权已转移给 agent，不要在这里释放
+            free(atts);
+        } else {
+            agent_send_message(msg->content);
+        }
     } else {
-        log_error("[Channel] Failed to send message to agent from %s", channel->name);
+        if (agent_send_message(msg->content)) {
+            log_info("[Channel] Message sent to agent from %s", channel->name);
+        } else {
+            log_error("[Channel] Failed to send message to agent from %s", channel->name);
+        }
     }
 
     return false;  // 消息已发送到 agent，没有即时响应

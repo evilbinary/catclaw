@@ -4,6 +4,7 @@
 #include "common/cJSON.h"
 #include "common/config.h"
 #include "common/log.h"
+#include "common/utils.h"
 #include "agent/command.h"
 #include "agent/agent.h"
 #include <stdio.h>
@@ -867,6 +868,60 @@ char* feishu_upload_image(const char *file_path) {
     return image_key;
 }
 
+// 下载飞书图片 (返回 base64 编码数据，需调用者释放)
+char* feishu_download_image(const char *image_key) {
+    if (!image_key) return NULL;
+    
+    ChannelInstance *channel = channel_first_of_type(CHANNEL_FEISHU);
+    if (!channel) {
+        log_error("[Feishu] No Feishu channel available");
+        return NULL;
+    }
+    
+    FeishuConfig *config = (FeishuConfig *)channel->config;
+    if (!config) return NULL;
+    
+    char *token = feishu_get_valid_token(config);
+    if (!token) return NULL;
+    
+    // 构建下载 URL
+    char url[512];
+    snprintf(url, sizeof(url), "%s/im/v1/images/%s", FEISHU_API_BASE, image_key);
+    
+    char auth_header[512];
+    snprintf(auth_header, sizeof(auth_header), "Authorization: Bearer %s", token);
+    const char *headers[] = {auth_header, NULL};
+    
+    HttpRequest req = {
+        .url = url,
+        .method = "GET",
+        .headers = headers,
+        .timeout_sec = 30
+    };
+    
+    HttpResponse *resp = http_request(&req);
+    if (!resp) {
+        log_error("[Feishu] Download image failed, no response");
+        return NULL;
+    }
+    
+    if (!resp->success || !resp->body || resp->body_len == 0) {
+        log_error("[Feishu] Download image failed, status=%d", resp->status_code);
+        http_response_free(resp);
+        return NULL;
+    }
+    
+    // 将二进制图片数据转 base64
+    char *base64 = base64_encode((const unsigned char*)resp->body, resp->body_len);
+    http_response_free(resp);
+    
+    if (base64) {
+        log_info("[Feishu] Image downloaded and encoded, key=%s", image_key);
+    }
+    
+    return base64;
+}
+
 // 发送图片消息
 bool feishu_send_image(const char *chat_id, const char *image_path) {
     if (!chat_id || !image_path) return false;
@@ -1065,10 +1120,43 @@ char* feishu_handle_event(const char *body) {
                         ChannelIncomingMessage incoming_msg = {
                             .content = msg->content,
                             .sender_id = msg->sender_id,
-                            .chat_id = msg->chat_id,
+                            .chat_id = msg->chat_id ? msg->chat_id : msg->sender_id,
                             .message_id = msg->message_id,
+                            .attachments = NULL,
+                            .attachment_count = 0,
                             .extra = NULL
                         };
+
+                        // 处理图片消息：提取 image_key，下载图片转 base64
+                        if (msg->message_type && strcmp(msg->message_type, "image") == 0) {
+                            // 图片消息的显示文本（无论下载是否成功，都不发原始 JSON 给模型）
+                            static const char *img_text = "[图片]";
+                            incoming_msg.content = img_text;
+
+                            cJSON *content_json = cJSON_Parse(msg->content);
+                            if (content_json) {
+                                cJSON *image_key = cJSON_GetObjectItem(content_json, "image_key");
+                                if (image_key && cJSON_IsString(image_key)) {
+                                    char *base64 = feishu_download_image(image_key->valuestring);
+                                    if (base64) {
+                                        ChannelAttachment *att = (ChannelAttachment*)calloc(1, sizeof(ChannelAttachment));
+                                        if (att) {
+                                            att->type = strdup("image");
+                                            att->file_key = strdup(image_key->valuestring);
+                                            att->mime_type = strdup("image/jpeg");
+                                            att->url = base64;
+                                            incoming_msg.attachments = att;
+                                            incoming_msg.attachment_count = 1;
+                                        } else {
+                                            free(base64);
+                                        }
+                                    } else {
+                                        log_error("[Feishu] Failed to download image: %s", image_key->valuestring);
+                                    }
+                                }
+                                cJSON_Delete(content_json);
+                            }
+                        }
 
                         // 使用统一消息处理入口
                         char* response = NULL;
@@ -1086,6 +1174,19 @@ char* feishu_handle_event(const char *body) {
                         }
                         
                         feishu_message_free(msg);
+
+                        // 释放附件资源（数据已被 attachment_create 复制）
+                        if (incoming_msg.attachments) {
+                            for (int i = 0; i < incoming_msg.attachment_count; i++) {
+                                ChannelAttachment *att = &incoming_msg.attachments[i];
+                                free(att->type);
+                                free(att->url);
+                                free(att->file_key);
+                                free(att->filename);
+                                free(att->mime_type);
+                            }
+                            free(incoming_msg.attachments);
+                        }
                     }
                 }
             }

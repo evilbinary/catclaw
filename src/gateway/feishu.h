@@ -43,6 +43,9 @@ bool feishu_send_image_url(const char *chat_id, const char *image_url);
 // 上传图片到飞书 (返回 image_key，需调用者释放)
 char* feishu_upload_image(const char *file_path);
 
+// 下载飞书图片 (返回 base64 编码数据，需调用者释放)
+char* feishu_download_image(const char *image_key);
+
 // ==================== 流式消息 API (打字机效果) ====================
 
 // 流式消息上下文

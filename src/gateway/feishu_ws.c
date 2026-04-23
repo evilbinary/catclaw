@@ -540,8 +540,43 @@ static bool feishu_ws_on_message(WsClient *ws, const char *data, size_t len, voi
                 .sender_id = msg->sender_id,
                 .chat_id = msg->chat_id ? msg->chat_id : msg->sender_id,
                 .message_id = msg->message_id,
+                .attachments = NULL,
+                .attachment_count = 0,
                 .extra = NULL
             };
+
+            // 处理图片消息：从 content JSON 中提取 image_key，下载图片转 base64
+            if (msg->message_type && strcmp(msg->message_type, "image") == 0) {
+                // 图片消息的显示文本（无论下载是否成功，都不发原始 JSON 给模型）
+                static const char *img_text = "[图片]";
+                incoming_msg.content = img_text;
+
+                cJSON *content_json = cJSON_Parse(msg->content);
+                if (content_json) {
+                    cJSON *image_key = cJSON_GetObjectItem(content_json, "image_key");
+                    if (image_key && cJSON_IsString(image_key)) {
+                        char *base64 = feishu_download_image(image_key->valuestring);
+                        if (base64) {
+                            // 构建 ChannelAttachment
+                            ChannelAttachment *att = (ChannelAttachment*)calloc(1, sizeof(ChannelAttachment));
+                            if (att) {
+                                att->type = strdup("image");
+                                att->file_key = strdup(image_key->valuestring);
+                                att->mime_type = strdup("image/jpeg");
+                                // 将 base64 数据存在 url 字段（复用现有字段）
+                                att->url = base64;
+                                incoming_msg.attachments = att;
+                                incoming_msg.attachment_count = 1;
+                            } else {
+                                free(base64);
+                            }
+                        } else {
+                            log_error("[FeishuWS] Failed to download image: %s", image_key->valuestring);
+                        }
+                    }
+                    cJSON_Delete(content_json);
+                }
+            }
 
             // 使用统一消息处理入口
             char* response = NULL;
@@ -559,6 +594,19 @@ static bool feishu_ws_on_message(WsClient *ws, const char *data, size_t len, voi
             }
 
             feishu_message_free(msg);
+
+            // 释放附件资源（数据已被 attachment_create 复制）
+            if (incoming_msg.attachments) {
+                for (int i = 0; i < incoming_msg.attachment_count; i++) {
+                    ChannelAttachment *att = &incoming_msg.attachments[i];
+                    free(att->type);
+                    free(att->url);
+                    free(att->file_key);
+                    free(att->filename);
+                    free(att->mime_type);
+                }
+                free(incoming_msg.attachments);
+            }
         }
         
         // 发送响应帧（按照 Go SDK 的方式：payload 放响应 JSON）
