@@ -22,9 +22,36 @@
 // Thread pool
 static ThreadPool *g_thread_pool = NULL;
 
+// Global flag for graceful shutdown
+static volatile int g_shutdown_requested = 0;
+
+#ifdef _WIN32
+static BOOL WINAPI console_ctrl_handler(DWORD fdwCtrlType) {
+    if (fdwCtrlType == CTRL_C_EVENT || fdwCtrlType == CTRL_BREAK_EVENT) {
+        g_shutdown_requested = 1;
+        printf("\n\nShutting down...\n");
+        return TRUE;
+    }
+    return FALSE;
+}
+#else
+#include <signal.h>
+static void signal_handler(int sig) {
+    (void)sig;
+    g_shutdown_requested = 1;
+    printf("\n\nShutting down...\n");
+}
+#endif
+
 int main(int argc, char *argv[]) {
-    // Initialize platform-specific console
     platform_console_init();
+    
+#ifdef _WIN32
+    SetConsoleCtrlHandler(console_ctrl_handler, TRUE);
+#else
+    signal(SIGINT, signal_handler);
+    signal(SIGTERM, signal_handler);
+#endif
     
     printf("🐦 CatClaw - C version\n");
     printf("Based on OpenClaw functionality\n\n");
@@ -154,9 +181,11 @@ int main(int argc, char *argv[]) {
 
     // Simple command loop
     char command[1024];  // Increase buffer size for UTF-8 characters
-    while (1) {
+    while (!g_shutdown_requested) {
         printf("catclaw> ");
         fflush(stdout);
+        
+        if (g_shutdown_requested) break;
         
 #ifdef _WIN32
         // Windows: Use ReadConsoleW for proper UTF-8 input
@@ -167,6 +196,8 @@ int main(int argc, char *argv[]) {
         if (!ReadConsoleW(hStdin, wbuf, sizeof(wbuf)/sizeof(wchar_t) - 1, &read_count, NULL)) {
             break;
         }
+        
+        if (g_shutdown_requested) break;
         
         // Remove trailing newline
         if (read_count > 0 && wbuf[read_count-1] == L'\n') {
