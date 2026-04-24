@@ -63,6 +63,7 @@ char *agent_memory_get(const char *key);
 bool agent_memory_clear(void);
 bool agent_memory_delete(const char *key);
 char *agent_get_history(int limit, int page, const char *query);
+bool agent_clear_session(const char *session_key);
 
 // Multi-step execution functions
 bool agent_add_step(const char *description, const char *tool_name, const char *params);

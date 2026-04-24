@@ -145,16 +145,24 @@ static AIProviderResponse* ollama_send_messages(AIProvider* self,
             // Add images if present (Ollama vision models)
             if (msg->attachments && msg->attachment_count > 0) {
                 cJSON* images_array = cJSON_CreateArray();
+                int image_count = 0;
                 for (int j = 0; j < msg->attachment_count; j++) {
                     Attachment* att = msg->attachments[j];
                     if (att->type == ATTACHMENT_IMAGE && att->data) {
+                        log_debug("[Ollama] Adding image attachment: filename=%s, base64_len=%zu, mime=%s",
+                                  att->filename ? att->filename : "N/A",
+                                  strlen(att->data),
+                                  att->mime_type ? att->mime_type : "N/A");
                         cJSON_AddItemToArray(images_array, cJSON_CreateString(att->data));
+                        image_count++;
                     }
                 }
                 if (cJSON_GetArraySize(images_array) > 0) {
                     cJSON_AddItemToObject(m, "images", images_array);
+                    log_debug("[Ollama] Added %d image(s) to message", image_count);
                 } else {
                     cJSON_Delete(images_array);
+                    log_warn("[Ollama] Message has attachments but no valid images found (count=%d)", msg->attachment_count);
                 }
             }
             
@@ -180,10 +188,42 @@ static AIProviderResponse* ollama_send_messages(AIProvider* self,
     // 非流式模式
     cJSON_AddBoolToObject(root, "stream", false);
 
-    char* payload = cJSON_Print(root);
+    char* payload = cJSON_PrintUnformatted(root);
+    
+    // Debug log: truncate base64 images to avoid flooding logs
+    {
+        cJSON* log_root = cJSON_Parse(payload);
+        if (log_root) {
+            cJSON* msgs = cJSON_GetObjectItem(log_root, "messages");
+            if (msgs && cJSON_IsArray(msgs)) {
+                for (int i = 0; i < cJSON_GetArraySize(msgs); i++) {
+                    cJSON* m = cJSON_GetArrayItem(msgs, i);
+                    cJSON* images = cJSON_GetObjectItem(m, "images");
+                    if (images && cJSON_IsArray(images)) {
+                        for (int j = 0; j < cJSON_GetArraySize(images); j++) {
+                            cJSON* img = cJSON_GetArrayItem(images, j);
+                            if (img && cJSON_IsString(img) && strlen(img->valuestring) > 80) {
+                                char truncated[128];
+                                snprintf(truncated, sizeof(truncated), "%.40s...[TRUNCATED,len=%zu]...%.40s",
+                                    img->valuestring, strlen(img->valuestring),
+                                    img->valuestring + strlen(img->valuestring) - 40);
+                                cJSON_ReplaceItemInArray(images, j, cJSON_CreateString(truncated));
+                            }
+                        }
+                    }
+                }
+            }
+            char* log_payload = cJSON_PrintUnformatted(log_root);
+            cJSON_Delete(log_root);
+            log_debug("[Ollama] Request: %s", log_payload);
+            free(log_payload);
+        } else {
+            log_debug("[Ollama] Request: (unavailable for logging)");
+        }
+    }
     cJSON_Delete(root);
 
-    log_debug("[Ollama] Request: %s", payload);
+    log_debug("[Ollama] Payload size: %zu bytes", strlen(payload));
 
     // 使用 common http client 发送请求
     HttpResponse* http_resp = http_post(url, payload);
@@ -197,6 +237,12 @@ static AIProviderResponse* ollama_send_messages(AIProvider* self,
         // 解析响应
         cJSON* resp_root = cJSON_Parse(http_resp->body);
         if (resp_root) {
+            // Log prompt_eval_count to diagnose vision model issues
+            cJSON* eval_count = cJSON_GetObjectItem(resp_root, "prompt_eval_count");
+            if (eval_count && cJSON_IsNumber(eval_count)) {
+                log_debug("[Ollama] prompt_eval_count: %d", (int)eval_count->valuedouble);
+            }
+            
             cJSON* response_text = NULL;
             
             // /api/generate 格式: {"response": "..."}

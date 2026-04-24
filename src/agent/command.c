@@ -88,6 +88,7 @@ static char* cmd_help(void) {
         "  /file <path>        - 发送文件/图片给模型\n"
         "\n"
         "系统控制:\n"
+        "  /clear [session]   - 清除会话历史（默认: default）\n"
         "  /system restart    - 重启系统\n"
         "  /system shutdown   - 关闭系统\n"
         "\n"
@@ -807,6 +808,21 @@ static char* cmd_file(const char* args) {
     return strdup("✓ 文件已发送给模型");
 }
 
+// 处理 clear 命令 - 清除会话历史
+static char* cmd_clear(const char* args) {
+    const char* session_key = (args && strlen(args) > 0) ? args : "default";
+    
+    if (agent_clear_session(session_key)) {
+        char buf[256];
+        snprintf(buf, sizeof(buf), "✓ 会话 '%s' 已清除", session_key);
+        return strdup(buf);
+    } else {
+        char buf[256];
+        snprintf(buf, sizeof(buf), "✗ 清除会话 '%s' 失败", session_key);
+        return strdup(buf);
+    }
+}
+
 // 处理 system 命令
 static char* cmd_system(const char* args, CommandAction* action) {
     size_t size = 256;
@@ -912,6 +928,8 @@ CommandResult* command_process_with_context(const char* input, const CommandCont
         response = cmd_shell(args);
     } else if (strcmp(cmd_copy, "file") == 0) {
         response = cmd_file(args);
+    } else if (strcmp(cmd_copy, "clear") == 0) {
+        response = cmd_clear(args);
     } else {
         handled = false;
         response = strdup("❌ 未知命令，输入 /help 查看帮助");

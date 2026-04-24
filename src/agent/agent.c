@@ -68,6 +68,25 @@ bool agent_memory_delete(const char *key) {
     return memory_delete(g_agent.memory_manager, key);
 }
 
+bool agent_clear_session(const char *session_key) {
+    if (!g_agent.session_manager) {
+        log_error("Session manager not initialized");
+        return false;
+    }
+    
+    const char *key = session_key ? session_key : "default";
+    Session *session = session_manager_get(g_agent.session_manager, key);
+    if (!session) {
+        log_warn("Session '%s' not found", key);
+        return false;
+    }
+    
+    int msg_count = session->history ? session->history->count : 0;
+    message_list_clear(session->history);
+    log_info("Session '%s' cleared (%d messages removed)", key, msg_count);
+    return true;
+}
+
 char *agent_get_history(int limit, int page, const char *query) {
     if (!g_agent.session_manager) {
         return strdup("Error: Session manager not initialized");
