@@ -756,14 +756,16 @@ static char* cmd_file(const char* args) {
     }
     fclose(fp);
     
-    // 提取文件名
-    const char* filename = strrchr(resolved_path, '/');
-    if (!filename) filename = strrchr(resolved_path, '\\');
-    filename = filename ? filename + 1 : resolved_path;
+    // 提取文件名（在 free resolved_path 之前复制）
+    const char* filename_ptr = strrchr(resolved_path, '/');
+    if (!filename_ptr) filename_ptr = strrchr(resolved_path, '\\');
+    filename_ptr = filename_ptr ? filename_ptr + 1 : resolved_path;
+    char* filename = strdup(filename_ptr);
     
     // 读取文件为 base64
     char* base64_data = message_file_to_base64(resolved_path);
     if (!base64_data) {
+        free(filename);
         free(resolved_path);
         return strdup("✗ 读取文件失败");
     }
@@ -786,12 +788,14 @@ static char* cmd_file(const char* args) {
     free(resolved_path);
     
     if (!att) {
+        free(filename);
         return strdup("✗ 创建附件失败");
     }
     
     // 构建消息文本并发送给模型
     char msg_text[512];
     snprintf(msg_text, sizeof(msg_text), "[用户发送了文件: %s，请分析此文件内容]", filename);
+    free(filename);
     
     bool success = agent_send_message_with_attachments(msg_text, &att, 1);
     if (!success) {
