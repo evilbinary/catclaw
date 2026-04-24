@@ -187,40 +187,13 @@ int main(int argc, char *argv[]) {
         
         if (g_shutdown_requested) break;
         
-#ifdef _WIN32
-        // Windows: Use ReadConsoleW for proper UTF-8 input
-        wchar_t wbuf[1024];
-        DWORD read_count = 0;
-        HANDLE hStdin = GetStdHandle(STD_INPUT_HANDLE);
-        
-        if (!ReadConsoleW(hStdin, wbuf, sizeof(wbuf)/sizeof(wchar_t) - 1, &read_count, NULL)) {
+        if (fgets(command, sizeof(command), stdin) == NULL) {
             break;
         }
         
         if (g_shutdown_requested) break;
         
-        // Remove trailing newline
-        if (read_count > 0 && wbuf[read_count-1] == L'\n') {
-            read_count--;
-            if (read_count > 0 && wbuf[read_count-1] == L'\r') {
-                read_count--;
-            }
-        }
-        wbuf[read_count] = L'\0';
-        
-        // Convert to UTF-8
-        int utf8_len = WideCharToMultiByte(CP_UTF8, 0, wbuf, read_count, command, sizeof(command) - 1, NULL, NULL);
-        if (utf8_len <= 0) {
-            continue;
-        }
-        command[utf8_len] = '\0';
-#else
-        // Unix: Use standard fgets
-        if (fgets(command, sizeof(command), stdin) == NULL) {
-            break;
-        }
         command[strcspn(command, "\n")] = 0;
-#endif
         
         // Debug: print raw input
         // log_debug("Raw input length: %zu, content: ", strlen(command));

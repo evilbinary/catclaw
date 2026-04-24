@@ -244,15 +244,6 @@ void platform_console_init(void) {
 #ifdef _WIN32
     SetConsoleOutputCP(CP_UTF8);
     SetConsoleCP(CP_UTF8);
-    
-    HANDLE hStdin = GetStdHandle(STD_INPUT_HANDLE);
-    if (hStdin != INVALID_HANDLE_VALUE) {
-        DWORD mode;
-        if (GetConsoleMode(hStdin, &mode)) {
-            mode |= ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT | ENABLE_PROCESSED_INPUT;
-            SetConsoleMode(hStdin, mode);
-        }
-    }
 #endif
 }
 
